@@ -1,0 +1,74 @@
+name: Sick Scan XD Build
+on:
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - run: echo '::echo::on'
+      - name: Build Script
+        run: |
+          mkdir sick_scan_ws
+          cd sick_scan_ws
+          git clone https://github.com/SICKAG/msgpack11.git
+          git clone https://github.com/SICKAG/sick_scan_xd.git
+          mkdir sick_scan_xd\build\msgpack11
+          pushd sick_scan_xd\build\msgpack11
+          cmake -DMSGPACK11_BUILD_TESTS=0 -G "Visual Studio 17 2022" ../../../msgpack11
+          cmake --build . --clean-first --config Debug
+          cmake --build . --clean-first --config Release
+          popd
+          cd sick_scan_xd
+          set _os=x64
+          set _msvc="Visual Studio 2022"
+          set _cmake_build_dir=build
+          pushd build
+          cmake -DROS_VERSION=0 -G "Visual Studio 17 2022" ..
+          cmake --build . --clean-first --config Debug
+          cmake --build . --clean-first --config Release
+          popd
+          7z a -tzip build.zip build include doc launch python examples tools *.md
+      - name: Upload
+        uses: actions/upload-artifact@main
+        with:
+          name: build-windows
+          path: sick_scan_ws/sick_scan_xd/build.zip
+
+  build-ubuntu:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo '::echo::on'
+      - name: Build Script
+        run: |
+          mkdir -p ./sick_scan_ws
+          cd ./sick_scan_ws
+          git clone https://github.com/SICKAG/msgpack11.git
+          git clone https://github.com/SICKAG/sick_scan_xd.git
+          mkdir -p ./build-msgpk
+          pushd ./build-msgpk
+          cmake -G "Unix Makefiles" -DMSGPACK11_BUILD_TESTS=0 -DCMAKE_POSITION_INDEPENDENT_CODE=ON ../msgpack11
+          make -j4
+          sudo make install
+          popd
+          mkdir -p ./build-sickxd
+          pushd ./build-sickxd
+          export ROS_VERSION=0
+          cmake -DROS_VERSION=0 -DLDMRS=0 -G "Unix Makefiles" ../sick_scan_xd
+          make -j4
+          popd
+          mkdir output
+          cp -R {build-msgpk,build-sickxd} output
+          cp -R sick_scan_xd/{include,doc,launch,python,examples,tools} output
+          pushd sick_scan_xd
+          find . -maxdepth 1 -name "*.md" -exec cp {} ../output \;
+          popd
+      - name: Package
+        run: |
+          sudo apt-get install zip
+          zip -r build.zip sick_scan_ws/output
+      - name: Upload
+        uses: actions/upload-artifact@main
+        with:
+          name: build-ubuntu
+          path: build.zip
