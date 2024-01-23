@@ -57,7 +57,7 @@ if(WIN32)
 	endif()
 elseif(UNIX)
 	set(LIB_INTERN_LINKS
-		"${LIBS_BASE_DIR}/ubuntu/sick_scan_xd-3.1.0/build-sickxd/sick_scan_xd_shared_lib.so"
+		"${LIBS_BASE_DIR}/ubuntu/sick_scan_xd-3.1.0/build-sickxd/libsick_scan_xd_shared_lib.so"
 	)
 endif()
 set(LIB_EXTERN_DIRS
