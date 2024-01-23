@@ -8,11 +8,28 @@
 #include <pcl/point_cloud.h>
 
 
+class PCDTarReader {
+public:
+	PCDTarReader();
+	~PCDTarReader();
+
+public:
+	bool setFile(const char* fname);
+	bool isOpen();
+	void closeIO();
+	
+protected:
+	
+
+
+};
+
 class PCDTarWriter {
 public:
 	PCDTarWriter() {}
 	~PCDTarWriter();
 
+public:
 	bool setFile(const char* fname);
 	bool isOpen();
 	void closeIO();

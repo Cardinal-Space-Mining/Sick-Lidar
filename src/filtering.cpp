@@ -4,6 +4,7 @@
 #include <memory>
 #include <chrono>
 
+#include <pcl/pcl_config.h>
 #include <pcl/pcl_macros.h>
 #include <pcl/point_types.h>
 #include <pcl/point_cloud.h>
@@ -16,6 +17,8 @@
 #include <pcl/segmentation/sac_segmentation.h>
 #include <pcl/sample_consensus/method_types.h>
 #include <pcl/sample_consensus/model_types.h>
+
+#include "mem_utils.h"
 
 
 /** PCDTarWriter Impl -- (external) */
@@ -61,8 +64,14 @@ void PCDTarWriter::addCloud(const pcl::PCLPointCloud2& cloud, const Eigen::Vecto
 		const spos_t pcd_beg = this->fio.tellp();
 
 		int status;
-		if (compress) { status = this->writer.writeBinaryCompressed(this->fio, cloud, origin, orient); }
-		else { status = this->writer.writeBinary(this->fio, cloud, origin, orient); }
+#if PCL_VERSION >= 101300
+		if (!compress) {
+			status = this->writer.writeBinary(this->fio, cloud, origin, orient);
+		} else
+#endif
+		{
+			status = this->writer.writeBinaryCompressed(this->fio, cloud, origin, orient);
+		}
 		if (status) return;	// keep the same append position so we overwrite next time
 
 		const spos_t pcd_end = this->fio.tellp();
@@ -91,8 +100,8 @@ void PCDTarWriter::addCloud(const pcl::PCLPointCloud2& cloud, const Eigen::Vecto
 		snprintf(this->head_buff->gid, 8, "0000000");
 		snprintf(this->head_buff->file_size, 12, "%011llo", (uint64_t)flen);
 		snprintf(this->head_buff->mtime, 12, "%011llo", mseconds / 1000);
-		sprintf_s(this->head_buff->ustar, "ustar");
-		sprintf_s(this->head_buff->ustar_version, "00");
+		snprintf(this->head_buff->ustar, 6, "ustar");
+		snprintf(this->head_buff->ustar_version, 2, "00");
 		this->head_buff->file_type[0] = '0';
 
 		uint64_t xsum = 0;
@@ -121,13 +130,48 @@ void PCDTarWriter::addCloud(const pcl::PCLPointCloud2& cloud, const Eigen::Vecto
 
 
 
+template<typename T>
+inline static T& unconst(const T& v) {
+	return const_cast<T&>(v);
+}
+
+
 /** for reimplementation */
 void pc_voxelize(
 	const std::vector<pcl::PointXYZ>& points,
 	const std::vector<int32_t>& selection,
 	std::vector<pcl::PointXYZ>& out,
 	const Eigen::Vector4f& leaf_size
-) {}
+) {
+
+	static thread_local pcl::VoxelGrid<pcl::PointXYZ>
+		filter{};
+	static thread_local pcl::PointCloud<pcl::PointXYZ>::Ptr
+		cloud{ new pcl::PointCloud<pcl::PointXYZ> },
+		filtered{ new pcl::PointCloud<pcl::PointXYZ> };
+	static thread_local pcl::IndicesPtr
+		select{ new pcl::Indices };
+
+	// ::pointSwap(unconst(points), *cloud);
+	// ::pointSwap(out, *filtered);
+
+	filter.setInputCloud(cloud);
+	filter.setLeafSize(leaf_size);
+
+	// if filter inst gets saved between calls, we need to figure out how to reset indices!
+	if(!selection.empty()) {
+		std::swap(*select, unconst(selection));
+		filter.setIndices(select);
+		filter.filter(*filtered);
+		std::swap(*select, unconst(selection));
+	} else {
+		filter.filter(*filtered);
+	}
+
+	// ::pointSwap(unconst(points), *cloud);
+	// ::pointSwap(out, *filtered);
+
+}
 void pc_filter_plane(
 	const std::vector<pcl::PointXYZ>& points,
 	const std::vector<int32_t>& selection,
@@ -229,13 +273,13 @@ void pc_generate_ranges(
 	if (!selection.empty()) {
 		out_ranges.resize(selection.size());
 		for (int i = 0; i < selection.size(); i++) {
-			// pointXYZ to vector3f ?
+			out_ranges[i] = (origin - *reinterpret_cast<const Eigen::Vector3f*>(&points[selection[i]])).norm();
 		}
 	}
 	else {
 		out_ranges.resize(points.size());
 		for (int i = 0; i < points.size(); i++) {
-			
+			out_ranges[i] = (origin - *reinterpret_cast<const Eigen::Vector3f*>(&points[i])).norm();
 		}
 	}
 }

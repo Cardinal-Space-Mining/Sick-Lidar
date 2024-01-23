@@ -41,6 +41,8 @@ static std::unique_ptr<char[]> hexify(const T* data, const size_t items = 1U) {
 	return std::unique_ptr<char[]>(hex);
 }
 
+
+
 template<typename T>
 std::unique_ptr<uint8_t[]> create_mem_snapshot(const T& val) {
 	uint8_t* buff = new uint8_t[sizeof(T)];
@@ -51,6 +53,8 @@ template<typename T>
 bool compare_mem_snapshot(const T& val, std::unique_ptr<uint8_t[]>& snap) {
 	return !memcmp(&val, snap.get(), sizeof(T));
 }
+
+
 
 #ifdef WITH_ENGINE
 #include <Containers/Array.h>
@@ -133,6 +137,9 @@ static bool memSwap(TArray<T, Alloc_A>& a, TArray<T, Alloc_B>& b) {
 }
 #endif
 
+
+
+/** Wraps std::swap for std::vector but checks that allocators are compatible (the same) */
 template<
 	typename T,
 	typename Alloc_A,
@@ -144,3 +151,22 @@ static bool memSwap(std::vector<T, Alloc_A>& a, std::vector<T, Alloc_B>& b) {
 	}
 	return false;
 }
+
+
+
+#include <pcl/point_cloud.h>
+#include <pcl/types.h>
+
+template<
+	typename PointT>
+static void pointSwap(std::vector<PointT>& vec, pcl::PointCloud<PointT>& cloud) {
+	std::swap(vec, cloud.points);		// make sure this works as intended since cloud.points uses Eigen::aligned_allocator<>
+	cloud.width = cloud.points.size();
+	cloud.height = 1;
+}
+template<
+	typename PointT>
+static void pointSwap(pcl::PointCloud<PointT>& cloud, std::vector<PointT>& vec) {
+	::pointSwap<PointT>(vec, cloud);
+}
+

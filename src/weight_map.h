@@ -102,12 +102,15 @@ public:
 public:
 	WeightMap() {}
 	~WeightMap() {
-		if (map_data) delete[] map_data;
+		if (this->map_data) delete[] this->map_data;
 	}
 
 
 	void reset(float grid_res = 1.f, const Eigen::Vector2f grid_origin = Eigen::Vector2f::Zero()) {
-		if (map_data) delete[] map_data;
+		if (this->map_data) {
+			delete[] this->map_data;
+			this->map_data = nullptr;
+		}
 		map_size = Eigen::Vector2i::Zero();
 		max_weight = Weight<0>();
 		resolution = grid_res <= 0.f ? 1.f : grid_res;
