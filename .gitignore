@@ -3,3 +3,4 @@ build/*
 .vscode/*
 out/*
 Makefile
+CMakeSettings.json
