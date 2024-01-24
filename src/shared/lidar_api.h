@@ -28,7 +28,7 @@ namespace ldrp {
 
 
 	/** Get the pcl version string of the currently linked library */
-	__API constexpr char const* pclVer();
+	__API char const* pclVer();
 
 	/** Create a new lidar processing instance */
 	__API const LidarApi create();	// add params

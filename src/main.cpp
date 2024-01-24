@@ -11,7 +11,7 @@ int main(int argc, char** argv) {
 	std::cout << "Internally Linked PCL v" << ldrp::pclVer() << std::endl;
 
 	const ldrp::LidarApi lapi = ldrp::create();
-	ldrp::lidarInit(lapi, "C:\\Users\\Hoodi\\Documents\\Files\\Code\\Robotics\\2024\\SickLidar\\sick_multiscan.launch");
+	ldrp::lidarInit(lapi, "../sick_multiscan.launch");
 
 	using namespace std::chrono_literals;
 	std::this_thread::sleep_for(5s);

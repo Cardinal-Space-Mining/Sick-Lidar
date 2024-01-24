@@ -56,7 +56,7 @@ namespace ldrp {
 
 	/** Static API */
 
-	constexpr char const* pclVer() {
+	char const* pclVer() {
 		return PCL_VERSION_PRETTY;
 	}
 
