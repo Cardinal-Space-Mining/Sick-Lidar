@@ -1,0 +1,24 @@
+{
+	"version": 3,
+	"configurePresets": [
+		{
+			"name": "release",
+			"displayName": "Release",
+			"cacheVariables": {
+				"CMAKE_BUILD_TYPE": "Release",
+				"CMAKE_CXX_STANDARD": "20",
+				"CMAKE_CXX_FLAGS_INIT": "-Wall"
+			}
+		},
+		{
+			"name": "debug",
+			"displayName": "Debug",
+			"cacheVariables": {
+				"CMAKE_BUILD_TYPE": "Debug",
+				"CMAKE_CXX_STANDARD": "20",
+				"CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+				"CMAKE_CXX_FLAGS_INIT": "-Wall -fpermissive"
+			}
+		}
+	]
+}
