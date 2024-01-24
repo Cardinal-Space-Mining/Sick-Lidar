@@ -14,22 +14,29 @@
 #endif
 
 
-// "LiDaR Proccessing"
+// "LiDaR Proccessing container namespace"
 namespace ldrp {
 
-	using ApiRef = std::shared_ptr<void>;
+	using LidarApi = std::shared_ptr<void>;
 
-	struct PointBuff {
-
-	};
-	struct MapBuff {
+	struct __API PointBuff {
 
 	};
+	struct __API MapBuff {
 
+	};
+
+
+	/** Get the pcl version string of the currently linked library */
+	__API constexpr char const* pclVer();
 
 	/** Create a new lidar processing instance */
-	__API const ApiRef create();	// add params
+	__API const LidarApi create();	// add params
+	/** Intialize the lidar connection via config file */
+	__API void lidarInit(LidarApi l, const char* file);
 
+	/** Get the status of the last call made to the internal sick_scan interface */
+	__API int32_t internalStatus(LidarApi l);
 
 
 
