@@ -3,17 +3,15 @@
 #include <cstdint>
 #include <memory>
 
-// create inst
-//		V
-// multiscan
-//		V
-// filter caller
-//		V
-// store result
-//		V
-// public api
-//		V
-// get result, logging, network telemetry, configs
+#ifdef WIN32
+#ifdef _LIB_SOURCE
+#define __API __declspec(dllexport)
+#else
+#define __API __declspec(dllimport)
+#endif
+#else
+#define __API
+#endif
 
 
 // "LiDaR Proccessing"
@@ -30,7 +28,7 @@ namespace ldrp {
 
 
 	/** Create a new lidar processing instance */
-	const ApiRef create();	// add params
+	__API const ApiRef create();	// add params
 
 
 

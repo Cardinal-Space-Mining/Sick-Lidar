@@ -21,6 +21,7 @@ add_library(SickLidar_shared
 	SHARED ${_shared_sources}
 )
 add_definitions(
+	-D_LIB_SOURCE
 	${PCL_DEFINITIONS}
 )
 target_include_directories(SickLidar_shared
