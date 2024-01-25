@@ -34,5 +34,6 @@ target_link_directories(SickLidar_shared
 )
 target_link_libraries(SickLidar_shared
 	PRIVATE ${PCL_LIBRARIES}
-	PRIVATE "${PROJECT_SOURCE_DIR}/lib/${SICK_SCAN_LIB_REL}"
+	PRIVATE sick_scan_xd_shared_lib
+	# PRIVATE "${PROJECT_SOURCE_DIR}/lib/${SICK_SCAN_LIB_REL}"
 )

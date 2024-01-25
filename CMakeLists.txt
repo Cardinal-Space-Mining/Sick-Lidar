@@ -6,6 +6,7 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
 
+add_subdirectory(sick_scan/sick_scan_xd)
 add_subdirectory(src/shared)
 
 add_executable(SickLidar_test "src/main.cpp")
