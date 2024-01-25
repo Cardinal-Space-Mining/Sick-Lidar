@@ -1,12 +1,18 @@
 cmake_minimum_required(VERSION 3.13)
 project(SickLidar)
 
+if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.27.0")
+	cmake_policy(SET CMP0144 NEW)
+endif()
 
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
 
+set(ROS_VERSION 0 CACHE BOOL "Disable ROS!" FORCE)
+# set(BUILD_DEBUG_TARGET OFF CACHE BOOL "Build release SickScanXD" FORCE)
 add_subdirectory(sick_scan/sick_scan_xd)
+message(STATUS "Configured sick_scan_xd with ROS version ${ROS_VERSION}")
 add_subdirectory(src/shared)
 
 add_executable(SickLidar_test "src/main.cpp")
