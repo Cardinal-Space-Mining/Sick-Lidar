@@ -1,10 +1,25 @@
 cmake_minimum_required(VERSION 3.13)
 project(SickLidar)
 
+if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.27.0")
+	cmake_policy(SET CMP0144 NEW)
+endif()
 
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
+
+#build sick_scan_xd as dependency of shared lib
+set(ROS_VERSION 0 CACHE BOOL "Disable ROS!" FORCE)
+set(LDMRS 0 CACHE BOOL "Disable LDMRS!" FORCE)
+set(__CMAKE_CXX_STANDARD ${CMAKE_CXX_STANDARD})
+if(${CMAKE_CXX_STANDARD} GREATER 14)
+	set(CMAKE_CXX_STANDARD 14)
+endif()
+add_subdirectory(sick_scan/sick_scan_xd)
+message(STATUS "Building sick_scan_xd with ROS version ${ROS_VERSION}")
+set(CMAKE_CXX_STANDARD ${__CMAKE_CXX_STANDARD})
+#end sick_scan_xd
 
 add_subdirectory(src/shared)
 
