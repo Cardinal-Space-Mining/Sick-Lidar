@@ -20,7 +20,7 @@ jobs:
 
       - name: "Get PCL"
         run: |
-          sudo apt-get update && supo apt-get install libpcl-dev
+          sudo apt-get update && sudo apt-get install libpcl-dev
 
       - name: "Checkout"
         uses: actions/checkout@main
