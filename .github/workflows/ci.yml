@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    paths:
+      - 'src/**'
+      - 'CMakeLists.txt'
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'CMakeLists.txt'
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: "Build Project"
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo '::echo::on'
+
+      - name: "Get PCL"
+        run: |
+          sudo apt-get update && supo apt-get install libpcl-dev
+
+      - name: "Checkout"
+        uses: actions/checkout@main
+        with:
+          submodules: recursive
+
+      - name: "Build"
+        run: |
+          cmake . -B ./build --preset default
+          cmake --build ./build --config Release
+      
+      - name: "Status"
+        run: |
+          cd build
+          ls -l -R
+
+      - name: "Zip Artifacts"
+        run: |
+          sudo apt-get install zip
+          zip -r build.zip build
+
+      - name: "Upload Artifacts"
+        uses: actions/upload-artifact@main
+        with:
+          name: ci-build
+          path: build.zip
