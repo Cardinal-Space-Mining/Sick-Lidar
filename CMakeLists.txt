@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.13)
-project(SickLidar)
+project(SickPerception)
 
 if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.27.0")
 	cmake_policy(SET CMP0144 NEW)
@@ -8,6 +8,7 @@ endif()
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
+set(CMAKE_INSTALL_PREFIX "${PROJECT_SOURCE_DIR}/install")
 
 #build sick_scan_xd as dependency of shared lib
 set(ROS_VERSION 0 CACHE BOOL "Disable ROS!" FORCE)
@@ -23,9 +24,9 @@ set(CMAKE_CXX_STANDARD ${__CMAKE_CXX_STANDARD})
 
 add_subdirectory(src/shared)
 
-add_executable(SickLidar_test "src/main.cpp")
-target_link_libraries(SickLidar_test
-	PRIVATE SickLidar_shared
+add_executable(${PROJECT_NAME}_test "src/main.cpp")
+target_link_libraries(${PROJECT_NAME}_test
+	PRIVATE ${PROJECT_NAME}_shared
 )
 
 
