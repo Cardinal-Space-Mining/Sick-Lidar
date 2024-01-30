@@ -28,7 +28,7 @@ int main(int argc, char** argv) {
 	signal(SIGFPE, _action);
 	signal(SIGSEGV, _action);
 	signal(SIGTERM, _action);
-	signal(SIGBREAK, _action);
+	// signal(SIGBREAK, _action);
 	signal(SIGABRT, _action);
 // #else
 // 	struct sigaction _sig_action;
