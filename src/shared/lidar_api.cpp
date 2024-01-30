@@ -9,7 +9,27 @@
 
 namespace ldrp {
 
-	// TODO macros for logging
+#ifndef _LDRP_DISABLE_LOG
+#define LDRP_LOG_GLOBAL(__inst, __condition, __output)		if(__condition) { (*__inst->_log_output) << __output; }
+#define LDRP_LOG_S_GLOBAL(__inst, __condition, __output)	LDRP_LOG_GLOBAL(__inst, (__inst->_log_output != nullptr && (__condition)), __output)
+#define LOG_LEVEL_GLOBAL(__inst, __min_lvl)					(__inst->_log_level >= __min_lvl)
+#define LDRP_LOG(__condition, __output)		LDRP_LOG_GLOBAL(this, __condition, __output)
+#define LDRP_LOG_S(__condition, __output)	LDRP_LOG_S_GLOBAL(this, __condition, __output)
+#define LOG_LEVEL(__min_lvl)				LOG_LEVEL_GLOBAL(this, __min_lvl)
+#define LOG_NONE				true
+#define LOG_STANDARD			LOG_LEVEL(1)
+#define LOG_VERBOSE				LOG_LEVEL(2)
+#else
+#define LDRP_LOG_GLOBAL(...)
+#define LDRP_LOG_S_GLOBAL(...)
+#define LOG_LEVEL_GLOBAL(...)
+#define LDRP_LOG(...)
+#define LDRP_LOG_S(...)
+#define LOG_LEVEL(...)
+#define LOG_NONE
+#define LOG_STANDARD
+#define LOG_VERBOSE
+#endif
 
 	static const status_t cvtStatus(const int32_t sick_ec) {
 		switch(sick_ec) {
@@ -31,6 +51,7 @@ namespace ldrp {
 	// 	std::cout << "C++ PointCloudMsgCb: " << msg->width << " x " << msg->height << " pointcloud message received" << std::endl; // data processing to be done
 	// }
 
+
 	/** Interfacing and Filtering Implementation */
 	struct LidarImpl {
 	public:
@@ -45,64 +66,74 @@ namespace ldrp {
 
 	public:
 		LidarImpl() {
-			if(this->_log_level > 0)
-				(*this->_log_output) << "LDRP global instance initialized." << std::endl;
+			LDRP_LOG_S( LOG_NONE, "LDRP global instance initialized." << std::endl )
 		}
 		~LidarImpl() {
 			this->sickDeinit();
-			if(this->_log_level > 0)
-				(*this->_log_output) << "LDRP global instance destroyed." << std::endl;
+			LDRP_LOG_S( LOG_NONE, "LDRP global instance destroyed." << std::endl )
 		}
-		// LidarImpl(int ss_argc = 0, char** ss_argv = nullptr) :
-		// 	_handle(SickScanApiCreate(ss_argc, ss_argv))
-		// {
-		// 	std::cout << "Lidar Internal API Created." << std::endl;
+
+		// template<typename arg_T, typename... args_T>
+		// inline void log(bool condition, arg_T a, args_T... args) {
+		// 	if(condition) {
+		// 		(*this->_log_output) << a;
+		// 		log<args_T>(args);
+		// 	}
 		// }
-		// ~LidarImpl() {
-		// 	std::cout << "Lidar Internal API Destroyed." << std::endl;
-
-		// 	this->_sick_status = SickScanApiDeregisterCartesianPointCloudMsg(this->_handle, nullptr);
-		// 	this->_sick_status = SickScanApiClose(this->_handle);
-		// 	this->_sick_status = SickScanApiRelease(this->_handle);
-		// 	this->_handle = nullptr;
-		// }
-
-
-		// inline int32_t getSickStatus() const {
-		// 	return this->_sick_status;
+		// template<typename arg_T, typename... args_T>
+		// inline void log(arg_T a, args_T... args) {
+		// 	(*this->_log_output) << a;
+		// 	if constexpr(sizeof...(args_T) > 0) log<args_T>(args);
 		// }
 
-		// void lidarInit(const char* file) {
-		// 	this->_sick_status = SickScanApiInitByLaunchfile(this->_handle, file);
-		// 	this->_sick_status = SickScanApiRegisterCartesianPointCloudMsg(this->_handle, nullptr);
-		// }
 
 		const status_t sickInit(int ss_argc = 0, char** ss_argv = nullptr) {
 			this->sickDeinit();
 			this->_handle = SickScanApiCreate(ss_argc, ss_argv);
 			if(this->_handle) {
-				if(this->_log_level > 0)
-					(*this->_log_output) << "Sick Scan API created successfully: " << this->_handle << std::endl;
+				LDRP_LOG( LOG_STANDARD, "Sick Scan API created successfully: " << this->_handle << std::endl )
 				return STATUS_SUCCESS;
 			}
-			if(this->_log_level > 0)
-				(*this->_log_output) << "Sick Scan API creation failed: " << this->_handle << std::endl;
-			return STATUS_EXTERNAL_ERROR;
+			LDRP_LOG( LOG_STANDARD, "Sick Scan API creation failed: " << this->_handle << std::endl )
+			return STATUS_EXTERNAL_ERROR | STATUS_FAIL;
 		}
 		const status_t sickDeinit() {
 			if(this->_handle) {
 				status_t s = STATUS_SUCCESS;
-				s |= cvtStatus(this->_sick_status = SickScanApiDeregisterCartesianPointCloudMsg(this->_handle, &cartesianPointCloudCallbackWrapper));	// keep track if we have an active lidar!?
-				if(this->_log_level > 1 && this->_sick_status)
-					(*this->_log_output) << "SickScanApiDeregisterCartesianPointCloudMsg error: " << this->_sick_status << std::endl;	// make a macro for this that can be compiled out if needed
-				s |= cvtStatus(this->_sick_status = SickScanApiClose(this->_handle));
-				if(this->_log_level > 1 && this->_sick_status)
-					(*this->_log_output) << "SickScanApiClose error: " << this->_sick_status << std::endl;
-				s |= cvtStatus(this->_sick_status = SickScanApiRelease(this->_handle));
-				if(this->_log_level > 1 && this->_sick_status)
-					(*this->_log_output) << "SickScanApiRelease error: " << this->_sick_status << std::endl;
+				s |= this->lidarClose() & ~(STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL);		// mask uninited fail since this the meaning isn't relevant to the outer function
+				s |= cvtStatus( this->_sick_status = SickScanApiClose(this->_handle) );
+				LDRP_LOG( LOG_STANDARD && this->_sick_status,
+					"SickScanApiClose error: " << this->_sick_status << std::endl )
+				s |= cvtStatus( this->_sick_status = SickScanApiRelease(this->_handle) );
+				LDRP_LOG( LOG_STANDARD && this->_sick_status,
+					"SickScanApiRelease error: " << this->_sick_status << std::endl )
 				this->_handle = nullptr;
 				return s;
+			}
+			return STATUS_PREREQ_UNINITIALIZED;
+		}
+
+		const status_t lidarInit(const char* config_file) {
+			if(this->_handle) {
+				status_t s = STATUS_SUCCESS;
+				s |= cvtStatus( this->_sick_status = SickScanApiInitByLaunchfile(this->_handle, config_file) );
+				if(!s) {
+					s |= cvtStatus( this->_sick_status = SickScanApiRegisterCartesianPointCloudMsg(this->_handle, &cartesianPointCloudCallbackWrapper) );
+					LDRP_LOG( LOG_STANDARD && this->_sick_status, "SickScanApiRegisterCartesianPointCloudMsg error: " << this->_sick_status << std::endl)
+				} else {
+					LDRP_LOG( LOG_STANDARD, "SickScanApiInitByLaunchfile error: " << this->_sick_status << " with config file: " << config_file << std::endl)
+				}
+				return s;
+			}
+			return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
+		}
+		const status_t lidarClose() {
+			if(this->_handle) {
+				if( this->_sick_status = SickScanApiDeregisterCartesianPointCloudMsg(this->_handle, &cartesianPointCloudCallbackWrapper) ) {
+					LDRP_LOG( LOG_STANDARD, "SickScanApiDeregisterCartesianPointCloudMsg error: " << this->_sick_status << std::endl )
+					return cvtStatus(this->_sick_status) | STATUS_FAIL;
+				}
+				return STATUS_SUCCESS;
 			}
 			return STATUS_PREREQ_UNINITIALIZED;
 		}
@@ -115,8 +146,12 @@ namespace ldrp {
 		std::ostream* _log_output{ &std::cout };
 		int32_t _log_level{ 1 };
 
+		struct {
+			
+		} _processing;
+
 	public:
-		inline static std::shared_ptr<LidarImpl> _global{ nullptr };
+		inline static std::unique_ptr<LidarImpl> _global{ nullptr };
 
 		static void cartesianPointCloudCallbackWrapper(SickScanApiHandle handle, const SickScanPointCloudMsg* msg) {
 			// call something on the global instance!
@@ -136,7 +171,7 @@ namespace ldrp {
 
 	const status_t apiInit(int ss_argc, char** ss_argv) {
 		if(!LidarImpl::_global) {
-			LidarImpl::_global = std::make_shared<LidarImpl>();
+			LidarImpl::_global = std::make_unique<LidarImpl>();
 		}
 		return LidarImpl::_global->sickInit(ss_argc, ss_argv);
 	}
@@ -146,16 +181,23 @@ namespace ldrp {
 		}
 		return STATUS_PREREQ_UNINITIALIZED;
 	}
+	const status_t apiHardReset() {
+		if(LidarImpl::_global) {
+			const status_t s = LidarImpl::_global->sickDeinit();
+			delete LidarImpl::_global.release();
+			return s;
+		}
+		return STATUS_PREREQ_UNINITIALIZED;
+	}
 	const status_t lidarInit(const char* config_file) {
 		if(LidarImpl::_global) {
-			// LidarImpl::_global->lidarInit(config_file);	// TODO
-			return STATUS_SUCCESS;
+			return LidarImpl::_global->lidarInit(config_file);
 		}
 		return STATUS_PREREQ_UNINITIALIZED;
 	}
 	const status_t lidarClose() {
 		if(LidarImpl::_global) {
-			// TODO
+			return LidarImpl::_global->lidarClose();
 		}
 		return STATUS_PREREQ_UNINITIALIZED;
 	}
@@ -176,13 +218,13 @@ namespace ldrp {
 		return STATUS_PREREQ_UNINITIALIZED;
 	}
 
-	const status_t enableFiltering(const bool enable) {
+	const status_t enablePipeline(const bool enable) {
 		if(LidarImpl::_global) {
 			// TODO
 		}
 		return STATUS_PREREQ_UNINITIALIZED;
 	}
-	const status_t setMaxFilterFrequency(const size_t f_hz) {
+	const status_t setMaxFrequency(const size_t f_hz) {
 		if(LidarImpl::_global) {
 			// TODO
 		}

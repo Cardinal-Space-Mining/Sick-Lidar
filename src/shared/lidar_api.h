@@ -18,7 +18,7 @@
 // "LiDaR Proccessing container namespace"
 namespace ldrp {
 
-	using LidarApi = std::shared_ptr<void>;
+	// using LidarApi = std::shared_ptr<void>;
 	using status_t = int32_t;
 
 	enum : status_t {
@@ -81,6 +81,8 @@ namespace ldrp {
 	__API const status_t apiInit(int ss_argc = 0, char** ss_argv = nullptr);
 	/** Reset the internal sick api instance. Does not delete buffers or filter params */
 	__API const status_t apiClose();
+	/** Same functionality as apiClose() but also deletes the main api buffer. apiInit() must be called afterwards before other api calls */
+	__API const status_t apiHardReset();
 	/** Intialize the lidar connection via config file */
 	__API const status_t lidarInit(const char* config_file);
 	/** Deregister the currently loaded lidar and stop all filter processes */
@@ -92,9 +94,9 @@ namespace ldrp {
 	__API const status_t setLogLevel(const int32_t lvl);
 
 	/** Enable or disable filtering and accumulation of point data */
-	__API const status_t enableFiltering(const bool enable);
+	__API const status_t enablePipeline(const bool enable);
 	/** Apply an upper limit frequency for how often filtering and accumulation occurs */
-	__API const status_t setMaxFilterFrequency(const size_t f_hz);
+	__API const status_t setMaxFrequency(const size_t f_hz);
 	/** Apply parameters used in the filtering and accumulation pipeline */
 	__API const status_t applyFilterParams(const FilterParams& params);
 
