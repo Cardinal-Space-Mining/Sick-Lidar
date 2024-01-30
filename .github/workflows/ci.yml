@@ -27,23 +27,26 @@ jobs:
         with:
           submodules: recursive
 
-      - name: "Build"
+      - name: "Build + Install"
         run: |
           cmake . -B ./build --preset default
           cmake --build ./build --config Release
+          cmake --install ./build
       
       - name: "Status"
         run: |
           cd build
           ls -l -R
 
-      - name: "Zip Artifacts"
-        run: |
-          sudo apt-get install zip
-          zip -r build.zip build
+      # - name: "Zip Artifacts"
+      #   run: |
+      #     sudo apt-get install zip
+      #     zip -r build.zip install
 
       - name: "Upload Artifacts"
         uses: actions/upload-artifact@main
         with:
           name: ci-build
-          path: build.zip
+          path: |
+            ./install
+            ./build
