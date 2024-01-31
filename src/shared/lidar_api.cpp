@@ -1,10 +1,92 @@
 #include "lidar_api.h"
 
+#include <type_traits>
 #include <iostream>
 #include <memory>
+#include <chrono>
+#include <thread>
+#include <utility>
+#include <deque>
 
 #include <pcl/pcl_config.h>
 #include <sick_scan_xd_api/sick_scan_api.h>
+
+
+namespace std {
+	namespace chrono {
+		using hrc = high_resolution_clock;
+	}
+}
+namespace crno = std::chrono;
+
+
+template<typename V, typename C = crno::high_resolution_clock>
+class TimestampedQueue {
+	static_assert(crno::is_clock<C>::value, "");
+public:
+	using Value_T = V;
+	using Clock_T = C;
+	using Duration_T = typename Clock_T::duration;
+	using TimeStamp_T = crno::time_point<Clock_T>;
+	using Data_T = std::pair<TimeStamp_T, Value_T>;
+
+public:
+	TimestampedQueue() {}
+	~TimestampedQueue() {}
+
+	void add(const Value_T& value, const TimeStamp_T ts = Clock_T::now()) {
+		this->_queue.push_front(
+			Data_T{ value, ts }
+		);
+	}
+	void add(Value_T&& value, const TimeStamp_T ts = Clock_T::now()) {
+		this->_queue.push_front(
+			Data_T{ std::move(value), ts }
+		);
+	}
+
+	Value_T& getClosest(const TimeStamp_T ts = Clock_T::now()) {
+		if(this->_queue.empty()) {
+			return;
+		} else if(ts > this->_queue.front().first) {
+			return this->_queue.front().second;
+		}
+		for(size_t i = this->_queue.size() / 2;;) {
+			if(i + 1 >= this->_queue.size()) {
+				return this->_queue.back().second;
+			}
+			const TimeStamp_T
+				&f = this->_queue[i].first,
+				&b = this->_queue[i + 1].first;
+			const Duration_T
+				_f = (f - ts),
+				_b = (ts - b);
+			if(_f >= 0 && _b >= 0) {
+				return _f < _b ? this->_queue[i].second : this->_queue[i + 1].second;	// return value that is closest
+			} else if(_f < 0) {
+				i /= 2;		// go forwards
+			} else {	// _b < 0
+				i += (i / 2);	// go backwards
+			}
+		}
+	}
+	// const Value_T& getClosest(const TimeStamp_T ts = Clock_T::now()) const {
+
+	// }
+
+protected:
+	void truncate(const Duration_T window_size) {
+		const TimeStamp_T min = this->_queue.front().first - window_size;
+		for(;this->_queue.back().first < min;) {
+			this->_queue.pop_back();
+		}
+	}
+
+
+protected:
+	std::deque<Data_T> _queue;
+
+};
 
 
 namespace ldrp {
@@ -46,24 +128,10 @@ namespace ldrp {
 		}
 	}
 
-	// void customizedPointCloudMsgCb(SickScanApiHandle apiHandle, const SickScanPointCloudMsg* msg)
-	// {
-	// 	std::cout << "C++ PointCloudMsgCb: " << msg->width << " x " << msg->height << " pointcloud message received" << std::endl; // data processing to be done
-	// }
 
 
 	/** Interfacing and Filtering Implementation */
 	struct LidarImpl {
-	public:
-		// template<typename T>
-		// static inline typename std::conditional<std::is_same<T, void>::value,
-		// 	std::shared_ptr<LidarImpl>,
-		// 	std::shared_ptr<void>
-		// >::type swap_cast(const std::shared_ptr<T>& in) {
-		// 	static_assert(std::is_same<T, void>::value || std::is_same<T, LidarImpl>::value, "Only void and LidarImpl pointers can be swapped between!");
-		// 	return std::static_pointer_cast<typename std::conditional<std::is_same<T, void>::value, LidarImpl, void>::type>(in);
-		// }
-
 	public:
 		LidarImpl() {
 			LDRP_LOG_S( LOG_NONE, "LDRP global instance initialized." << std::endl )
@@ -73,20 +141,11 @@ namespace ldrp {
 			LDRP_LOG_S( LOG_NONE, "LDRP global instance destroyed." << std::endl )
 		}
 
-		// template<typename arg_T, typename... args_T>
-		// inline void log(bool condition, arg_T a, args_T... args) {
-		// 	if(condition) {
-		// 		(*this->_log_output) << a;
-		// 		log<args_T>(args);
-		// 	}
-		// }
-		// template<typename arg_T, typename... args_T>
-		// inline void log(arg_T a, args_T... args) {
-		// 	(*this->_log_output) << a;
-		// 	if constexpr(sizeof...(args_T) > 0) log<args_T>(args);
-		// }
+		LidarImpl(const LidarImpl&) = delete;
+		LidarImpl(LidarImpl&&) = delete;
 
 
+		/** SickScanApiCreate() --> generate handle + error handling/logging */
 		const status_t sickInit(int ss_argc = 0, char** ss_argv = nullptr) {
 			this->sickDeinit();
 			this->_handle = SickScanApiCreate(ss_argc, ss_argv);
@@ -97,6 +156,7 @@ namespace ldrp {
 			LDRP_LOG( LOG_STANDARD, "Sick Scan API creation failed: " << this->_handle << std::endl )
 			return STATUS_EXTERNAL_ERROR | STATUS_FAIL;
 		}
+		/** SickScanApi- Close & Release + nullify handle + error handling/logging */
 		const status_t sickDeinit() {
 			if(this->_handle) {
 				status_t s = STATUS_SUCCESS;
@@ -113,6 +173,7 @@ namespace ldrp {
 			return STATUS_PREREQ_UNINITIALIZED;
 		}
 
+		/** Init by launch file, register point cloud callback + error handling/logging */
 		const status_t lidarInit(const char* config_file) {
 			if(this->_handle) {
 				status_t s = STATUS_SUCCESS;
@@ -127,6 +188,7 @@ namespace ldrp {
 			}
 			return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
 		}
+		/** Deregister point cloud callback + error handling/logging */
 		const status_t lidarClose() {
 			if(this->_handle) {
 				if( this->_sick_status = SickScanApiDeregisterCartesianPointCloudMsg(this->_handle, &cartesianPointCloudCallbackWrapper) ) {
@@ -138,6 +200,7 @@ namespace ldrp {
 			return STATUS_PREREQ_UNINITIALIZED;
 		}
 
+
 	protected:
 		SickScanApiHandle _handle{ nullptr };
 		int32_t _sick_status{ 0 };
@@ -147,14 +210,39 @@ namespace ldrp {
 		int32_t _log_level{ 1 };
 
 		struct {
+			std::atomic<crno::hrc::duration> min_loop_duration;
+		} _config;
+
+		std::thread _thread;
+		std::atomic<bool> _enable_thread{false};
+		struct {
 			
 		} _processing;
+
 
 	public:
 		inline static std::unique_ptr<LidarImpl> _global{ nullptr };
 
 		static void cartesianPointCloudCallbackWrapper(SickScanApiHandle handle, const SickScanPointCloudMsg* msg) {
-			// call something on the global instance!
+			// NOTE: SickScanPointCloudMsg buffers are freed immediately after all callbacks finish --> will need to copy data if we want to keep it!
+		}
+
+		void lidarWorker() {
+			// 1. update accumulated point globule
+			// 2. run filtering on points
+			// 3. update accumulator
+			// 4. [when configured] update map
+		}
+		void lidarThreadWrapper() {
+
+			for(;this->_enable_thread.load();) {
+				crno::hrc::time_point n = crno::hrc::now();
+
+				this->lidarWorker();
+
+				std::this_thread::sleep_until(n + this->_config.min_loop_duration.load());
+			}
+
 		}
 
 
@@ -220,13 +308,26 @@ namespace ldrp {
 
 	const status_t enablePipeline(const bool enable) {
 		if(LidarImpl::_global) {
-			// TODO
+			// check for sick api inited? (not super necessary?)
+			LidarImpl::_global->_enable_thread.store(enable);
+			const bool joinable = LidarImpl::_global->_thread.joinable();
+			if(enable) {
+				if(!joinable) {
+					LidarImpl::_global->_thread = std::thread(LidarImpl::lidarThreadWrapper, LidarImpl::_global.get());
+					return STATUS_SUCCESS;
+				}
+			} else if(joinable) {
+				LidarImpl::_global->_thread.join();
+				return STATUS_SUCCESS;
+			}
+			return STATUS_ALREADY_SATISFIED;
 		}
 		return STATUS_PREREQ_UNINITIALIZED;
 	}
 	const status_t setMaxFrequency(const size_t f_hz) {
 		if(LidarImpl::_global) {
-			// TODO
+			LidarImpl::_global->_config.min_loop_duration.store( crno::nanoseconds((int64_t)(1e9 / f_hz)) );	// be as precise as realisticly possible
+			return STATUS_SUCCESS;
 		}
 		return STATUS_PREREQ_UNINITIALIZED;
 	}

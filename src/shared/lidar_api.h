@@ -25,7 +25,7 @@ namespace ldrp {
 		STATUS_SUCCESS				= (0 << 0),
 		STATUS_FAIL					= (1 << 0),
 		STATUS_EXTERNAL_ERROR		= (1 << 1),
-		STATUS_ALREADY_INITIALIZED	= (1 << 2),
+		STATUS_ALREADY_SATISFIED	= (1 << 2),
 		STATUS_BAD_PARAM			= (1 << 3),
 		STATUS_IO_ERROR				= (1 << 4),
 		STATUS_BUSY_MUTEX			= (1 << 5),
@@ -51,8 +51,8 @@ namespace ldrp {
 
 	struct FilterParams {
 		float
-			min_scan_theta,
-			max_scan_theta,
+			// min_scan_theta,
+			// max_scan_theta,
 			voxel_size_cm,
 			map_resolution_cm,
 			pmf_window_base_cm,
@@ -106,7 +106,7 @@ namespace ldrp {
 	/** Apply a new world pose for the lidar -- used directly to transform points to world space.
 	 * The provided buffer is expected to contain an xyz position and quaternion component -
 	 * the _** params represent the respective offsets of each component in the buffer */
-	inline const status_t updateWorldPose(const float* pose3, const size_t _xyz = 0, const size_t _qw = 3, const size_t _qxyz = 4)
+	inline const status_t updateWorldPose(const float* pose3, const size_t _xyz = 0, const size_t _qxyz = 3, const size_t _qw = 6)
 		{ return updateWorldPose(pose3 + _xyz, pose3 + _qxyz, pose3[_qw]); }
 	/** Apply a new world pose for the lidar -- used directly to transform points to world space.
 	 * This method assumes the quaternion components are ordered X, Y, Z, W */
