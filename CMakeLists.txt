@@ -17,7 +17,7 @@ set(__CMAKE_CXX_STANDARD ${CMAKE_CXX_STANDARD})
 if(${CMAKE_CXX_STANDARD} GREATER 14)
 	set(CMAKE_CXX_STANDARD 14)
 endif()
-add_subdirectory(sick_scan/sick_scan_xd)
+add_subdirectory(submodule-deps/sick_scan_xd)
 message(STATUS "Building sick_scan_xd with ROS version ${ROS_VERSION}")
 set(CMAKE_CXX_STANDARD ${__CMAKE_CXX_STANDARD})
 #end sick_scan_xd

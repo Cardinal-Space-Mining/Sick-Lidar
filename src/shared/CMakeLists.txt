@@ -27,7 +27,7 @@ add_definitions(
 )
 target_include_directories(${PROJECT_NAME}_shared
 	PUBLIC "${CMAKE_CURRENT_LIST_DIR}"
-	PRIVATE "${PROJECT_SOURCE_DIR}/sick_scan/sick_scan_xd/include"
+	PRIVATE "${PROJECT_SOURCE_DIR}/submodule-deps/sick_scan_xd/include"
 	PRIVATE ${PCL_INCLUDE_DIRS}
 )
 target_link_directories(${PROJECT_NAME}_shared
