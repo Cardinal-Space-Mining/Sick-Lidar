@@ -18,6 +18,7 @@
 // "LiDaR Proccessing container namespace"
 namespace ldrp {
 
+	#define LDRP_SAFETY_CHECKS
 	// using LidarApi = std::shared_ptr<void>;
 	using status_t = int32_t;
 
@@ -49,7 +50,7 @@ namespace ldrp {
 		};
 	};
 
-	struct FilterParams {
+	struct PipelineConfig {
 		float
 			// min_scan_theta,
 			// max_scan_theta,
@@ -76,6 +77,8 @@ namespace ldrp {
 
 	/** Get the pcl version string of the currently linked library */
 	__API char const* pclVer();
+	/** Get the default pipeline configuration */
+	__API const PipelineConfig& getDefaultPipelineConfig();
 
 	/** Initialize the global and sick api instances -- optional params are passed directly to SickScanApiCreate when called */
 	__API const status_t apiInit(int ss_argc = 0, char** ss_argv = nullptr);
@@ -98,7 +101,7 @@ namespace ldrp {
 	/** Apply an upper limit frequency for how often filtering and accumulation occurs */
 	__API const status_t setMaxFrequency(const size_t f_hz);
 	/** Apply parameters used in the filtering and accumulation pipeline */
-	__API const status_t applyFilterParams(const FilterParams& params);
+	__API const status_t applyPipelineConfig(const PipelineConfig& params);
 
 	/** Apply a new world pose for the lidar -- used directly to transform points to world space.
 	 * The q** params represent quaternion components */

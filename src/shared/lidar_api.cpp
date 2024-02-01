@@ -7,6 +7,7 @@
 #include <thread>
 #include <utility>
 #include <deque>
+#include <mutex>
 
 #include <pcl/pcl_config.h>
 #include <sick_scan_xd_api/sick_scan_api.h>
@@ -45,15 +46,16 @@ public:
 		);
 	}
 
-	Value_T& getClosest(const TimeStamp_T ts = Clock_T::now()) {
+	Value_T* getClosest(const TimeStamp_T ts = Clock_T::now()) {
+		// DO NOT USE -- TODO: implement a functional algorithm
 		if(this->_queue.empty()) {
-			return;
+			return nullptr;
 		} else if(ts > this->_queue.front().first) {
-			return this->_queue.front().second;
+			return &(this->_queue.front().second);
 		}
 		for(size_t i = this->_queue.size() / 2;;) {
 			if(i + 1 >= this->_queue.size()) {
-				return this->_queue.back().second;
+				return &this->_queue.back().second;
 			}
 			const TimeStamp_T
 				&f = this->_queue[i].first,
@@ -62,7 +64,7 @@ public:
 				_f = (f - ts),
 				_b = (ts - b);
 			if(_f >= 0 && _b >= 0) {
-				return _f < _b ? this->_queue[i].second : this->_queue[i + 1].second;	// return value that is closest
+				return _f < _b ? &this->_queue[i].second : &this->_queue[i + 1].second;	// return value that is closest
 			} else if(_f < 0) {
 				i /= 2;		// go forwards
 			} else {	// _b < 0
@@ -82,9 +84,9 @@ protected:
 		}
 	}
 
-
 protected:
 	std::deque<Data_T> _queue;
+
 
 };
 
@@ -92,11 +94,9 @@ protected:
 namespace ldrp {
 
 #ifndef _LDRP_DISABLE_LOG
-#define LDRP_LOG_GLOBAL(__inst, __condition, __output)		if(__condition) { (*__inst->_log_output) << __output; }
-#define LDRP_LOG_S_GLOBAL(__inst, __condition, __output)	LDRP_LOG_GLOBAL(__inst, (__inst->_log_output != nullptr && (__condition)), __output)
+#define LDRP_LOG_GLOBAL(__inst, __condition, __output)		if(__condition) { __inst->logs() << __output; }
 #define LOG_LEVEL_GLOBAL(__inst, __min_lvl)					(__inst->_log_level >= __min_lvl)
 #define LDRP_LOG(__condition, __output)		LDRP_LOG_GLOBAL(this, __condition, __output)
-#define LDRP_LOG_S(__condition, __output)	LDRP_LOG_S_GLOBAL(this, __condition, __output)
 #define LOG_LEVEL(__min_lvl)				LOG_LEVEL_GLOBAL(this, __min_lvl)
 #define LOG_NONE				true
 #define LOG_STANDARD			LOG_LEVEL(1)
@@ -134,15 +134,24 @@ namespace ldrp {
 	struct LidarImpl {
 	public:
 		LidarImpl() {
-			LDRP_LOG_S( LOG_NONE, "LDRP global instance initialized." << std::endl )
+			LDRP_LOG( LOG_NONE, "LDRP global instance initialized." << std::endl )
 		}
 		~LidarImpl() {
 			this->sickDeinit();
-			LDRP_LOG_S( LOG_NONE, "LDRP global instance destroyed." << std::endl )
+			LDRP_LOG( LOG_NONE, "LDRP global instance destroyed." << std::endl )
 		}
 
 		LidarImpl(const LidarImpl&) = delete;
 		LidarImpl(LidarImpl&&) = delete;
+
+
+		inline std::ostream& logs() {
+#ifdef LDRP_SAFETY_CHECKS
+			return (this->_log_output == nullptr) ? *LidarImpl::FALLBACK_STREAM : *this->_log_output;
+#else
+			return *this->_log_output;
+#endif
+		}
 
 
 		/** SickScanApiCreate() --> generate handle + error handling/logging */
@@ -206,15 +215,32 @@ namespace ldrp {
 		int32_t _sick_status{ 0 };
 
 	public:
-		std::ostream* _log_output{ &std::cout };
+		static constexpr std::ostream* FALLBACK_STREAM{ &std::cout };
+		std::ostream* _log_output{ FALLBACK_STREAM };
 		int32_t _log_level{ 1 };
 
+		/** PARAMS, STATES
+		 * - log level
+		 * - loop frequency (bounds)
+		 * - use full OR partial scan data
+		 * - thread enabled
+		 * - filtering source event -- on pose update, clocked internal, external, on map access (bad idea)
+		 * - accumulator and map resolution -- need to deal with updates while running
+		 * - filter params (see header)
+		*/
+
 		struct {
-			std::atomic<crno::hrc::duration> min_loop_duration;
+			std::atomic<crno::hrc::duration> min_loop_duration{ crno::milliseconds(50) };
+			std::atomic<bool> use_full_scans{ false };
+
+			PipelineConfig pipeline_config{};
 		} _config;
 
 		std::thread _thread;
 		std::atomic<bool> _enable_thread{false};
+		std::mutex
+			_points_mutex{},
+			_pose_mutex{};
 		struct {
 			
 		} _processing;
@@ -225,6 +251,15 @@ namespace ldrp {
 
 		static void cartesianPointCloudCallbackWrapper(SickScanApiHandle handle, const SickScanPointCloudMsg* msg) {
 			// NOTE: SickScanPointCloudMsg buffers are freed immediately after all callbacks finish --> will need to copy data if we want to keep it!
+			// filter by scan segment (only accept full frames or only accept partial segments)
+#ifdef LDRP_SAFETY_CHECKS
+			if(!LidarImpl::_global || handle != LidarImpl::_global->_handle) return;		// add macro for disabling extra safety checks
+#endif
+			LidarImpl::_global->_points_mutex.lock();
+			{
+				// append points to queue
+			}
+			LidarImpl::_global->_points_mutex.unlock();
 		}
 
 		void lidarWorker() {
@@ -255,6 +290,9 @@ namespace ldrp {
 
 	char const* pclVer() {
 		return PCL_VERSION_PRETTY;
+	}
+	const PipelineConfig& getDefaultPipelineConfig() {
+		return PipelineConfig{};
 	}
 
 	const status_t apiInit(int ss_argc, char** ss_argv) {
@@ -313,7 +351,7 @@ namespace ldrp {
 			const bool joinable = LidarImpl::_global->_thread.joinable();
 			if(enable) {
 				if(!joinable) {
-					LidarImpl::_global->_thread = std::thread(LidarImpl::lidarThreadWrapper, LidarImpl::_global.get());
+					LidarImpl::_global->_thread = std::thread(&LidarImpl::lidarThreadWrapper, LidarImpl::_global.get());
 					return STATUS_SUCCESS;
 				}
 			} else if(joinable) {
@@ -331,7 +369,7 @@ namespace ldrp {
 		}
 		return STATUS_PREREQ_UNINITIALIZED;
 	}
-	const status_t applyFilterParams(const FilterParams& params) {
+	const status_t applyPipelineConfig(const PipelineConfig& params) {
 		if(LidarImpl::_global) {
 			// TODO
 		}
@@ -340,7 +378,11 @@ namespace ldrp {
 
 	const status_t updateWorldPose(const float* xyz, const float* qxyz, const float qw) {
 		if(LidarImpl::_global) {
-			// TODO
+			LidarImpl::_global->_pose_mutex.lock();
+			{
+				// add to timestamped queue or whatever we callin it
+			}
+			LidarImpl::_global->_pose_mutex.unlock();
 		}
 		return STATUS_PREREQ_UNINITIALIZED;
 	}
