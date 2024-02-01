@@ -21,6 +21,8 @@ int main(int argc, char** argv) {
 
 	status_t s = ldrp::apiInit();
 	s = ldrp::lidarInit("./sick_multiscan.launch");
+	s = ldrp::setMaxFrequency(5);
+	s = ldrp::enablePipeline(true);
 
 // #ifdef WIN32
 	signal(SIGINT, _action);

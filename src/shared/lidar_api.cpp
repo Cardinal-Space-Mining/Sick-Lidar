@@ -138,6 +138,8 @@ namespace ldrp {
 		}
 		~LidarImpl() {
 			this->sickDeinit();
+			this->_enable_thread.store(false);
+			if(this->_thread.joinable()) this->_thread.join();
 			LDRP_LOG( LOG_NONE, "LDRP global instance destroyed." << std::endl )
 		}
 
@@ -147,9 +149,9 @@ namespace ldrp {
 
 		inline std::ostream& logs() {
 #ifdef LDRP_SAFETY_CHECKS
-			return (this->_log_output == nullptr) ? *LidarImpl::FALLBACK_STREAM : *this->_log_output;
+			return ((this->_log_output == nullptr) ? std::cout : *this->_log_output);
 #else
-			return *this->_log_output;
+			return (*this->_log_output);
 #endif
 		}
 
@@ -215,8 +217,7 @@ namespace ldrp {
 		int32_t _sick_status{ 0 };
 
 	public:
-		static constexpr std::ostream* FALLBACK_STREAM{ &std::cout };
-		std::ostream* _log_output{ FALLBACK_STREAM };
+		std::ostream* _log_output{ &std::cout };
 		int32_t _log_level{ 1 };
 
 		/** PARAMS, STATES
@@ -263,6 +264,7 @@ namespace ldrp {
 		}
 
 		void lidarWorker() {
+			LDRP_LOG(LOG_NONE, "lidar processing internal worker called!" << std::endl)
 			// 1. update accumulated point globule
 			// 2. run filtering on points
 			// 3. update accumulator
