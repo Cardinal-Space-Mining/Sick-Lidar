@@ -5,7 +5,8 @@ protobuff:
 3. cmake --build ./cmake-build --target install (use ^^^)
 
 wpilib:
-1. cmake . -B ./cmake-build -DWITH_JAVA=OFF -DWITH_JAVA_SOURCE=OFF -DWITH_CSCORE=OFF -DWITH_WPILIB=OFF -DWITH_EXAMPLES=OFF -DWITH_TESTS=OFF -DWITH_GUI=OFF -DWITH_SIMULATION_MODULES=OFF
+1. cmake . -B ./cmake-build -DWITH_JAVA=OFF -DWITH_JAVA_SOURCE=OFF -DWITH_CSCORE=OFF -DWITH_WPILIB=OFF -DWITH_EXAMPLES=OFF -DWITH_TESTS=OFF -DWITH_GUI=OFF -DWITH_SIMULATION_MODULES=OFF (-DCMAKE_INSTALL_PREFIX=./cmake-install)
 2. cmake --build ./cmake-build --config Release
+3. cmake --install ./cmake-build --config Release
 
 --> cmake . -B ./cmake-build -DWITH_JAVA=OFF -DWITH_JAVA_SOURCE=OFF -DWITH_CSCORE=OFF -DWITH_WPILIB=OFF -DWITH_EXAMPLES=OFF -DWITH_TESTS=OFF -DWITH_GUI=OFF -DWITH_SIMULATION_MODULES=OFF -DProtobuf_INCLUDE_DIR=../protobuf/cmake-install/include -DProtobuf_PROTOC_EXECUTABLE=../protobuf/cmake-install/bin/protoc.exe -DCMAKE_LIBRARY_PATH=../protobuf/cmake-install/lib
