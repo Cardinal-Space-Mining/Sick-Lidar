@@ -52,7 +52,7 @@ int main(int argc, char** argv) {
 	 * - manually skipping the deinit lets the main thread and program terminate gracefully (except that the sick api is not destroyed gracefully)
 	 * - what to do???? ha thats hillarious :|
 	*/
-	s = ldrp::apiHardReset();
+	s = ldrp::apiDestroy();
 	std::cout << "main thread exitting!?" << std::endl;
 	// exit(0);
 

@@ -93,6 +93,9 @@ protected:
 
 namespace ldrp {
 
+#ifndef LOG_DEBUG
+#define LOG_DEBUG	true
+#endif
 #ifndef _LDRP_DISABLE_LOG
 #define LDRP_LOG_GLOBAL(__inst, __condition, __output)		if(__condition) { __inst->logs() << __output; }
 #define LOG_LEVEL_GLOBAL(__inst, __min_lvl)					(__inst->_log_level >= __min_lvl)
@@ -137,9 +140,11 @@ namespace ldrp {
 			LDRP_LOG( LOG_NONE, "LDRP global instance initialized." << std::endl )
 		}
 		~LidarImpl() {
-			this->sickDeinit();
 			this->_enable_thread.store(false);
 			if(this->_thread.joinable()) this->_thread.join();
+
+			this->sickDeinit();		// make sure that this is the last call since it tends to stall
+
 			LDRP_LOG( LOG_NONE, "LDRP global instance destroyed." << std::endl )
 		}
 
@@ -264,7 +269,7 @@ namespace ldrp {
 		}
 
 		void lidarWorker() {
-			LDRP_LOG(LOG_NONE, "lidar processing internal worker called!" << std::endl)
+			LDRP_LOG( LOG_DEBUG, "lidar processing internal worker called!" << std::endl)
 			// 1. update accumulated point globule
 			// 2. run filtering on points
 			// 3. update accumulator
@@ -279,6 +284,7 @@ namespace ldrp {
 
 				std::this_thread::sleep_until(n + this->_config.min_loop_duration.load());
 			}
+			LDRP_LOG( LOG_DEBUG, "lidar processing thread finished and exitting." << std::endl)
 
 		}
 
@@ -309,11 +315,12 @@ namespace ldrp {
 		}
 		return STATUS_PREREQ_UNINITIALIZED;
 	}
-	const status_t apiHardReset() {
+	const status_t apiDestroy() {
 		if(LidarImpl::_global) {
-			const status_t s = LidarImpl::_global->sickDeinit();
+			// const status_t s = LidarImpl::_global->sickDeinit();
 			delete LidarImpl::_global.release();
-			return s;
+			// return s;
+			return STATUS_SUCCESS;
 		}
 		return STATUS_PREREQ_UNINITIALIZED;
 	}
@@ -382,7 +389,7 @@ namespace ldrp {
 		if(LidarImpl::_global) {
 			LidarImpl::_global->_pose_mutex.lock();
 			{
-				// add to timestamped queue or whatever we callin it
+				// TODO - add to timestamped queue or whatever we callin it
 			}
 			LidarImpl::_global->_pose_mutex.unlock();
 		}

@@ -85,7 +85,7 @@ namespace ldrp {
 	/** Reset the internal sick api instance. Does not delete buffers or filter params */
 	__API const status_t apiClose();
 	/** Same functionality as apiClose() but also deletes the main api buffer. apiInit() must be called afterwards before other api calls */
-	__API const status_t apiHardReset();
+	__API const status_t apiDestroy();
 	/** Intialize the lidar connection via config file */
 	__API const status_t lidarInit(const char* config_file);
 	/** Deregister the currently loaded lidar and stop all filter processes */
