@@ -14,24 +14,25 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
 set(CMAKE_INSTALL_PREFIX "${PROJECT_SOURCE_DIR}/install")
 
-# test for both stages defined
-if(MULTISTAGE_PREREQ AND MULTISTAGE_MAIN)
-	message(FATAL_ERROR "Multiple build stages cannot be targeted at once! Enable variable MULTISTAGE_PREREQ --OR-- MULTISTAGE_MAIN only!")
+
+if(NOT DEFINED MULTISTAGE_STEP)
+	set(MULTISTAGE_STEP -1)
 endif()
 # automatically deduce build stage
-if(NOT MULTISTAGE_PREREQ AND NOT MULTISTAGE_MAIN)
-	message(STATUS "No build stage defined. Attempting automatic deduction...")
+if(${MULTISTAGE_STEP} LESS 0)
+	message(STATUS "Attempting build stage automatic deduction...")
 	if(EXISTS "${CMAKE_INSTALL_PREFIX}/cmake/protobuf-config.cmake") # possibly set variables like for wpilib and use find_package() ???
-		set(MULTISTAGE_MAIN ON)
-		message(STATUS "Protobuf install detected: automatically deduced build stage MULTISTAGE_MAIN.")
+		set(MULTISTAGE_STEP 1)
+		message(STATUS "Protobuf install detected: automatically deduced build stage 1 (project).")
 	else()
-		set(MULTISTAGE_PREREQ ON)
-		message(STATUS "Protobuf install not detected: automatically deduced build stage MULTISTAGE_PREREQ.")
+		set(MULTISTAGE_STEP 0)
+		message(STATUS "Protobuf install not detected: automatically deduced build stage 0 (prereq).")
 	endif()
 endif()
 
 # run a build stage based on variables
-if(MULTISTAGE_PREREQ)
+if(${MULTISTAGE_STEP} EQUAL 0)
+	message(STATUS "Build stage 0 (prereq) running!...")
 
 # protobuf
 	# set(CMAKE_CXX_STANDARD 20)
@@ -42,7 +43,8 @@ if(MULTISTAGE_PREREQ)
 	add_subdirectory(submodule-deps/protobuf)
 
 
-elseif(MULTISTAGE_MAIN)
+elseif(${MULTISTAGE_STEP} GREATER 0)
+	message(STATUS "Build stage 1 (project) running!...")
 
 #wpilib
 	set(__BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
@@ -93,5 +95,5 @@ elseif(MULTISTAGE_MAIN)
 
 
 else()
-	message(FATAL_ERROR "Internal branch logic error. Please manually set variable MULTISTAGE_PREREQ --OR-- MULTISTAGE_MAIN to define a build stage")
+	message(FATAL_ERROR "Internal branch logic error. Please manually set variable MULTISTAGE_STEP to define a build stage.")
 endif()

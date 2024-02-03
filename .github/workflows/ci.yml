@@ -29,13 +29,13 @@ jobs:
 
       - name: "Build/Install Stage 1"
         run: |
-          cmake . -B ./cmake-build --preset default
+          cmake . -B ./cmake-build -DMULTISTAGE_STEP=0 --preset default
           cmake --build ./cmake-build --config Release
           cmake --install ./cmake-build
       
       - name: "Build/Install Stage 2"
         run: |
-          cmake . -B ./cmake-build --preset default
+          cmake . -B ./cmake-build -DMULTISTAGE_STEP=1 --preset default
           cmake --build ./cmake-build --config Release
           cmake --install ./cmake-build
       
