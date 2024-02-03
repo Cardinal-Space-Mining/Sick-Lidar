@@ -9,10 +9,10 @@ if(POLICY CMP0077)
 	set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
 endif()
 
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
-set(CMAKE_INSTALL_PREFIX "${PROJECT_SOURCE_DIR}/install")
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}" CACHE STRING "" FORCE)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}" CACHE STRING "" FORCE)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}" CACHE STRING "" FORCE)
+set(CMAKE_INSTALL_PREFIX "${PROJECT_SOURCE_DIR}/install" CACHE STRING "" FORCE)
 
 
 if(NOT DEFINED MULTISTAGE_STEP)
@@ -21,7 +21,7 @@ endif()
 # automatically deduce build stage
 if(${MULTISTAGE_STEP} LESS 0)
 	message(STATUS "Attempting build stage automatic deduction...")
-	if(EXISTS "${CMAKE_INSTALL_PREFIX}/cmake/protobuf-config.cmake") # possibly set variables like for wpilib and use find_package() ???
+	if(EXISTS "${CMAKE_INSTALL_PREFIX}/cmake/protobuf-config.cmake" OR EXISTS "${CMAKE_INSTALL_PREFIX}/lib/cmake/protobuf/protobuf-config.cmake") # possibly set variables like for wpilib and use find_package() ???
 		set(MULTISTAGE_STEP 1)
 		message(STATUS "Protobuf install detected: automatically deduced build stage 1 (project).")
 	else()
@@ -57,7 +57,7 @@ elseif(${MULTISTAGE_STEP} GREATER 0)
 	set(WITH_GUI OFF CACHE BOOL "" FORCE)
 	set(WITH_SIMULATION_MODULES OFF CACHE BOOL "" FORCE)
 	set(Protobuf_INCLUDE_DIR		"${CMAKE_INSTALL_PREFIX}/include")
-	set(Protobuf_PROTOC_EXECUTABLE	"${CMAKE_INSTALL_PREFIX}/bin/protoc")
+	set(Protobuf_PROTOC_EXECUTABLE	"${CMAKE_INSTALL_PREFIX}/bin/protoc")	// make sure that this is still compatible with windows!
 	list(APPEND CMAKE_LIBRARY_PATH	"${CMAKE_INSTALL_PREFIX}/lib")
 	add_subdirectory(submodule-deps/allwpilib)
 	set(BUILD_SHARED_LIBS ${__BUILD_SHARED_LIBS})
