@@ -2,10 +2,11 @@ cmake_minimum_required(VERSION 3.15)
 project(SickPerception)
 
 if(POLICY CMP0144)
-	cmake_policy(SET CMP0144 NEW)
+	# cmake_policy(SET CMP0144 NEW)
 endif()
 if(POLICY CMP0077)
-	cmake_policy(SET CMP0077 NEW)
+	# cmake_policy(SET CMP0077 NEW)
+	set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
 endif()
 
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
@@ -37,6 +38,7 @@ if(MULTISTAGE_PREREQ)
 	set(protobuf_BUILD_EXAMPLES OFF CACHE BOOl "" FORCE)
 	set(protobuf_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 	set(protobuf_BUILD_SHARED_LIBS ON CACHE BOOL "" FORCE)
+	set(protobuf_BUILD_WITH_ZLIB OFF CACHE BOOL "" FORCE)
 	add_subdirectory(submodule-deps/protobuf)
 
 
@@ -62,7 +64,7 @@ elseif(MULTISTAGE_MAIN)
 	set(ROS_VERSION 0 CACHE BOOL	"Force disable ROS" FORCE)
 	set(LDMRS 0 CACHE BOOL			"Force disable LDMRS" FORCE)
 	set(__CMAKE_CXX_STANDARD ${CMAKE_CXX_STANDARD})
-	if(${CMAKE_CXX_STANDARD} GREATER 14)
+	if(NOT ${CMAKE_CXX_STANDARD} OR ${CMAKE_CXX_STANDARD} GREATER 14)
 		set(CMAKE_CXX_STANDARD 14)
 	endif()
 	add_subdirectory(submodule-deps/sick_scan_xd)
@@ -70,6 +72,9 @@ elseif(MULTISTAGE_MAIN)
 	set(CMAKE_CXX_STANDARD ${__CMAKE_CXX_STANDARD})
 
 #ldrp shared library
+	if(NOT CMAKE_CXX_STANDARD)
+		set(CMAKE_CXX_STANDARD 20)	# used for main program as well
+	endif()
 	add_subdirectory(src/shared)
 
 #main program

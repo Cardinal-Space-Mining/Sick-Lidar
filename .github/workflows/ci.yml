@@ -27,15 +27,21 @@ jobs:
         with:
           submodules: recursive
 
-      - name: "Build + Install"
+      - name: "Build/Install Stage 1"
         run: |
-          cmake . -B ./build --preset default
-          cmake --build ./build --config Release
-          cmake --install ./build
+          cmake . -B ./cmake-build --preset default
+          cmake --build ./cmake-build --config Release
+          cmake --install ./cmake-build
       
-      - name: "Status"
+      - name: "Build/Install Stage 2"
         run: |
-          cd build
+          cmake . -B ./cmake-build --preset default
+          cmake --build ./cmake-build --config Release
+          cmake --install ./cmake-build
+      
+      - name: "Inspect Install"
+        run: |
+          cd install
           ls -l -R
 
       # - name: "Zip Artifacts"
@@ -49,4 +55,4 @@ jobs:
           name: ci-build
           path: |
             ./install
-            ./build
+            ./cmake-build
