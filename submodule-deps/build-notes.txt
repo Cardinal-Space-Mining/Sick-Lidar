@@ -2,6 +2,7 @@ protobuff:
 1. cmake . -B ./cmake-build -DCMAKE_CXX_STANDARD=20 -Dprotobuf_BUILD_TESTS=OFF -Dprotobuf_BULID_EXAMPLES=OFF -Dprotobuf_BUILD_WITH_ZLIB=OFF -Dprotobuf_BUILD_SHARED_LIBS=ON -DABSL_PROPAGATE_CXX_STD=ON -DCMAKE_INSTALL_PREFIX=./cmake-install
 ^^ try without propagate_cxx_std
 2. cmake --build ./cmake-build --config Release (--target install)
+2.5. cmake --install ./cmake-build ^^
 3. cmake --build ./cmake-build --target install (use ^^^)
 
 wpilib:
