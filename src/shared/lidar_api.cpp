@@ -13,6 +13,8 @@
 #include <pcl/pcl_config.h>
 #include <sick_scan_xd_api/sick_scan_api.h>
 
+//#define LOG_DEBUG  false
+
 
 namespace std {
 	namespace chrono {
@@ -93,7 +95,6 @@ protected:
 
 
 namespace ldrp {
-//#define LOG_DEBUG  false
 
 #ifndef LOG_DEBUG
 #define LOG_DEBUG	true
@@ -282,22 +283,15 @@ namespace ldrp {
 		} _processing;
 
 
-		std::atomic_int _counter {0};
-
 	public:
 		inline static std::unique_ptr<LidarImpl> _global{ nullptr };
 
 		static void cartesianPointCloudCallbackWrapper(SickScanApiHandle handle, const SickScanPointCloudMsg* msg) {
 			// NOTE: SickScanPointCloudMsg buffers are freed immediately after all callbacks finish --> will need to copy data if we want to keep it!
 			// filter by scan segment (only accept full frames or only accept partial segments)
-
-
-
 #ifdef LDRP_SAFETY_CHECKS
 			if(!LidarImpl::_global || handle != LidarImpl::_global->_handle) return;		// add macro for disabling extra safety checks
 #endif
-			LidarImpl::_global->_counter++;
-
 			LidarImpl::_global->_points_mutex.lock();
 			{
 				// append points to queue
@@ -311,7 +305,6 @@ namespace ldrp {
 			// 2. run filtering on points
 			// 3. update accumulator
 			// 4. [when configured] update map
-			LDRP_LOG(LOG_DEBUG, "================================OUTPUT:" << LidarImpl::_global->_counter << std::endl);
 		}
 		void lidarThreadWrapper() {
 
