@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.15)
 project(SickPerception)
 
+include(CMakeDependentOption)
+
 if(POLICY CMP0144)
 	# cmake_policy(SET CMP0144 NEW)
 endif()
@@ -9,19 +11,30 @@ if(POLICY CMP0077)
 	set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
 endif()
 
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
-set(CMAKE_INSTALL_PREFIX "${PROJECT_SOURCE_DIR}/install")
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}" CACHE STRING "" FORCE)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}" CACHE STRING "" FORCE)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}" CACHE STRING "" FORCE)
+set(CMAKE_INSTALL_PREFIX "${PROJECT_SOURCE_DIR}/install" CACHE STRING "" FORCE)
 
-
-if(NOT DEFINED MULTISTAGE_STEP)
-	set(MULTISTAGE_STEP -1)
+# options
+option(USE_WPILIB "Enable the compiling and internal usage of Wpilib (results in a multistage build process)" OFF)
+cmake_dependent_option(MULTISTAGE_STEP
+	"Which step (0 or 1) of the multistage build should be configured. Default of -1 for autodetect (unused when wpilib is not included)"
+	-1 USE_WPILIB 1
+)
+# if(${USE_WPILIB})		# alternative solution?
+# 	option(MULTISTAGE_STEP "Which step (0 or 1) of the multistage build should be configured. Default of -1 for autodetect (unused when wpilib is not included)" -1)
+# else()
+# 	set(MULTISTAGE_STEP 1 CACHE INTERNAL "" FORCE)
+# endif()
+if(NOT PROJECT_CXX_STANDARD)
+	set(PROJECT_CXX_STANDARD 20)
 endif()
+
 # automatically deduce build stage
 if(${MULTISTAGE_STEP} LESS 0)
 	message(STATUS "Attempting build stage automatic deduction...")
-	if(EXISTS "${CMAKE_INSTALL_PREFIX}/cmake/protobuf-config.cmake") # possibly set variables like for wpilib and use find_package() ???
+	if(EXISTS "${CMAKE_INSTALL_PREFIX}/cmake/protobuf-config.cmake" OR EXISTS "${CMAKE_INSTALL_PREFIX}/lib/cmake/protobuf/protobuf-config.cmake") # possibly set variables like for wpilib and use find_package() ???
 		set(MULTISTAGE_STEP 1)
 		message(STATUS "Protobuf install detected: automatically deduced build stage 1 (project).")
 	else()
@@ -47,6 +60,13 @@ elseif(${MULTISTAGE_STEP} GREATER 0)
 	message(STATUS "Build stage 1 (project) running!...")
 
 #wpilib
+if(${USE_WPILIB})
+	if(WIN32)
+		set(_PROTOC_EXECUTABLE "protoc.exe")
+	else()
+		set(_PROTOC_EXECUTABLE "protoc")
+	endif()
+
 	set(__BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
 	set(BUILD_SHARED_LIBS ON)
 	set(WITH_JAVA OFF CACHE BOOL "" FORCE)
@@ -57,26 +77,25 @@ elseif(${MULTISTAGE_STEP} GREATER 0)
 	set(WITH_GUI OFF CACHE BOOL "" FORCE)
 	set(WITH_SIMULATION_MODULES OFF CACHE BOOL "" FORCE)
 	set(Protobuf_INCLUDE_DIR		"${CMAKE_INSTALL_PREFIX}/include")
-	set(Protobuf_PROTOC_EXECUTABLE	"${CMAKE_INSTALL_PREFIX}/bin/protoc.exe")
+	set(Protobuf_PROTOC_EXECUTABLE	"${CMAKE_INSTALL_PREFIX}/bin/${_PROTOC_EXECUTABLE}")	# make sure that this is still compatible with windows!
 	list(APPEND CMAKE_LIBRARY_PATH	"${CMAKE_INSTALL_PREFIX}/lib")
 	add_subdirectory(submodule-deps/allwpilib)
 	set(BUILD_SHARED_LIBS ${__BUILD_SHARED_LIBS})
+endif()
 
 #sick_scan_xd
 	set(ROS_VERSION 0 CACHE BOOL	"Force disable ROS" FORCE)
 	set(LDMRS 0 CACHE BOOL			"Force disable LDMRS" FORCE)
 	set(__CMAKE_CXX_STANDARD ${CMAKE_CXX_STANDARD})
 	if(NOT ${CMAKE_CXX_STANDARD} OR ${CMAKE_CXX_STANDARD} GREATER 14)
-		set(CMAKE_CXX_STANDARD 14)
+		set(CMAKE_CXX_STANDARD 14)	# sick_scan_xd fails to build with > C++14
 	endif()
 	add_subdirectory(submodule-deps/sick_scan_xd)
 	message(STATUS "Building sick_scan_xd with ROS version ${ROS_VERSION}")
 	set(CMAKE_CXX_STANDARD ${__CMAKE_CXX_STANDARD})
 
 #ldrp shared library
-	if(NOT CMAKE_CXX_STANDARD)
-		set(CMAKE_CXX_STANDARD 20)	# used for main program as well
-	endif()
+	set(CMAKE_CXX_STANDARD ${PROJECT_CXX_STANDARD})
 	add_subdirectory(src/shared)
 
 #main program

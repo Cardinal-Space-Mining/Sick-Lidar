@@ -43,7 +43,7 @@ int main(int argc, char** argv) {
 	using namespace std::chrono_literals;
 	// std::this_thread::sleep_for(3s);
 	for(;_program_running.load();) {
-		std::cout << "main thread is still running!?" << std::endl;
+		//std::cout << "main thread is still running!?" << std::endl;
 		std::this_thread::sleep_for(1s);
 	}
 

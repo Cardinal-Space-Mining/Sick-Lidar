@@ -1,16 +1,6 @@
-# project(LidarProcShared)	# get good
-
 find_package(PCL REQUIRED)
 
-# if(WIN32)
-# 	if(CMAKE_BUILD_TYPE EQUAL Debug)
-# 		set(SICK_SCAN_LIB_REL "windows/sick_scan_xd-3.1.0/Debug/sick_scan_xd_shared_lib.lib")
-# 	else()
-# 		set(SICK_SCAN_LIB_REL "windows/sick_scan_xd-3.1.0/Release/sick_scan_xd_shared_lib.lib")
-# 	endif()
-# elseif(UNIX)
-# 	set(SICK_SCAN_LIB_REL "ubuntu/sick_scan_xd-3.1.0/build-sickxd/libsick_scan_xd_shared_lib.so")
-# endif()
+# NOTE: add logic + defines for disabling wpilib, disabling debug prints, etc.
 
 
 set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
