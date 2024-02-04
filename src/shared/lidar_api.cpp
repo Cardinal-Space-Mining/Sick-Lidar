@@ -8,6 +8,7 @@
 #include <utility>
 #include <deque>
 #include <mutex>
+#include <vector>
 
 #include <pcl/pcl_config.h>
 #include <sick_scan_xd_api/sick_scan_api.h>
@@ -133,6 +134,33 @@ namespace ldrp {
 
 
 
+	template<typename PointT>
+	struct ScanSlice {
+		crno::hrc::time_point _tstamp{};
+		std::vector<PointT> _points{};
+		uint32_t
+			_width,
+			_height;
+		bool _dense;
+
+		// template<typename _PointT>
+		// static bool fromSickScanMsg(ScanSlice<_PointT>* buff, const SickScanPointCloudMsg* msg) {
+		// 	if(!buff || !msg) return false;
+		// 	if(sizeof(_PointT) != msg->point_step) return false;
+		// 	buff->_tstamp = crno::hrc::time_point{
+		// 		crno::seconds{ msg->header->timestamp_sec } +
+		// 		crno::nanoseconds{ msg->header->timestamp_nsec }
+		// 	};
+		// 	buff->_points.resize(msg->width * msg->height);
+		// 	memcpy(buff->_points.data(), msg->data->buffer,
+		// 		msg->width * msg->height * msg->point_step);
+		// 	buff->_dense = msg->is_dense;
+		// 	buff->_width = msg->width;
+		// 	buff->_height = msg->height;
+		// }
+	};
+
+
 	/** Interfacing and Filtering Implementation */
 	struct LidarImpl {
 	public:
@@ -244,6 +272,7 @@ namespace ldrp {
 
 		std::thread _thread;
 		std::atomic<bool> _enable_thread{false};
+		// std::deque<ScanSlice<pcl::PointXYZ> > _points_queue;
 		std::mutex
 			_points_mutex{},
 			_pose_mutex{};
