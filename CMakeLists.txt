@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.15)
 project(SickPerception)
 
 include(CMakeDependentOption)
+include(GNUInstallDirs)
 
 if(POLICY CMP0144)
 	# cmake_policy(SET CMP0144 NEW)
@@ -84,21 +85,22 @@ if(${USE_WPILIB})
 endif()
 
 #sick_scan_xd
-	set(ROS_VERSION 0 CACHE BOOL	"Force disable ROS" FORCE)
-	set(LDMRS 0 CACHE BOOL			"Force disable LDMRS" FORCE)
-	set(__CMAKE_CXX_STANDARD ${CMAKE_CXX_STANDARD})
-	if(NOT ${CMAKE_CXX_STANDARD} OR ${CMAKE_CXX_STANDARD} GREATER 14)
-		set(CMAKE_CXX_STANDARD 14)	# sick_scan_xd fails to build with > C++14
-	endif()
-	add_subdirectory(submodule-deps/sick_scan_xd)
-	message(STATUS "Building sick_scan_xd with ROS version ${ROS_VERSION}")
-	set(CMAKE_CXX_STANDARD ${__CMAKE_CXX_STANDARD})
+	# set(ROS_VERSION 0 CACHE BOOL	"Force disable ROS" FORCE)
+	# set(LDMRS 0 CACHE BOOL			"Force disable LDMRS" FORCE)
+	# set(__CMAKE_CXX_STANDARD ${CMAKE_CXX_STANDARD})
+	# if(NOT ${CMAKE_CXX_STANDARD} OR ${CMAKE_CXX_STANDARD} GREATER 14)
+	# 	set(CMAKE_CXX_STANDARD 14)	# sick_scan_xd fails to build with > C++14
+	# endif()
+	# add_subdirectory(submodule-deps/sick_scan_xd)
+	# message(STATUS "Building sick_scan_xd with ROS version ${ROS_VERSION}")
+	# set(CMAKE_CXX_STANDARD ${__CMAKE_CXX_STANDARD})
 
 #ldrp shared library
-	set(CMAKE_CXX_STANDARD ${PROJECT_CXX_STANDARD})
+	# set(CMAKE_CXX_STANDARD ${PROJECT_CXX_STANDARD})
 	add_subdirectory(src/shared)
 
 #main program
+	set(CMAKE_CXX_STANDARD ${PROJECT_CXX_STANDARD})
 	add_executable(${PROJECT_NAME}_test "src/main.cpp")
 	target_link_libraries(${PROJECT_NAME}_test
 		PRIVATE ${PROJECT_NAME}_shared

@@ -3,7 +3,172 @@ find_package(PCL REQUIRED)
 # NOTE: add logic + defines for disabling wpilib, disabling debug prints, etc.
 
 
+#sick scan files
+set(SICK_SCAN_DIR "${PROJECT_SOURCE_DIR}/submodule-deps/sick_scan_xd")
+
+# SSXD CMakeLists.txt line 53
+# if(NOT WIN32)
+# 	add_compile_options(-O3)
+# endif()
+if (POLICY CMP0022)	# Added CMP0022 and CMP0048 to avoid cmake warnings
+	cmake_policy(SET CMP0022 NEW)
+endif ()
+if (POLICY CMP0048)
+	cmake_policy(SET CMP0048 NEW)
+endif()
+if(NOT ${CMAKE_CXX_STANDARD} OR ${CMAKE_CXX_STANDARD} GREATER 14)
+	set(CMAKE_CXX_STANDARD 14)	# sick_scan_xd fails to build with > C++14
+endif()
+# if(BUILD_LIB_HIDE_FUNCTIONS AND NOT WIN32)
+# 	add_compile_options(-fvisibility=hidden)
+# 	add_link_options(-fvisibility=hidden)
+# endif()
+# if(NOT WIN32)	# Switch on, if you use c11-specific commands
+# 	set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-format-overflow -fno-var-tracking-assignments")
+# endif()
+# #SSXD CMakeLists.txt line 97
+# add_compile_options(
+# 	-D__ROS_VERSION=0
+# 	-DROSSIMU)
+# #SSXD CMakeLists.txt line 111
+# if(WIN32)
+# 	add_compile_options(
+# 		-D_WINSOCK_DEPRECATED_NO_WARNINGS
+# 		-D_CRT_SECURE_NO_WARNINGS
+# 		-D_WIN32_WINNT=0x0A00)
+# 	link_libraries(ws2_32)
+# else()
+# 	link_libraries(pthread) # std::thread requires pthread on linux
+# 	link_libraries(dl)      # dynamic loading of libraries
+# endif()
+# if(RASPBERRY EQUAL 1)
+# 	add_compile_options(-DRASPBERRY=1)
+# else()
+# 	add_compile_options(-DRASPBERRY=0)
+# endif()
+# # SSXD CMakeLists.txt line 370
+# add_compile_options(
+# 	-DSCANSEGMENT_XD_SUPPORT=1)
+include_directories(
+	${SICK_SCAN_DIR}/include/sick_scansegment_xd/msgpack11)
+file(GLOB SCANSEGMENT_XD_SOURCES
+	${SICK_SCAN_DIR}/driver/src/sick_scansegment_xd/*.cpp
+	${SICK_SCAN_DIR}/driver/src/sick_scansegment_xd/msgpack11/*.cpp)
+# SSXD CMakeLists.txt line 484
+include_directories(
+	${SICK_SCAN_DIR}/include
+	${SICK_SCAN_DIR}/include/sick_scan_xd_api
+	${SICK_SCAN_DIR}/include/tinyxml
+	${SICK_SCAN_DIR}/include/sick_scan
+	${SICK_SCAN_DIR}/roswrap/src/include/launchparser
+	${SICK_SCAN_DIR}/roswrap/src/msg_header)
+# SSXD CMakeLists.txt line 580
+include_directories(
+	${SICK_SCAN_DIR}/roswrap/src/include)
+if(WIN32)
+	include_directories(
+		${SICK_SCAN_DIR}/roswrap/helper_win)
+	file(GLOB SRC_WIN_FILES
+		${SICK_SCAN_DIR}/roswrap/helper_win/usleep/usleep.c)
+endif()
+include_directories(
+	${SICK_SCAN_DIR}/roswrap/src/include
+	${SICK_SCAN_DIR}/roswrap/src/rossimu/melodic/include
+	${SICK_SCAN_DIR}/roswrap/src/rossimu/kinetic/include
+	${SICK_SCAN_DIR}/roswrap/src/cfgsimu
+	${SICK_SCAN_DIR}/roswrap/src/toojpeg
+	${SICK_SCAN_DIR}/roswrap/src/tools )
+file(GLOB SRC_ROSSIMU_FILES
+	${SICK_SCAN_DIR}/roswrap/src/cfgsimu/sick_scan/time_modi.cpp
+	${SICK_SCAN_DIR}/roswrap/src/rossimu/kinetic/src/rossimu.cpp
+	${SICK_SCAN_DIR}/roswrap/src/rossimu/kinetic/src/duration.cpp
+	${SICK_SCAN_DIR}/roswrap/src/rossimu/kinetic/src/rate.cpp
+	${SICK_SCAN_DIR}/roswrap/src/tools/sick_scan/pointcloud_utils.cpp )
+set(SICK_SCAN_LIB_SRC
+	${SICK_SCAN_DIR}/driver/src/abstract_parser.cpp
+	${SICK_SCAN_DIR}/driver/src/binPrintf.cpp
+	${SICK_SCAN_DIR}/driver/src/binScanf.cpp
+	${SICK_SCAN_DIR}/driver/src/dataDumper.cpp
+	${SICK_SCAN_DIR}/driver/src/helper/angle_compensator.cpp
+	${SICK_SCAN_DIR}/driver/src/sick_cloud_transform.cpp
+	${SICK_SCAN_DIR}/driver/src/sick_generic_callback.cpp
+	${SICK_SCAN_DIR}/driver/src/sick_generic_field_mon.cpp
+	${SICK_SCAN_DIR}/driver/src/sick_generic_imu.cpp
+	${SICK_SCAN_DIR}/driver/src/sick_nav_scandata_parser.cpp
+	${SICK_SCAN_DIR}/driver/src/sick_generic_laser.cpp
+	${SICK_SCAN_DIR}/driver/src/sick_generic_monitoring.cpp
+	${SICK_SCAN_DIR}/driver/src/sick_generic_parser.cpp
+	${SICK_SCAN_DIR}/driver/src/sick_generic_radar.cpp
+	${SICK_SCAN_DIR}/driver/src/sick_lmd_scandata_parser.cpp
+	${SICK_SCAN_DIR}/driver/src/sick_scan_common.cpp
+	${SICK_SCAN_DIR}/driver/src/sick_scan_common_nw.cpp
+	${SICK_SCAN_DIR}/driver/src/sick_scan_common_tcp.cpp
+	${SICK_SCAN_DIR}/driver/src/sick_scan_marker.cpp
+	${SICK_SCAN_DIR}/driver/src/sick_scan_messages.cpp
+	${SICK_SCAN_DIR}/driver/src/sick_scan_parse_util.cpp
+	${SICK_SCAN_DIR}/driver/src/sick_scan_services.cpp
+	${SICK_SCAN_DIR}/driver/src/sick_scan_xd_api/api_impl.cpp
+	${SICK_SCAN_DIR}/driver/src/sick_scan_xd_api/sick_scan_api_converter.cpp
+	${SICK_SCAN_DIR}/driver/src/softwarePLL.cpp
+	${SICK_SCAN_DIR}/driver/src/tcp/Mutex.cpp
+	${SICK_SCAN_DIR}/driver/src/tcp/SickThread.cpp
+	${SICK_SCAN_DIR}/driver/src/tcp/Time.cpp
+	${SICK_SCAN_DIR}/driver/src/tcp/colaa.cpp
+	${SICK_SCAN_DIR}/driver/src/tcp/colab.cpp
+	${SICK_SCAN_DIR}/driver/src/tcp/errorhandler.cpp
+	${SICK_SCAN_DIR}/driver/src/tcp/tcp.cpp
+	${SICK_SCAN_DIR}/driver/src/tcp/toolbox.cpp
+	${SICK_SCAN_DIR}/driver/src/tcp/wsa_init.cpp
+	${SICK_SCAN_DIR}/driver/src/tinyxml/tinystr.cpp
+	${SICK_SCAN_DIR}/driver/src/tinyxml/tinyxml.cpp
+	${SICK_SCAN_DIR}/driver/src/tinyxml/tinyxmlerror.cpp
+	${SICK_SCAN_DIR}/driver/src/tinyxml/tinyxmlparser.cpp
+	${SICK_SCAN_DIR}/roswrap/src/getopt/getopt.c
+	${SICK_SCAN_DIR}/roswrap/src/launchparser/launchparser.cpp
+	${SICK_SCAN_DIR}/roswrap/src/toojpeg/toojpeg.cpp
+	${SCANSEGMENT_XD_SOURCES}
+	${SRC_ROSSIMU_FILES}
+	${SRC_WIN_FILES} )
+# SSXD CMakeLists.txt line 643 (equivalent)
+add_library(SickScanInternal_lib STATIC ${SICK_SCAN_LIB_SRC})
+
+# converted options from above specific to lib target
+if(BUILD_LIB_HIDE_FUNCTIONS AND NOT WIN32)
+	target_compile_options(SickScanInternal_lib PRIVATE -fvisibility=hidden)
+	target_link_options(SickScanInternal_lib PRIVATE -fvisibility=hidden)
+endif()
+target_compile_options(SickScanInternal_lib PRIVATE
+	-D__ROS_VERSION=0
+	-DROSSIMU
+	-DSCANSEGMENT_XD_SUPPORT=1)
+if(WIN32)
+	target_compile_options(SickScanInternal_lib PRIVATE
+		-D_WINSOCK_DEPRECATED_NO_WARNINGS
+		-D_CRT_SECURE_NO_WARNINGS
+		-D_WIN32_WINNT=0x0A00)
+	target_link_libraries(SickScanInternal_lib ws2_32)
+else()
+	target_compile_options(SickScanInternal_lib PRIVATE
+		-O3
+		-Wno-format-overflow
+		-fno-var-tracking-assignments)
+	target_link_libraries(SickScanInternal_lib pthread dl)	# std::thread requires pthread on linux, dynamic loading of libraries
+endif()
+if(RASPBERRY EQUAL 1)
+	target_compile_options(SickScanInternal_lib
+		PRIVATE -DRASPBERRY=1)
+else()
+	target_compile_options(SickScanInternal_lib
+		PRIVATE -DRASPBERRY=0)
+endif()
+
+
+
+
+
+
 set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
+set(CMAKE_CXX_STANDARD ${PROJECT_CXX_STANDARD})
 
 file(GLOB _shared_sources "${CMAKE_CURRENT_LIST_DIR}/*.cpp")
 file(GLOB _target_headers "${CMAKE_CURRENT_LIST_DIR}/*.h")
@@ -11,13 +176,13 @@ file(GLOB _target_headers "${CMAKE_CURRENT_LIST_DIR}/*.h")
 add_library(${PROJECT_NAME}_shared
 	SHARED ${_shared_sources}
 )
-add_definitions(
+target_compile_definitions(${PROJECT_NAME}_shared PRIVATE
 	-D_LIB_SOURCE
 	${PCL_DEFINITIONS}
 )
 target_include_directories(${PROJECT_NAME}_shared
 	PUBLIC "${CMAKE_CURRENT_LIST_DIR}"
-	PRIVATE "${PROJECT_SOURCE_DIR}/submodule-deps/sick_scan_xd/include"
+	# PRIVATE "${PROJECT_SOURCE_DIR}/submodule-deps/sick_scan_xd/include"
 	PRIVATE ${PCL_INCLUDE_DIRS}
 )
 target_link_directories(${PROJECT_NAME}_shared
@@ -25,7 +190,8 @@ target_link_directories(${PROJECT_NAME}_shared
 )
 target_link_libraries(${PROJECT_NAME}_shared
 	PRIVATE ${PCL_LIBRARIES}
-	PRIVATE sick_scan_xd_shared_lib
+	PRIVATE SickScanInternal_lib
+	# PRIVATE sick_scan_xd_shared_lib
 	# PRIVATE "${PROJECT_SOURCE_DIR}/lib/${SICK_SCAN_LIB_REL}"
 )
 
