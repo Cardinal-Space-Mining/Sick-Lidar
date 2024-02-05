@@ -133,10 +133,6 @@ set(SICK_SCAN_LIB_SRC
 add_library(SickScanInternal_lib STATIC ${SICK_SCAN_LIB_SRC})
 
 # converted options from above specific to lib target
-if(BUILD_LIB_HIDE_FUNCTIONS AND NOT WIN32)
-	target_compile_options(SickScanInternal_lib PRIVATE -fvisibility=hidden)
-	target_link_options(SickScanInternal_lib PRIVATE -fvisibility=hidden)
-endif()
 target_compile_options(SickScanInternal_lib PRIVATE
 	-D__ROS_VERSION=0
 	-DROSSIMU
@@ -150,9 +146,16 @@ if(WIN32)
 else()
 	target_compile_options(SickScanInternal_lib PRIVATE
 		-O3
+		-fPIC
 		-Wno-format-overflow
 		-fno-var-tracking-assignments)
 	target_link_libraries(SickScanInternal_lib pthread dl)	# std::thread requires pthread on linux, dynamic loading of libraries
+	if(BUILD_LIB_HIDE_FUNCTIONS)
+		target_compile_options(SickScanInternal_lib PRIVATE
+			-fvisibility=hidden)
+		target_link_options(SickScanInternal_lib PRIVATE
+			-fvisibility=hidden)
+	endif()
 endif()
 if(RASPBERRY EQUAL 1)
 	target_compile_options(SickScanInternal_lib
