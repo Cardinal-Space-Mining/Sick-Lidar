@@ -29,7 +29,7 @@ cmake_dependent_option(MULTISTAGE_STEP
 # 	set(MULTISTAGE_STEP 1 CACHE INTERNAL "" FORCE)
 # endif()
 if(NOT PROJECT_CXX_STANDARD)
-	set(PROJECT_CXX_STANDARD 20)
+	set(PROJECT_CXX_STANDARD 17)
 endif()
 
 # automatically deduce build stage

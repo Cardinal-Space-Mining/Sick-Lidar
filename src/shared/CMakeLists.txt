@@ -16,8 +16,8 @@ endif ()
 if (POLICY CMP0048)
 	cmake_policy(SET CMP0048 NEW)
 endif()
-if(NOT ${CMAKE_CXX_STANDARD} OR ${CMAKE_CXX_STANDARD} GREATER 14)
-	set(CMAKE_CXX_STANDARD 14)	# sick_scan_xd fails to build with > C++14
+if(NOT ${CMAKE_CXX_STANDARD} OR ${CMAKE_CXX_STANDARD} GREATER 17)
+	set(CMAKE_CXX_STANDARD 17)	# sick_scan_xd fails to build with > C++14
 endif()
 # if(BUILD_LIB_HIDE_FUNCTIONS AND NOT WIN32)
 # 	add_compile_options(-fvisibility=hidden)
@@ -133,42 +133,54 @@ set(SICK_SCAN_LIB_SRC
 add_library(SickScanInternal_lib STATIC ${SICK_SCAN_LIB_SRC})
 
 # converted options from above specific to lib target
-target_compile_options(SickScanInternal_lib PRIVATE
+target_compile_options(SickScanInternal_lib PUBLIC
+	-DBOOST_NO_AUTO_PTR
 	-D__ROS_VERSION=0
 	-DROSSIMU
 	-DSCANSEGMENT_XD_SUPPORT=1)
 if(WIN32)
-	target_compile_options(SickScanInternal_lib PRIVATE
+	target_compile_options(SickScanInternal_lib PUBLIC
 		-D_WINSOCK_DEPRECATED_NO_WARNINGS
 		-D_CRT_SECURE_NO_WARNINGS
 		-D_WIN32_WINNT=0x0A00)
 	target_link_libraries(SickScanInternal_lib ws2_32)
 else()
-	target_compile_options(SickScanInternal_lib PRIVATE
+	target_compile_options(SickScanInternal_lib PUBLIC
 		-O3
 		-fPIC
 		-Wno-format-overflow
 		-fno-var-tracking-assignments)
 	target_link_libraries(SickScanInternal_lib pthread dl)	# std::thread requires pthread on linux, dynamic loading of libraries
 	if(BUILD_LIB_HIDE_FUNCTIONS)
-		target_compile_options(SickScanInternal_lib PRIVATE
+		target_compile_options(SickScanInternal_lib PUBLIC
 			-fvisibility=hidden)
-		target_link_options(SickScanInternal_lib PRIVATE
+		target_link_options(SickScanInternal_lib PUBLIC
 			-fvisibility=hidden)
 	endif()
 endif()
 if(RASPBERRY EQUAL 1)
 	target_compile_options(SickScanInternal_lib
-		PRIVATE -DRASPBERRY=1)
+		PUBLIC -DRASPBERRY=1)
 else()
 	target_compile_options(SickScanInternal_lib
-		PRIVATE -DRASPBERRY=0)
+		PUBLIC -DRASPBERRY=0)
 endif()
 
 
 
 
 
+
+option(LDRP_ENABLE_DEBUG_LOGGING "Enable debug logging for the shared library" ON)
+option(LDRP_ENABLE_SAFETY_CHECKS "Enable additional safety checks for the shared library" ON)
+if(${LDRP_ENABLE_DEBUG_LOGGING})
+	list(APPEND _PROJECT_DEFINES -DLOG_DEBUG=true)
+else()
+	list(APPEND _PROJECT_DEFINES -DLOG_DEBUG=false)
+endif()
+if(${LDRP_ENABLE_SAFETY_CHECKS})
+	list(APPEND _PROJECT_DEFINES -DLDRP_SAFETY_CHECKS)
+endif()
 
 set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
 set(CMAKE_CXX_STANDARD ${PROJECT_CXX_STANDARD})
@@ -181,6 +193,7 @@ add_library(${PROJECT_NAME}_shared
 )
 target_compile_definitions(${PROJECT_NAME}_shared PRIVATE
 	-D_LIB_SOURCE
+	${_PROJECT_DEFINES}
 	${PCL_DEFINITIONS}
 )
 target_include_directories(${PROJECT_NAME}_shared
