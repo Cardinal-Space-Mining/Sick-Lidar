@@ -82,50 +82,51 @@ file(GLOB SRC_ROSSIMU_FILES
 	${SICK_SCAN_DIR}/roswrap/src/cfgsimu/sick_scan/time_modi.cpp
 	${SICK_SCAN_DIR}/roswrap/src/rossimu/kinetic/src/rossimu.cpp
 	${SICK_SCAN_DIR}/roswrap/src/rossimu/kinetic/src/duration.cpp
-	${SICK_SCAN_DIR}/roswrap/src/rossimu/kinetic/src/rate.cpp
-	${SICK_SCAN_DIR}/roswrap/src/tools/sick_scan/pointcloud_utils.cpp )
+	# ${SICK_SCAN_DIR}/roswrap/src/rossimu/kinetic/src/rate.cpp
+	# ${SICK_SCAN_DIR}/roswrap/src/tools/sick_scan/pointcloud_utils.cpp
+)
 set(SICK_SCAN_LIB_SRC
-	${SICK_SCAN_DIR}/driver/src/abstract_parser.cpp
-	${SICK_SCAN_DIR}/driver/src/binPrintf.cpp
-	${SICK_SCAN_DIR}/driver/src/binScanf.cpp
-	${SICK_SCAN_DIR}/driver/src/dataDumper.cpp
-	${SICK_SCAN_DIR}/driver/src/helper/angle_compensator.cpp
+	# ${SICK_SCAN_DIR}/driver/src/abstract_parser.cpp
+	# ${SICK_SCAN_DIR}/driver/src/binPrintf.cpp
+	# ${SICK_SCAN_DIR}/driver/src/binScanf.cpp
+	# ${SICK_SCAN_DIR}/driver/src/dataDumper.cpp
+	# ${SICK_SCAN_DIR}/driver/src/helper/angle_compensator.cpp
 	${SICK_SCAN_DIR}/driver/src/sick_cloud_transform.cpp
-	${SICK_SCAN_DIR}/driver/src/sick_generic_callback.cpp
-	${SICK_SCAN_DIR}/driver/src/sick_generic_field_mon.cpp
-	${SICK_SCAN_DIR}/driver/src/sick_generic_imu.cpp
-	${SICK_SCAN_DIR}/driver/src/sick_nav_scandata_parser.cpp
-	${SICK_SCAN_DIR}/driver/src/sick_generic_laser.cpp
-	${SICK_SCAN_DIR}/driver/src/sick_generic_monitoring.cpp
-	${SICK_SCAN_DIR}/driver/src/sick_generic_parser.cpp
-	${SICK_SCAN_DIR}/driver/src/sick_generic_radar.cpp
-	${SICK_SCAN_DIR}/driver/src/sick_lmd_scandata_parser.cpp
-	${SICK_SCAN_DIR}/driver/src/sick_scan_common.cpp
-	${SICK_SCAN_DIR}/driver/src/sick_scan_common_nw.cpp
-	${SICK_SCAN_DIR}/driver/src/sick_scan_common_tcp.cpp
-	${SICK_SCAN_DIR}/driver/src/sick_scan_marker.cpp
-	${SICK_SCAN_DIR}/driver/src/sick_scan_messages.cpp
-	${SICK_SCAN_DIR}/driver/src/sick_scan_parse_util.cpp
-	${SICK_SCAN_DIR}/driver/src/sick_scan_services.cpp
-	${SICK_SCAN_DIR}/driver/src/sick_scan_xd_api/api_impl.cpp
-	${SICK_SCAN_DIR}/driver/src/sick_scan_xd_api/sick_scan_api_converter.cpp
+	# ${SICK_SCAN_DIR}/driver/src/sick_generic_callback.cpp
+	# ${SICK_SCAN_DIR}/driver/src/sick_generic_field_mon.cpp
+	# ${SICK_SCAN_DIR}/driver/src/sick_generic_imu.cpp
+	# ${SICK_SCAN_DIR}/driver/src/sick_nav_scandata_parser.cpp
+	# ${SICK_SCAN_DIR}/driver/src/sick_generic_laser.cpp
+	# ${SICK_SCAN_DIR}/driver/src/sick_generic_monitoring.cpp
+	# ${SICK_SCAN_DIR}/driver/src/sick_generic_parser.cpp
+	# ${SICK_SCAN_DIR}/driver/src/sick_generic_radar.cpp
+	# ${SICK_SCAN_DIR}/driver/src/sick_lmd_scandata_parser.cpp
+	# ${SICK_SCAN_DIR}/driver/src/sick_scan_common.cpp
+	# ${SICK_SCAN_DIR}/driver/src/sick_scan_common_nw.cpp
+	# ${SICK_SCAN_DIR}/driver/src/sick_scan_common_tcp.cpp
+	# ${SICK_SCAN_DIR}/driver/src/sick_scan_marker.cpp
+	# ${SICK_SCAN_DIR}/driver/src/sick_scan_messages.cpp
+	# ${SICK_SCAN_DIR}/driver/src/sick_scan_parse_util.cpp
+	# ${SICK_SCAN_DIR}/driver/src/sick_scan_services.cpp
+	# ${SICK_SCAN_DIR}/driver/src/sick_scan_xd_api/api_impl.cpp
+	# ${SICK_SCAN_DIR}/driver/src/sick_scan_xd_api/sick_scan_api_converter.cpp
 	${SICK_SCAN_DIR}/driver/src/softwarePLL.cpp
-	${SICK_SCAN_DIR}/driver/src/tcp/Mutex.cpp
-	${SICK_SCAN_DIR}/driver/src/tcp/SickThread.cpp
-	${SICK_SCAN_DIR}/driver/src/tcp/Time.cpp
-	${SICK_SCAN_DIR}/driver/src/tcp/colaa.cpp
-	${SICK_SCAN_DIR}/driver/src/tcp/colab.cpp
-	${SICK_SCAN_DIR}/driver/src/tcp/errorhandler.cpp
-	${SICK_SCAN_DIR}/driver/src/tcp/tcp.cpp
-	${SICK_SCAN_DIR}/driver/src/tcp/toolbox.cpp
+	# ${SICK_SCAN_DIR}/driver/src/tcp/Mutex.cpp
+	# ${SICK_SCAN_DIR}/driver/src/tcp/SickThread.cpp
+	# ${SICK_SCAN_DIR}/driver/src/tcp/Time.cpp
+	# ${SICK_SCAN_DIR}/driver/src/tcp/colaa.cpp
+	# ${SICK_SCAN_DIR}/driver/src/tcp/colab.cpp
+	# ${SICK_SCAN_DIR}/driver/src/tcp/errorhandler.cpp
+	# ${SICK_SCAN_DIR}/driver/src/tcp/tcp.cpp
+	# ${SICK_SCAN_DIR}/driver/src/tcp/toolbox.cpp
 	${SICK_SCAN_DIR}/driver/src/tcp/wsa_init.cpp
-	${SICK_SCAN_DIR}/driver/src/tinyxml/tinystr.cpp
-	${SICK_SCAN_DIR}/driver/src/tinyxml/tinyxml.cpp
-	${SICK_SCAN_DIR}/driver/src/tinyxml/tinyxmlerror.cpp
-	${SICK_SCAN_DIR}/driver/src/tinyxml/tinyxmlparser.cpp
-	${SICK_SCAN_DIR}/roswrap/src/getopt/getopt.c
-	${SICK_SCAN_DIR}/roswrap/src/launchparser/launchparser.cpp
-	${SICK_SCAN_DIR}/roswrap/src/toojpeg/toojpeg.cpp
+	# ${SICK_SCAN_DIR}/driver/src/tinyxml/tinystr.cpp
+	# ${SICK_SCAN_DIR}/driver/src/tinyxml/tinyxml.cpp
+	# ${SICK_SCAN_DIR}/driver/src/tinyxml/tinyxmlerror.cpp
+	# ${SICK_SCAN_DIR}/driver/src/tinyxml/tinyxmlparser.cpp
+	# ${SICK_SCAN_DIR}/roswrap/src/getopt/getopt.c
+	# ${SICK_SCAN_DIR}/roswrap/src/launchparser/launchparser.cpp
+	# ${SICK_SCAN_DIR}/roswrap/src/toojpeg/toojpeg.cpp
 	${SCANSEGMENT_XD_SOURCES}
 	${SRC_ROSSIMU_FILES}
 	${SRC_WIN_FILES} )
