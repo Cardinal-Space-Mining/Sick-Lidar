@@ -19,10 +19,10 @@ int main(int argc, char** argv) {
 
 	using ldrp::status_t;
 
-	status_t s = ldrp::apiInit();
-	s = ldrp::lidarInit("./sick_multiscan.launch");
+	status_t s{0};
+	s = ldrp::apiInit();
+	s = ldrp::lidarInit();
 	s = ldrp::setMaxFrequency(5);
-	s = ldrp::enablePipeline(true);
 
 // #ifdef WIN32
 	signal(SIGINT, _action);
@@ -43,7 +43,7 @@ int main(int argc, char** argv) {
 	using namespace std::chrono_literals;
 	// std::this_thread::sleep_for(3s);
 	for(;_program_running.load();) {
-		//std::cout << "main thread is still running!?" << std::endl;
+		std::cout << "main thread is still running!?" << std::endl;
 		std::this_thread::sleep_for(1s);
 	}
 
@@ -52,6 +52,7 @@ int main(int argc, char** argv) {
 	 * - manually skipping the deinit lets the main thread and program terminate gracefully (except that the sick api is not destroyed gracefully)
 	 * - what to do???? ha thats hillarious :|
 	*/
+	s = ldrp::lidarShutdown();
 	s = ldrp::apiDestroy();
 	std::cout << "main thread exitting!?" << std::endl;
 	// exit(0);
