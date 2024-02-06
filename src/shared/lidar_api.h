@@ -5,21 +5,26 @@
 #include <ostream>
 
 #ifdef WIN32
-#ifdef _LIB_SOURCE
-#define __API __declspec(dllexport)
+	#ifdef _LIB_SOURCE
+		#define __API __declspec(dllexport)
+	#else
+		#define __API __declspec(dllimport)
+	#endif
+	#define __API_LOCAL
 #else
-#define __API __declspec(dllimport)
+	#if __GNUC__ >= 4
+		#define __API __attribute__ ((visibility ("default")))
+		#define __API_LOCAL __attribute__ ((visibility ("hidden")))
+	#else
+		#define __API
+		#define __API_LOCAL
 #endif
-#else
-#define __API
 #endif
 
 
 // "LiDaR Proccessing container namespace"
 namespace ldrp {
 
-	#define LDRP_SAFETY_CHECKS
-	// using LidarApi = std::shared_ptr<void>;
 	using status_t = int32_t;
 
 	enum : status_t {
@@ -34,26 +39,10 @@ namespace ldrp {
 	};
 
 
-	struct Pose3 {
-		union {
-			struct {
-				float
-					x, y, z, _w,
-					qx, qy, qz, qw;		// change to wxyz ordering if that is more popular externally
-			};
-			struct {
-				float
-					xyz[4],
-					quat[4];
-			};
-			float data[8];	// since the struct will be most likely aligned to 8-bytes anyway
-		};
-	};
-
 	struct PipelineConfig {
 		float
-			// min_scan_theta,
-			// max_scan_theta,
+			min_scan_theta,
+			max_scan_theta,
 			voxel_size_cm,
 			map_resolution_cm,
 			pmf_window_base_cm,
@@ -64,12 +53,6 @@ namespace ldrp {
 		int32_t
 			pmf_max_window_size;
 	};
-	// struct PointBuff {
-
-	// };
-	// struct MapBuff {
-
-	// };
 
 
 
@@ -91,24 +74,11 @@ namespace ldrp {
 	/** Calls lidarInit() or lidarShutdown() depending on the given state. */
 	__API const status_t lidarSetState(const bool enabled);
 
-	// /** Initialize the global and sick api instances -- optional params are passed directly to SickScanApiCreate when called */
-	// __API const status_t apiInit(int ss_argc = 0, char** ss_argv = nullptr);
-	// /** Reset the internal sick api instance. Does not delete buffers or filter params */
-	// __API const status_t apiClose();
-	// /** Same functionality as apiClose() but also deletes the main api buffer. apiInit() must be called afterwards before other api calls */
-	// __API const status_t apiDestroy();
-	// /** Intialize the lidar connection via config file */
-	// __API const status_t lidarInit(const char* config_file);
-	// /** Deregister the currently loaded lidar and stop all filter processes */
-	// __API const status_t lidarClose();
-
 	/** Specify where output messages should be sent */
 	__API const status_t setOutput(std::ostream& out);
 	/** Specify the logging level: 0 = none, 1 = standard, 2 = verbose, 3 = VERBOOOSE! */
 	__API const status_t setLogLevel(const int32_t lvl);
 
-	// /** Enable or disable filtering and accumulation of point data */
-	// __API const status_t enablePipeline(const bool enable);
 	/** Apply an upper limit frequency for how often filtering and accumulation occurs */
 	__API const status_t setMaxFrequency(const size_t f_hz);
 	/** Apply parameters used in the filtering and accumulation pipeline */

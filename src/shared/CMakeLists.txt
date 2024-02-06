@@ -171,6 +171,17 @@ endif()
 
 
 
+option(LDRP_ENABLE_DEBUG_LOGGING "Enable debug logging for the shared library" ON)
+option(LDRP_ENABLE_SAFETY_CHECKS "Enable additional safety checks for the shared library" ON)
+if(${LDRP_ENABLE_DEBUG_LOGGING})
+	list(APPEND _PROJECT_DEFINES -DLOG_DEBUG=true)
+else()
+	list(APPEND _PROJECT_DEFINES -DLOG_DEBUG=false)
+endif()
+if(${LDRP_ENABLE_SAFETY_CHECKS})
+	list(APPEND _PROJECT_DEFINES -DLDRP_SAFETY_CHECKS)
+endif()
+
 set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
 set(CMAKE_CXX_STANDARD ${PROJECT_CXX_STANDARD})
 
@@ -182,6 +193,7 @@ add_library(${PROJECT_NAME}_shared
 )
 target_compile_definitions(${PROJECT_NAME}_shared PRIVATE
 	-D_LIB_SOURCE
+	${_PROJECT_DEFINES}
 	${PCL_DEFINITIONS}
 )
 target_include_directories(${PROJECT_NAME}_shared

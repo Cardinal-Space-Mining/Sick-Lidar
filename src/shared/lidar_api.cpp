@@ -11,7 +11,6 @@
 #include <vector>
 
 #include <pcl/pcl_config.h>
-// #include <sick_scan_xd_api/sick_scan_api.h>
 #include "sick_scansegment_xd/config.h"
 #include "sick_scansegment_xd/udp_receiver.h"
 #include "sick_scansegment_xd/msgpack_converter.h"
@@ -19,15 +18,31 @@
 #include "sick_scansegment_xd/scansegment_parser_output.h"
 #include "sick_scan/sick_cloud_transform.h"
 
-//#define LOG_DEBUG  false
-
 
 namespace std {
 	namespace chrono {
 		using hrc = high_resolution_clock;
+#if !_HAS_CXX20
+		template <class _Clock, class = void>
+		inline constexpr bool _Is_clock_v = false;
+
+		template <class _Clock>
+		inline constexpr bool
+			_Is_clock_v<_Clock, std::void_t<typename _Clock::rep, typename _Clock::period, typename _Clock::duration,
+									typename _Clock::time_point, decltype(_Clock::is_steady), decltype(_Clock::now())>> =
+				true;
+
+		template <class _Clock>
+		struct is_clock : bool_constant<_Is_clock_v<_Clock>> {};
+		template <class _Clock>
+		inline constexpr bool is_clock_v = _Is_clock_v<_Clock>;
+#endif
 	}
 }
 namespace crno = std::chrono;
+
+
+
 
 
 template<typename V, typename C = crno::high_resolution_clock>
@@ -100,11 +115,18 @@ protected:
 };
 
 
+
+
+
 namespace ldrp {
 
 #ifndef LOG_DEBUG
-#define LOG_DEBUG	true
+#define LOG_DEBUG true
 #endif
+#ifndef LDRP_SAFETY_CHECKS
+#define LDRP_SAFETY_CHECKS true
+#endif
+
 #ifndef _LDRP_DISABLE_LOG
 #define LDRP_LOG_GLOBAL(__inst, __condition, __output)		if(__condition) { __inst->logs() << __output; }
 #define LOG_LEVEL_GLOBAL(__inst, __min_lvl)					(__inst->_log_level >= __min_lvl)
@@ -125,49 +147,6 @@ namespace ldrp {
 #define LOG_VERBOSE
 #endif
 
-	// static const status_t cvtStatus(const int32_t sick_ec) {
-	// 	switch(sick_ec) {
-	// 		case SICK_SCAN_API_SUCCESS:
-	// 			return STATUS_SUCCESS;
-	// 		case SICK_SCAN_API_NOT_LOADED:
-	// 		case SICK_SCAN_API_NOT_INITIALIZED:
-	// 		case SICK_SCAN_API_NOT_IMPLEMENTED:
-	// 			return STATUS_PREREQ_UNINITIALIZED | STATUS_EXTERNAL_ERROR;
-	// 		case SICK_SCAN_API_ERROR:
-	// 		case SICK_SCAN_API_TIMEOUT:
-	// 		default:
-	// 			return STATUS_EXTERNAL_ERROR;
-	// 	}
-	// }
-
-
-
-	template<typename PointT>
-	struct ScanSlice {
-		crno::hrc::time_point _tstamp{};
-		std::vector<PointT> _points{};
-		uint32_t
-			_width,
-			_height;
-		bool _dense;
-
-		// template<typename _PointT>
-		// static bool fromSickScanMsg(ScanSlice<_PointT>* buff, const SickScanPointCloudMsg* msg) {
-		// 	if(!buff || !msg) return false;
-		// 	if(sizeof(_PointT) != msg->point_step) return false;
-		// 	buff->_tstamp = crno::hrc::time_point{
-		// 		crno::seconds{ msg->header->timestamp_sec } +
-		// 		crno::nanoseconds{ msg->header->timestamp_nsec }
-		// 	};
-		// 	buff->_points.resize(msg->width * msg->height);
-		// 	memcpy(buff->_points.data(), msg->data->buffer,
-		// 		msg->width * msg->height * msg->point_step);
-		// 	buff->_dense = msg->is_dense;
-		// 	buff->_width = msg->width;
-		// 	buff->_height = msg->height;
-		// }
-	};
-
 
 	/** Interfacing and Filtering Implementation */
 	struct LidarImpl {
@@ -177,9 +156,9 @@ namespace ldrp {
 		}
 		~LidarImpl() {
 			this->_enable_thread.store(false);
-			if(this->_thread->joinable()) this->_thread->join();
-
-			// this->sickDeinit();		// make sure that this is the last call since it tends to stall
+			if(this->_thread->joinable()) {
+				this->_thread->join();
+			}
 
 			LDRP_LOG( LOG_ALWAYS, "LDRP global instance destroyed." << std::endl )
 		}
@@ -197,67 +176,9 @@ namespace ldrp {
 		}
 
 
-		/** SickScanApiCreate() --> generate handle + error handling/logging */
-		// const status_t sickInit(int ss_argc = 0, char** ss_argv = nullptr) {
-		// 	this->sickDeinit();
-		// 	this->_handle = SickScanApiCreate(ss_argc, ss_argv);
-		// 	if(this->_handle) {
-		// 		LDRP_LOG( LOG_STANDARD, "Sick Scan API created successfully: " << this->_handle << std::endl )
-		// 		return STATUS_SUCCESS;
-		// 	}
-		// 	LDRP_LOG( LOG_STANDARD, "Sick Scan API creation failed: " << this->_handle << std::endl )
-		// 	return STATUS_EXTERNAL_ERROR | STATUS_FAIL;
-		// }
-		/** SickScanApi- Close & Release + nullify handle + error handling/logging */
-		// const status_t sickDeinit() {
-		// 	if(this->_handle) {
-		// 		status_t s = STATUS_SUCCESS;
-		// 		s |= this->lidarClose() & ~(STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL);		// mask uninited fail since this the meaning isn't relevant to the outer function
-		// 		s |= cvtStatus( this->_sick_status = SickScanApiClose(this->_handle) );
-		// 		LDRP_LOG( LOG_STANDARD && this->_sick_status,
-		// 			"SickScanApiClose error: " << this->_sick_status << std::endl )
-		// 		s |= cvtStatus( this->_sick_status = SickScanApiRelease(this->_handle) );
-		// 		LDRP_LOG( LOG_STANDARD && this->_sick_status,
-		// 			"SickScanApiRelease error: " << this->_sick_status << std::endl )
-		// 		this->_handle = nullptr;
-		// 		return s;
-		// 	}
-		// 	return STATUS_PREREQ_UNINITIALIZED;
-		// }
-
-		/** Init by launch file, register point cloud callback + error handling/logging */
-		// const status_t lidarInit(const char* config_file) {
-		// 	if(this->_handle) {
-		// 		status_t s = STATUS_SUCCESS;
-		// 		s |= cvtStatus( this->_sick_status = SickScanApiInitByLaunchfile(this->_handle, config_file) );
-		// 		if(!s) {
-		// 			s |= cvtStatus( this->_sick_status = SickScanApiRegisterCartesianPointCloudMsg(this->_handle, &cartesianPointCloudCallbackWrapper) );
-		// 			LDRP_LOG( LOG_STANDARD && this->_sick_status, "SickScanApiRegisterCartesianPointCloudMsg error: " << this->_sick_status << std::endl)
-		// 		} else {
-		// 			LDRP_LOG( LOG_STANDARD, "SickScanApiInitByLaunchfile error: " << this->_sick_status << " with config file: " << config_file << std::endl)
-		// 		}
-		// 		return s;
-		// 	}
-		// 	return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
-		// }
-		/** Deregister point cloud callback + error handling/logging */
-		// const status_t lidarClose() {
-		// 	if(this->_handle) {
-		// 		if( this->_sick_status = SickScanApiDeregisterCartesianPointCloudMsg(this->_handle, &cartesianPointCloudCallbackWrapper) ) {
-		// 			LDRP_LOG( LOG_STANDARD, "SickScanApiDeregisterCartesianPointCloudMsg error: " << this->_sick_status << std::endl )
-		// 			return cvtStatus(this->_sick_status) | STATUS_FAIL;
-		// 		}
-		// 		return STATUS_SUCCESS;
-		// 	}
-		// 	return STATUS_PREREQ_UNINITIALIZED;
-		// }
-
-
-	protected:
-		// SickScanApiHandle _handle{ nullptr };
-		// int32_t _sick_status{ 0 };
-
 	public:
+		inline static std::unique_ptr<LidarImpl> _global{ nullptr };
+
 		std::ostream* _log_output{ &std::cout };
 		int32_t _log_level{ 1 };
 
@@ -289,21 +210,6 @@ namespace ldrp {
 		} _processing;
 
 
-	public:
-		inline static std::unique_ptr<LidarImpl> _global{ nullptr };
-
-// 		static void cartesianPointCloudCallbackWrapper(SickScanApiHandle handle, const SickScanPointCloudMsg* msg) {
-// 			// NOTE: SickScanPointCloudMsg buffers are freed immediately after all callbacks finish --> will need to copy data if we want to keep it!
-// 			// filter by scan segment (only accept full frames or only accept partial segments)
-// #ifdef LDRP_SAFETY_CHECKS
-// 			if(!LidarImpl::_global || handle != LidarImpl::_global->_handle) return;		// add macro for disabling extra safety checks
-// #endif
-// 			LidarImpl::_global->_points_mutex.lock();
-// 			{
-// 				// append points to queue
-// 			}
-// 			LidarImpl::_global->_points_mutex.unlock();
-// 		}
 
 		void lidarWorker() {
 
@@ -375,27 +281,16 @@ namespace ldrp {
 			udp_receiver->Close();
 			delete udp_receiver;
 
-		}
-		// void lidarThreadWrapper() {
-
-		// 	for(;this->_enable_thread.load();) {
-		// 		crno::hrc::time_point n = crno::hrc::now();
-
-		// 		this->lidarWorker();
-
-		// 		std::this_thread::sleep_until(n + this->_config.min_loop_duration.load());
-		// 	}
-		// 	LDRP_LOG( LOG_DEBUG, "lidar processing thread finished and exitting." << std::endl)
-
-		// }
+		}	// lidarWorker
 
 
-	};
+	};	// LidarImpl
 
 
 
 
-	/** Static API */
+
+/** Static API */
 
 	char const* pclVer() {
 		return PCL_VERSION_PRETTY;
@@ -410,29 +305,15 @@ namespace ldrp {
 			return STATUS_SUCCESS;
 		}
 		return STATUS_ALREADY_SATISFIED;
-		// return LidarImpl::_global->sickInit(ss_argc, ss_argv);
 	}
-	// const status_t apiClose() {
-	// 	if(LidarImpl::_global) {
-	// 		return LidarImpl::_global->sickDeinit();
-	// 	}
-	// 	return STATUS_PREREQ_UNINITIALIZED;
-	// }
 	const status_t apiDestroy() {
 		if(LidarImpl::_global) {
-			// const status_t s = LidarImpl::_global->sickDeinit();
-			delete LidarImpl::_global.release();
-			// return s;
+			LidarImpl::_global.reset( nullptr );
 			return STATUS_SUCCESS;
 		}
 		return STATUS_PREREQ_UNINITIALIZED | STATUS_ALREADY_SATISFIED;
 	}
-	// const status_t lidarInit(const char* config_file) {
-	// 	if(LidarImpl::_global) {
-	// 		return LidarImpl::_global->lidarInit(config_file);
-	// 	}
-	// 	return STATUS_PREREQ_UNINITIALIZED;
-	// }
+
 	const status_t lidarInit() {
 		if(LidarImpl::_global) {
 			if(!LidarImpl::_global->_thread || !LidarImpl::_global->_thread->joinable()) {
@@ -446,12 +327,6 @@ namespace ldrp {
 		}
 		return STATUS_PREREQ_UNINITIALIZED;
 	}
-	// const status_t lidarClose() {
-	// 	if(LidarImpl::_global) {
-	// 		return LidarImpl::_global->lidarClose();
-	// 	}
-	// 	return STATUS_PREREQ_UNINITIALIZED;
-	// }
 	const status_t lidarShutdown() {
 		if(LidarImpl::_global) {
 			status_t s = STATUS_ALREADY_SATISFIED;
@@ -485,24 +360,6 @@ namespace ldrp {
 		return STATUS_PREREQ_UNINITIALIZED;
 	}
 
-	// const status_t enablePipeline(const bool enable) {
-	// 	if(LidarImpl::_global) {
-	// 		// check for sick api inited? (not super necessary?)
-	// 		LidarImpl::_global->_enable_thread.store(enable);
-	// 		const bool joinable = LidarImpl::_global->_thread.joinable();
-	// 		if(enable) {
-	// 			if(!joinable) {
-	// 				LidarImpl::_global->_thread = std::thread(&LidarImpl::lidarThreadWrapper, LidarImpl::_global.get());
-	// 				return STATUS_SUCCESS;
-	// 			}
-	// 		} else if(joinable) {
-	// 			LidarImpl::_global->_thread.join();
-	// 			return STATUS_SUCCESS;
-	// 		}
-	// 		return STATUS_ALREADY_SATISFIED;
-	// 	}
-	// 	return STATUS_PREREQ_UNINITIALIZED;
-	// }
 	const status_t setMaxFrequency(const size_t f_hz) {
 		if(LidarImpl::_global) {
 			LidarImpl::_global->_config.min_loop_duration.store( crno::nanoseconds((int64_t)(1e9 / f_hz)) );	// be as precise as realisticly possible
