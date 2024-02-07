@@ -2,11 +2,12 @@
 	"version": 3,
 	"configurePresets": [
 		{
-			"name": "default",
-			"displayName": "Default",
+			"name": "vscode-configure",
+			"displayName": "vscode",
 			"cacheVariables": {
-				"CMAKE_CXX_STANDARD": "20",
-				"CMAKE_CXX_FLAGS_INIT": "-Wall"
+				"PROJECT_CXX_STANDARD": "20",
+				"USE_WPILIB": "ON",
+				"MULTISTAGE_STEP": "1"
 			}
 		}
 	]

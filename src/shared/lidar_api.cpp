@@ -11,6 +11,16 @@
 #include <vector>
 
 #include <pcl/pcl_config.h>
+
+#if USING_WPILIB
+#include <frc/geometry/Pose3d.h>
+#include <networktables/NetworkTableInstance.h>
+#include <networktables/NetworkTable.h>
+#include <networktables/IntegerTopic.h>
+#include <networktables/FloatArrayTopic.h>
+#include <networkTables/DoubleArrayTopic.h>
+#endif
+
 #include "sick_scansegment_xd/config.h"
 #include "sick_scansegment_xd/udp_receiver.h"
 #include "sick_scansegment_xd/msgpack_converter.h"
@@ -152,6 +162,7 @@ namespace ldrp {
 	struct LidarImpl {
 	public:
 		LidarImpl() {
+			nt::NetworkTableInstance::GetDefault().StartServer();
 			LDRP_LOG( LOG_ALWAYS, "LDRP global instance initialized." << std::endl )
 		}
 		~LidarImpl() {
@@ -159,6 +170,7 @@ namespace ldrp {
 			if(this->_thread->joinable()) {
 				this->_thread->join();
 			}
+			nt::NetworkTableInstance::GetDefault().StopServer();
 
 			LDRP_LOG( LOG_ALWAYS, "LDRP global instance destroyed." << std::endl )
 		}

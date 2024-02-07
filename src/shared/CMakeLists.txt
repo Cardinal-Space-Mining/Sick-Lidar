@@ -16,9 +16,10 @@ endif ()
 if (POLICY CMP0048)
 	cmake_policy(SET CMP0048 NEW)
 endif()
-if(NOT ${CMAKE_CXX_STANDARD} OR ${CMAKE_CXX_STANDARD} GREATER 17)
-	set(CMAKE_CXX_STANDARD 17)	# sick_scan_xd fails to build with > C++14
-endif()
+set(CMAKE_CXX_STANDARD ${PROJECT_CXX_STANDARD})
+# if(NOT ${CMAKE_CXX_STANDARD} OR ${CMAKE_CXX_STANDARD} GREATER 17)
+# 	set(CMAKE_CXX_STANDARD 17)	# sick_scan_xd fails to build with > C++14
+# endif()
 # if(BUILD_LIB_HIDE_FUNCTIONS AND NOT WIN32)
 # 	add_compile_options(-fvisibility=hidden)
 # 	add_link_options(-fvisibility=hidden)
@@ -192,11 +193,6 @@ file(GLOB _target_headers "${CMAKE_CURRENT_LIST_DIR}/*.h")
 add_library(${PROJECT_NAME}_shared
 	SHARED ${_shared_sources}
 )
-target_compile_definitions(${PROJECT_NAME}_shared PRIVATE
-	-D_LIB_SOURCE
-	${_PROJECT_DEFINES}
-	${PCL_DEFINITIONS}
-)
 target_include_directories(${PROJECT_NAME}_shared
 	PUBLIC "${CMAKE_CURRENT_LIST_DIR}"
 	# PRIVATE "${PROJECT_SOURCE_DIR}/submodule-deps/sick_scan_xd/include"
@@ -210,6 +206,22 @@ target_link_libraries(${PROJECT_NAME}_shared
 	PRIVATE SickScanInternal_lib
 	# PRIVATE sick_scan_xd_shared_lib
 	# PRIVATE "${PROJECT_SOURCE_DIR}/lib/${SICK_SCAN_LIB_REL}"
+)
+if(${USE_WPILIB})
+	list(APPEND _PROJECT_DEFINES -DUSING_WPILIB=true)
+	target_link_libraries(${PROJECT_NAME}_shared
+		PRIVATE wpiutil
+		PRIVATE wpinet
+		PRIVATE wpimath
+		PRIVATE ntcore
+	)
+else()
+	list(APPEND _PROJECT_DEFINES -DUSING_WPILIB=false)
+endif()
+target_compile_definitions(${PROJECT_NAME}_shared PRIVATE
+	-D_LIB_SOURCE
+	${_PROJECT_DEFINES}
+	${PCL_DEFINITIONS}
 )
 
 set_target_properties(${PROJECT_NAME}_shared PROPERTIES PUBLIC_HEADER "lidar_api.h")

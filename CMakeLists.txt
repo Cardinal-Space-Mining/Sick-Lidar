@@ -19,17 +19,17 @@ set(CMAKE_INSTALL_PREFIX "${PROJECT_SOURCE_DIR}/install" CACHE STRING "" FORCE)
 
 # options
 option(USE_WPILIB "Enable the compiling and internal usage of Wpilib (results in a multistage build process)" OFF)
-cmake_dependent_option(MULTISTAGE_STEP
-	"Which step (0 or 1) of the multistage build should be configured. Default of -1 for autodetect (unused when wpilib is not included)"
-	-1 USE_WPILIB 1
-)
-# if(${USE_WPILIB})		# alternative solution?
-# 	option(MULTISTAGE_STEP "Which step (0 or 1) of the multistage build should be configured. Default of -1 for autodetect (unused when wpilib is not included)" -1)
-# else()
-# 	set(MULTISTAGE_STEP 1 CACHE INTERNAL "" FORCE)
-# endif()
+# cmake_dependent_option(MULTISTAGE_STEP
+# 	"Which step (0 or 1) of the multistage build should be configured. Default of -1 for autodetect (unused when wpilib is not included)"
+# 	-1 USE_WPILIB 1
+# )
+if(${USE_WPILIB})		# alternative solution?
+	option(MULTISTAGE_STEP "Which step (0 or 1) of the multistage build should be configured. Default of -1 for autodetect (unused when wpilib is not included)" -1)
+else()
+	set(MULTISTAGE_STEP 1 CACHE INTERNAL "" FORCE)
+endif()
 if(NOT PROJECT_CXX_STANDARD)
-	set(PROJECT_CXX_STANDARD 17)
+	set(PROJECT_CXX_STANDARD 20)
 endif()
 
 # automatically deduce build stage
@@ -49,7 +49,7 @@ if(${MULTISTAGE_STEP} EQUAL 0)
 	message(STATUS "Build stage 0 (prereq) running!...")
 
 # protobuf
-	# set(CMAKE_CXX_STANDARD 20)
+	set(CMAKE_CXX_STANDARD 20)
 	set(protobuf_BUILD_EXAMPLES OFF CACHE BOOl "" FORCE)
 	set(protobuf_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 	set(protobuf_BUILD_SHARED_LIBS ON CACHE BOOL "" FORCE)
@@ -69,7 +69,7 @@ if(${USE_WPILIB})
 	endif()
 
 	set(__BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
-	set(BUILD_SHARED_LIBS ON)
+	set(BUILD_SHARED_LIBS OFF)
 	set(WITH_JAVA OFF CACHE BOOL "" FORCE)
 	set(WITH_CSCORE OFF CACHE BOOL "" FORCE)
 	set(WITH_WPILIB OFF CACHE BOOL "" FORCE)
@@ -106,13 +106,13 @@ endif()
 		PRIVATE ${PROJECT_NAME}_shared
 	)
 
-	file(GLOB _lidar_configs "${CMAKE_CURRENT_LIST_DIR}/src/*.launch")
+	# file(GLOB _lidar_configs "${CMAKE_CURRENT_LIST_DIR}/src/*.launch")
 	install(TARGETS ${PROJECT_NAME}_test
 		DESTINATION ${CMAKE_INSTALL_BINDIR}
 	)
-	install(FILES ${_lidar_configs}
-		DESTINATION ${CMAKE_INSTALL_BINDIR}
-	)
+	# install(FILES ${_lidar_configs}
+	# 	DESTINATION ${CMAKE_INSTALL_BINDIR}
+	# )
 
 
 else()
