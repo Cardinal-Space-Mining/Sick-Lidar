@@ -3,6 +3,10 @@ find_package(PCL REQUIRED)
 # NOTE: add logic + defines for disabling wpilib, disabling debug prints, etc.
 
 
+if(WIN32)
+	add_compile_options(/Zc:__cplusplus)
+endif()
+
 #sick scan files
 set(SICK_SCAN_DIR "${PROJECT_SOURCE_DIR}/submodule-deps/sick_scan_xd")
 

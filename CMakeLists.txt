@@ -24,7 +24,10 @@ option(USE_WPILIB "Enable the compiling and internal usage of Wpilib (results in
 # 	-1 USE_WPILIB 1
 # )
 if(${USE_WPILIB})		# alternative solution?
-	option(MULTISTAGE_STEP "Which step (0 or 1) of the multistage build should be configured. Default of -1 for autodetect (unused when wpilib is not included)" -1)
+	# option(MULTISTAGE_STEP "Which step (0 or 1) of the multistage build should be configured. Default of -1 for autodetect (unused when wpilib is not included)" -1)
+	if(NOT MULTISTAGE_STEP)
+		set(MULTISTAGE_STEP -1)
+	endif()
 else()
 	set(MULTISTAGE_STEP 1 CACHE INTERNAL "" FORCE)
 endif()
