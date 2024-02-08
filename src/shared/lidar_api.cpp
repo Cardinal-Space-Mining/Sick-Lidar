@@ -1,7 +1,9 @@
 #include "lidar_api.h"
 
 #include <type_traits>
+#include <algorithm>
 #include <iostream>
+#include <cstdio>
 #include <memory>
 #include <chrono>
 #include <thread>
@@ -13,7 +15,7 @@
 #include <pcl/pcl_config.h>
 
 #ifndef USING_WPILIB
-#define USING_WPILIB false
+  #define USING_WPILIB false
 #endif
 
 #if USING_WPILIB
@@ -27,11 +29,12 @@
 #include <networktables/DoubleArrayTopic.h>
 #include <DataLogManager.h>
 #endif
+#include <fmt/format.h>		// fmt is header only(?) so we should be able to pull in fmt as long as the wpilib submodule is present
 
 #include "sick_scansegment_xd/config.h"
 #include "sick_scansegment_xd/udp_receiver.h"
-#include "sick_scansegment_xd/msgpack_converter.h"
-#include "sick_scansegment_xd/msgpack_exporter.h"
+#include "sick_scansegment_xd/compact_parser.h"
+#include "sick_scansegment_xd/msgpack_parser.h"
 #include "sick_scansegment_xd/scansegment_parser_output.h"
 #include "sick_scan/sick_cloud_transform.h"
 
@@ -159,116 +162,111 @@ static frc::Pose3d lerpPose3d(const frc::Pose3d& a, const frc::Pose3d& b, double
 namespace ldrp {
 
 #ifndef LOG_DEBUG
-#define LOG_DEBUG true
+  #define LOG_DEBUG true
 #endif
 #ifndef LDRP_SAFETY_CHECKS
-#define LDRP_SAFETY_CHECKS true
+  #define LDRP_SAFETY_CHECKS true
 #endif
 
 #ifndef _LDRP_DISABLE_LOG
-#define LDRP_LOG_GLOBAL(__inst, __condition, __output)		if(__condition) { __inst->logs() << __output; }
-#define LOG_LEVEL_GLOBAL(__inst, __min_lvl)					(__inst->_log_level >= __min_lvl)
-#define LDRP_LOG(__condition, __output)		LDRP_LOG_GLOBAL(this, __condition, __output)
-#define LOG_LEVEL(__min_lvl)				LOG_LEVEL_GLOBAL(this, __min_lvl)
-#define LOG_ALWAYS				true
-#define LOG_STANDARD			LOG_LEVEL(1)
-#define LOG_VERBOSE				LOG_LEVEL(2)
+  #if USING_WPILIB
+    #define LDRP_LOG(__condition, ...)		if(__condition) { wpi::DataLogManager::Log( fmt::format(__VA_ARGS__) ); }
+  #else
+    #define LDRP_LOG(__condition, ...)		if(__condition) { std::printf("%s\n", fmt::format(__VA_ARGS__) ); }		// DLM automatically appends newlines automatically
+  #endif
+  #define LOG_LEVEL_GLOBAL(__inst, __min_lvl)	(__inst->_state.log_level >= __min_lvl)
+  #define LOG_LEVEL(__min_lvl)					LOG_LEVEL_GLOBAL(this, __min_lvl)
+  #define LOG_ALWAYS			true
+  #define LOG_STANDARD			LOG_LEVEL(1)
+  #define LOG_VERBOSE			LOG_LEVEL(2)
 #else
-#define LDRP_LOG_GLOBAL(...)
-#define LDRP_LOG_S_GLOBAL(...)
-#define LOG_LEVEL_GLOBAL(...)
-#define LDRP_LOG(...)
-#define LDRP_LOG_S(...)
-#define LOG_LEVEL(...)
-#define LOG_ALWAYS
-#define LOG_STANDARD
-#define LOG_VERBOSE
+  #define LDRP_LOG_GLOBAL(...)
+  #define LDRP_LOG_S_GLOBAL(...)
+  #define LOG_LEVEL_GLOBAL(...)
+  #define LDRP_LOG(...)
+  #define LDRP_LOG_S(...)
+  #define LOG_LEVEL(...)
+  #define LOG_ALWAYS
+  #define LOG_STANDARD
+  #define LOG_VERBOSE
 #endif
 
 
 	/** Interfacing and Filtering Implementation (singleton usage) */
 	struct LidarImpl {
 	public:
-		LidarImpl() {
+		LidarImpl(const char* dlm_dir = "", const char* dlm_fname = "", double dlm_period = 0.25) {
+			wpi::DataLogManager::Start(dlm_dir, dlm_fname, dlm_period);
 			this->initNT();
 
-			LDRP_LOG( LOG_ALWAYS, "LDRP global instance initialized." << std::endl )
+			LDRP_LOG( LOG_ALWAYS, "LDRP global instance initialized." )
 		}
 		~LidarImpl() {
-			this->_enable_threads.store(false);
+			this->_state.enable_threads.store(false);
 			if(this->_lidar_thread->joinable()) {
 				this->_lidar_thread->join();
 			}
 			this->shutdownNT();
 
-			LDRP_LOG( LOG_ALWAYS, "LDRP global instance destroyed." << std::endl )
+			LDRP_LOG( LOG_ALWAYS, "LDRP global instance destroyed." )
+			wpi::DataLogManager::Stop();
 		}
 
 		LidarImpl(const LidarImpl&) = delete;
 		LidarImpl(LidarImpl&&) = delete;
 
 
-		inline std::ostream& logs() {
-#ifdef LDRP_SAFETY_CHECKS
-			return ((this->_log_output == nullptr) ? std::cout : *this->_log_output);
-#else
-			return (*this->_log_output);
-#endif
-		}
-
-
 		void initNT() {
-			nt::NetworkTableInstance inst = nt::NetworkTableInstance::GetDefault();
+			this->_nt.instance = nt::NetworkTableInstance::GetDefault();
 
-			inst.StartServer();
-			this->_nt.base = inst.GetTable("Perception");
+			this->_nt.instance.StartServer();	// config or auto-detect for server/client
+			this->_nt.base = this->_nt.instance.GetTable("Perception");
+
 			this->_nt.frame_accum_time = this->_nt.base->GetDoubleTopic("frame time").GetEntry(0.0);
 		}
 		void shutdownNT() {
-			nt::NetworkTableInstance::GetDefault().StopServer();
+			this->_nt.instance.Flush();
+			this->_nt.instance.StopServer();
 		}
 
 
 	public:
 		inline static std::unique_ptr<LidarImpl> _global{ nullptr };
 
-		std::ostream* _log_output{ &std::cout };
-		int32_t _log_level{ 1 };
 
-		/** PARAMS, STATES
-		 * - log level
-		 * - loop frequency (bounds)
-		 * - use full OR partial scan data
-		 * - thread enabled
-		 * - filtering source event -- on pose update, clocked internal, external, on map access (bad idea)
-		 * - accumulator and map resolution -- need to deal with updates while running
-		 * - filter params (see header)
-		*/
+		static constexpr size_t SEGMENTS_PER_FRAME = 12;
+		struct {	// configured constants/parameters
+			const std::string lidar_hostname{ "10.11.11.3" };
+			const int lidar_udp_port{ 2115 };
+			const bool use_msgpack{ true };
 
-		struct {
-			std::atomic<crno::hrc::duration> min_loop_duration{ crno::milliseconds(50) };
-			std::atomic<bool> use_full_scans{ false };
-
-			PipelineConfig pipeline_config{};
+			const uint64_t enabled_segments{ 0b111111111111 };	// 12 sections --> first 12 bits enabled (enable all section)
+			const uint32_t buffered_scans{ 1 };
+			const bool enable_pcd_logging{ true };
 		} _config;
 
-		bool _dlm_started{ false };		// DataLogManager
+		struct {	// states to be connunicated across threads
+			int32_t log_level{ 1 };
+
+			std::atomic<bool> enable_threads{false};
+		} _state;
+
+		struct {	// networktables
+			nt::NetworkTableInstance instance;
+			std::shared_ptr<nt::NetworkTable> base;
+
+			nt::DoubleEntry frame_accum_time;
+		} _nt;
 
 		std::unique_ptr<std::thread>
 			_lidar_thread,
 			_filter_thread;
-		std::atomic<bool> _enable_threads{false};
-		// std::deque<ScanSlice<pcl::PointXYZ> > _points_queue;
 		std::mutex
-			// _points_mutex{},
 			_pose_mutex{};
-		struct {
+
+		struct {	// filtering static buffers
 			
 		} _processing;
-		struct {
-			std::shared_ptr<nt::NetworkTable> base;
-			nt::DoubleEntry frame_accum_time;
-		} _nt;
 
 
 		void filterWorker() {
@@ -279,70 +277,82 @@ namespace ldrp {
 			// (the next 30 lines or so are converted from scansegment_threads.cpp: sick_scansegment_xd::MsgPackThreads::runThreadCb())
 			// init udp receiver
 			sick_scansegment_xd::UdpReceiver* udp_receiver = nullptr;
-			for(;!udp_receiver && _enable_threads.load();) {
+			for(;!udp_receiver && this->_state.enable_threads.load();) {
 				udp_receiver = new sick_scansegment_xd::UdpReceiver{};
-				if(udp_receiver->Init(	// use actual configuration parameter!
-					"10.11.11.3",	// udp receiver
-					2115	// udp port
-					// 20,	// udp fifo length
-					// false,	// verbose
-					// false,	// file export
-					// 1,	// scandata format (1 for msgpack)
-					// 0,	// fifo for payload data (for sharing a fifo)
+				if(udp_receiver->Init(
+					this->_config.lidar_hostname,	// udp receiver
+					this->_config.lidar_udp_port,	// udp port
+					this->_config.buffered_scans * SEGMENTS_PER_FRAME,	// udp fifo length -- really we should only need 1 or 2?
+					LOG_VERBOSE,						// verbose logging when our log level is verbose
+					false,								// should export to file?
+					this->_config.use_msgpack ? SCANDATA_MSGPACK : SCANDATA_COMPACT,	// scandata format (1 for msgpack)
+					nullptr	// fifo for payload data (for sharing a fifo)
 				)) {
-					LDRP_LOG( LOG_STANDARD, "LDRP Worker: UdpReceiver successfully connected to host " << "10.11.11.3" << " on port " << 2115 << "!" << std::endl )
+					LDRP_LOG( LOG_STANDARD, "LDRP Worker [Init]: UdpReceiver successfully connected to host {} on port {}!", this->_config.lidar_hostname, this->_config.lidar_udp_port )
 				} else {
-					LDRP_LOG( LOG_STANDARD, "LDRP Worker: UdpReceiver failed to connect to host " << "10.11.11.3" << " on port " << 2115 << ". Retrying in 1 second..." << std::endl )
+					LDRP_LOG( LOG_STANDARD, "LDRP Worker [Init]: UdpReceiver failed to connect to host {} on port {}. Retrying after 3 seconds...", this->_config.lidar_hostname, this->_config.lidar_udp_port )
 					delete udp_receiver;
 					udp_receiver = nullptr;
-					std::this_thread::sleep_for(crno::seconds{1});	// keep trying until successful
+					std::this_thread::sleep_for(crno::seconds{3});	// keep trying until successful
 				}
 			}
-			// init msgpack converter
-			sick_scansegment_xd::MsgPackConverter msgpack_converter{
-				sick_scansegment_xd::ScanSegmentParserConfig{},	// config (useless)
-				sick_scan_xd::SickCloudTransform{},				// cloud transform (probably not use since the internal calculations are not optimized)
-				udp_receiver->Fifo(),	// udp fifo
-				1,	// scandata format (1=msgpack)
-				20,	// fifo length (PARAM!)
-				false	// verbose output
-			};
-			// launch runners
-			if(msgpack_converter.Start() && udp_receiver->Start()) {
-				LDRP_LOG( LOG_STANDARD, "LDRP Worker: UdpReceiver and MsgPackConverter threads successfully launched!" << std::endl )
-			} else {
-				LDRP_LOG( LOG_STANDARD, "LDRP Worker: UdpReceiver and/or MsgPackConverter threads failed to launch." << std::endl )
-			}
-			// SOPAS services, msgpack validator (not necessary)
+			// launch udp receiver
+			if(udp_receiver->Start()) {
+				LDRP_LOG( LOG_STANDARD, "LDRP Worker [Init]: UdpReceiver thread successfully launched!" )
 
-			sick_scansegment_xd::ScanSegmentParserOutput scan_segment{};
-			fifo_timestamp scan_timestamp{};
-			size_t scan_counter{0};
-			for(;_enable_threads.load();) {
-				crno::hrc::time_point n = crno::hrc::now();
+				// main loop
+				static sick_scan_xd::SickCloudTransform no_transform{};
+				static sick_scansegment_xd::MsgPackValidatorData default_validator_data_collector{};
+				static sick_scansegment_xd::MsgPackValidator default_validator{};
+				static sick_scansegment_xd::ScanSegmentParserConfig default_parser_config{};
 
-				for(int i = 0; i < 12; i++) {
-					if(msgpack_converter.Fifo()->Pop(scan_segment, scan_timestamp, scan_counter)) {
-						LDRP_LOG( LOG_DEBUG, "Fifo loop: popped scan segment with id " << scan_segment.segmentIndex << std::endl )
+				sick_scansegment_xd::PayloadFifo* udp_fifo = udp_receiver->Fifo();
+				std::vector<uint8_t> payload_bytes{};
+				sick_scansegment_xd::ScanSegmentParserOutput parsed_segment{};
+				fifo_timestamp scan_timestamp{};
+				size_t scan_counter{0};
+				for(;this->_state.enable_threads.load();) {
+					crno::hrc::time_point n = crno::hrc::now();
+
+					for(int i = 0; this->_state.enable_threads && i < this->_config.buffered_scans * SEGMENTS_PER_FRAME; i++) {
+						if(udp_fifo->Pop(payload_bytes, scan_timestamp, scan_counter)) {
+
+							if(this->_config.use_msgpack ?
+								sick_scansegment_xd::MsgPackParser::Parse(
+									payload_bytes, scan_timestamp, no_transform, parsed_segment,
+									default_validator_data_collector, default_validator,
+									false, false, true, LOG_VERBOSE)
+								:
+								sick_scansegment_xd::CompactDataParser::Parse(default_parser_config,
+									payload_bytes, scan_timestamp, no_transform, parsed_segment,
+									true, LOG_VERBOSE)
+							) {	// if successful parse
+								LDRP_LOG( LOG_DEBUG, "LDRP Worker [Parse Loop]: Successfully parsed scan segment idx {}!", parsed_segment.segmentIndex )
+							} else {
+								LDRP_LOG( LOG_DEBUG, "LDRP Worker [Parse Loop]: Failed to parse bytes from UdpReceiver." )
+							}
+
+						}
 					}
+
+					this->_nt.frame_accum_time.Set( crno::duration<double>{crno::hrc::now() - n}.count() );
+
+					// export from fifo!
+					//LDRP_LOG( LOG_DEBUG, "lidar processing internal worker called!" << std::endl)
+					// 1. update accumulated point globule
+					// 2. run filtering on points
+					// 3. update accumulator
+					// 4. [when configured] update map
+
+					// std::this_thread::sleep_until(n + this->_config.min_loop_duration.load());
 				}
 
-				this->_nt.frame_accum_time.Set( crno::duration<double>{crno::hrc::now() - n}.count() );
-
-				// export from fifo!
-				//LDRP_LOG( LOG_DEBUG, "lidar processing internal worker called!" << std::endl)
-				// 1. update accumulated point globule
-				// 2. run filtering on points
-				// 3. update accumulator
-				// 4. [when configured] update map
-
-				// std::this_thread::sleep_until(n + this->_config.min_loop_duration.load());
+			} else {
+				LDRP_LOG( LOG_STANDARD, "LDRP Worker [Init]: UdpReceiver thread failed to start. Exitting..." )
 			}
 
-			// close runners and deallocate
-			msgpack_converter.Fifo()->Shutdown();
+			// close and deallocate
 			udp_receiver->Fifo()->Shutdown();
-			msgpack_converter.Close();
 			udp_receiver->Close();
 			delete udp_receiver;
 
@@ -363,14 +373,11 @@ namespace ldrp {
 	const bool hasWpilib() {
 		return USING_WPILIB;
 	}
-	const PipelineConfig& getDefaultPipelineConfig() {
-		return PipelineConfig{};
-	}
 
-	const status_t apiInit() {
+	const status_t apiInit(const char* dlm_dir, const char* dlm_fname, double dlm_period, const int32_t log_lvl) {
 		if(!LidarImpl::_global) {
-			LidarImpl::_global = std::make_unique<LidarImpl>();
-			return STATUS_SUCCESS;
+			LidarImpl::_global = std::make_unique<LidarImpl>(dlm_dir, dlm_fname, dlm_period);
+			return setLogLevel(log_lvl);
 		}
 		return STATUS_ALREADY_SATISFIED;
 	}
@@ -385,7 +392,7 @@ namespace ldrp {
 	const status_t lidarInit() {
 		if(LidarImpl::_global) {
 			if(!LidarImpl::_global->_lidar_thread || !LidarImpl::_global->_lidar_thread->joinable()) {
-				LidarImpl::_global->_enable_threads.store(true);
+				LidarImpl::_global->_state.enable_threads.store(true);
 				LidarImpl::_global->_lidar_thread.reset(
 					new std::thread{ &LidarImpl::lidarWorker, LidarImpl::_global.get() }
 				);
@@ -398,7 +405,7 @@ namespace ldrp {
 	const status_t lidarShutdown() {
 		if(LidarImpl::_global) {
 			status_t s = STATUS_ALREADY_SATISFIED;
-			LidarImpl::_global->_enable_threads.store(false);
+			LidarImpl::_global->_state.enable_threads.store(false);
 			if(LidarImpl::_global->_lidar_thread && LidarImpl::_global->_lidar_thread->joinable()) {
 				LidarImpl::_global->_lidar_thread->join();
 				s = STATUS_SUCCESS;
@@ -412,57 +419,35 @@ namespace ldrp {
 		return enabled ? lidarInit() : lidarShutdown();
 	}
 
-	const status_t setOutput(std::ostream& out) {
-		if(LidarImpl::_global) {
-			LidarImpl::_global->_log_output = &out;
-			return STATUS_SUCCESS;
-		}
-		return STATUS_PREREQ_UNINITIALIZED;
-	}
+	// const status_t setOutput(std::ostream& out) {
+	// 	if(LidarImpl::_global) {
+	// 		LidarImpl::_global->_log_output = &out;
+	// 		return STATUS_SUCCESS;
+	// 	}
+	// 	return STATUS_PREREQ_UNINITIALIZED;
+	// }
 	const status_t setLogLevel(const int32_t lvl) {
 		if(lvl < 0 || lvl > 3) return STATUS_BAD_PARAM;
 		if(LidarImpl::_global) {
-			LidarImpl::_global->_log_level = lvl;
+			LidarImpl::_global->_state.log_level = lvl;
 			return STATUS_SUCCESS;
 		}
 		return STATUS_PREREQ_UNINITIALIZED;
-	}
-	const status_t startLogManager(const char* dir, const char* fname, double period) {
-		if(LidarImpl::_global) {
-			if(LidarImpl::_global->_dlm_started)
-				return STATUS_ALREADY_SATISFIED;
-			wpi::DataLogManager::Start(dir, fname, period);
-			wpi::DataLogManager::Log("Test Log!? :)");
-			LidarImpl::_global->_dlm_started = true;
-			return STATUS_SUCCESS;
-		}
-		return STATUS_PREREQ_UNINITIALIZED;
-	}
-	const status_t stopLogManager() {
-		if(LidarImpl::_global) {
-			if(!LidarImpl::_global->_dlm_started)
-				return STATUS_ALREADY_SATISFIED;
-			wpi::DataLogManager::Log("Stopping log...");
-			wpi::DataLogManager::Stop();
-			LidarImpl::_global->_dlm_started = false;
-			return STATUS_SUCCESS;
-		}
-		return STATUS_PREREQ_UNINITIALIZED | STATUS_ALREADY_SATISFIED;
 	}
 
-	const status_t setMaxFrequency(const size_t f_hz) {
-		if(LidarImpl::_global) {
-			LidarImpl::_global->_config.min_loop_duration.store( crno::nanoseconds((int64_t)(1e9 / f_hz)) );	// be as precise as realisticly possible
-			return STATUS_SUCCESS;
-		}
-		return STATUS_PREREQ_UNINITIALIZED;
-	}
-	const status_t applyPipelineConfig(const PipelineConfig& params) {
-		if(LidarImpl::_global) {
-			// TODO
-		}
-		return STATUS_PREREQ_UNINITIALIZED;
-	}
+	// const status_t setMaxFrequency(const size_t f_hz) {
+	// 	if(LidarImpl::_global) {
+	// 		LidarImpl::_global->_config.min_loop_duration.store( crno::nanoseconds((int64_t)(1e9 / f_hz)) );	// be as precise as realisticly possible
+	// 		return STATUS_SUCCESS;
+	// 	}
+	// 	return STATUS_PREREQ_UNINITIALIZED;
+	// }
+	// const status_t applyPipelineConfig(const PipelineConfig& params) {
+	// 	if(LidarImpl::_global) {
+	// 		// TODO
+	// 	}
+	// 	return STATUS_PREREQ_UNINITIALIZED;
+	// }
 
 	const status_t updateWorldPose(const float* xyz, const float* qxyz, const float qw) {
 		if(LidarImpl::_global) {

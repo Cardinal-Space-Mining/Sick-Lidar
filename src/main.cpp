@@ -11,7 +11,6 @@ static std::atomic<bool> _program_running = true;
 static void _action(int sig) {
 	std::cout << "Caught signal. Stopping program..." << std::endl;
 	_program_running = false;
-	ldrp::stopLogManager();
 	ldrp::lidarShutdown();
 	ldrp::apiDestroy();
 }
@@ -24,10 +23,8 @@ int main(int argc, char** argv) {
 	using ldrp::status_t;
 
 	status_t s{0};
-	s = ldrp::apiInit();
+	s = ldrp::apiInit("", "lidar_log.wpilog");
 	s = ldrp::lidarInit();
-	s = ldrp::setMaxFrequency(5);
-	s = ldrp::startLogManager("", "temp_log.wpilog");
 
 // #ifdef WIN32
 	signal(SIGINT, _action);

@@ -2,7 +2,6 @@
 
 #include <cstdint>
 #include <memory>
-#include <ostream>
 
 #ifdef WIN32
 	#ifdef _LIB_SOURCE
@@ -39,20 +38,20 @@ namespace ldrp {
 	};
 
 
-	struct PipelineConfig {
-		float
-			min_scan_theta,
-			max_scan_theta,
-			voxel_size_cm,
-			map_resolution_cm,
-			pmf_window_base_cm,
-			pmf_cell_size_cm,
-			pmf_init_distance_cm,
-			pmf_max_distance_cm,
-			pmf_slope;
-		int32_t
-			pmf_max_window_size;
-	};
+	// struct PipelineConfig {
+	// 	float
+	// 		min_scan_theta,
+	// 		max_scan_theta,
+	// 		voxel_size_cm,
+	// 		map_resolution_cm,
+	// 		pmf_window_base_cm,
+	// 		pmf_cell_size_cm,
+	// 		pmf_init_distance_cm,
+	// 		pmf_max_distance_cm,
+	// 		pmf_slope;
+	// 	int32_t
+	// 		pmf_max_window_size;
+	// };
 
 
 
@@ -62,11 +61,16 @@ namespace ldrp {
 	__API const char* pclVer();
 	/** Get whether wpilib and supported functionality was compiled in */
 	__API const bool hasWpilib();
-	/** Get the default pipeline configuration */
-	__API const PipelineConfig& getDefaultPipelineConfig();
 
-	/** Initialize the global instance resources. */
-	__API const status_t apiInit();
+	/** Initialize the global instance resources.
+	 * @param dlm_dir - the log directory for the internal [wpi::]DataLogManager
+	 * @param dlm_fname - the name of the log file exported by the internal [wpi::]DataLogManager
+	 * @param dlm_period - the time between file writes for the internal [wpi::DataLogManager]
+	 * @param log_lvl - the maximum log level that will be output: 0 = none, 1 = standard, 2 = verbose, 3 = VERBOOOSE! */
+	__API const status_t apiInit(
+		const char* dlm_dir = "", const char* dlm_fname = "", double dlm_period = 0.25,
+		const int32_t log_lvl = 1);
+
 	/** Deletes the global api instance. Does not need to be called unless a hard reset is necessary. */
 	__API const status_t apiDestroy();
 	/** Spools up lidar processing resources and threads. */
@@ -76,19 +80,8 @@ namespace ldrp {
 	/** Calls lidarInit() or lidarShutdown() depending on the given state. */
 	__API const status_t lidarSetState(const bool enabled);
 
-	/** Specify where output messages should be sent */
-	__API const status_t setOutput(std::ostream& out);
 	/** Specify the logging level: 0 = none, 1 = standard, 2 = verbose, 3 = VERBOOOSE! */
 	__API const status_t setLogLevel(const int32_t lvl);
-	/** Start internal wpi::DataLogManager which will save all networktables posted values to a log file */
-	__API const status_t startLogManager(const char* dir = "", const char* fname = "", double period = 0.25);
-	/** Stop the internal wpi::DataLogManager */
-	__API const status_t stopLogManager();
-
-	/** Apply an upper limit frequency for how often filtering and accumulation occurs */
-	__API const status_t setMaxFrequency(const size_t f_hz);
-	/** Apply parameters used in the filtering and accumulation pipeline */
-	__API const status_t applyPipelineConfig(const PipelineConfig& params);
 
 	/** Apply a new world pose for the lidar -- used directly to transform points to world space.
 	 * The q** params represent quaternion components */

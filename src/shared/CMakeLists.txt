@@ -195,8 +195,10 @@ set(CMAKE_CXX_STANDARD ${PROJECT_CXX_STANDARD})
 file(GLOB _shared_sources "${CMAKE_CURRENT_LIST_DIR}/*.cpp")
 file(GLOB _target_headers "${CMAKE_CURRENT_LIST_DIR}/*.h")
 if(${USE_WPILIB})	# compile DataLogManager directly into our library
-list(APPEND _shared_sources "${WPILIB_DIR}/ntcoreffi/src/main/native/cpp/DataLogManager.cpp")
-list(APPEND _include_dirs "${WPILIB_DIR}/ntcoreffi/src/main/native/include")
+	list(APPEND _shared_sources "${WPILIB_DIR}/ntcoreffi/src/main/native/cpp/DataLogManager.cpp")
+	list(APPEND _include_dirs "${WPILIB_DIR}/ntcoreffi/src/main/native/include")
+else()
+	list(APPEND _include_dirs "${WPILIB_DIR}/wpiutil/src/main/native/thirdparty/fmtlib/include")
 endif()
 # set(SHARED_TARGET   "${PROJECT_NAME}_Shared")
 add_library(${PROJECT_NAME}_shared
