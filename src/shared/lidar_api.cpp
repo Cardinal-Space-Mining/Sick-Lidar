@@ -18,7 +18,7 @@
 #include <networktables/NetworkTable.h>
 #include <networktables/IntegerTopic.h>
 #include <networktables/FloatArrayTopic.h>
-#include <networkTables/DoubleArrayTopic.h>
+#include <networktables/DoubleArrayTopic.h>
 #endif
 
 #include "sick_scansegment_xd/config.h"
