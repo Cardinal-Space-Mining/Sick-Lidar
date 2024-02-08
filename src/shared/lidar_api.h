@@ -59,7 +59,9 @@ namespace ldrp {
 /** API */
 
 	/** Get the pcl version string of the currently linked library */
-	__API char const* pclVer();
+	__API const char* pclVer();
+	/** Get whether wpilib and supported functionality was compiled in */
+	__API const bool hasWpilib();
 	/** Get the default pipeline configuration */
 	__API const PipelineConfig& getDefaultPipelineConfig();
 
@@ -78,6 +80,10 @@ namespace ldrp {
 	__API const status_t setOutput(std::ostream& out);
 	/** Specify the logging level: 0 = none, 1 = standard, 2 = verbose, 3 = VERBOOOSE! */
 	__API const status_t setLogLevel(const int32_t lvl);
+	/** Start internal wpi::DataLogManager which will save all networktables posted values to a log file */
+	__API const status_t startLogManager(const char* dir = "", const char* fname = "", double period = 0.25);
+	/** Stop the internal wpi::DataLogManager */
+	__API const status_t stopLogManager();
 
 	/** Apply an upper limit frequency for how often filtering and accumulation occurs */
 	__API const status_t setMaxFrequency(const size_t f_hz);

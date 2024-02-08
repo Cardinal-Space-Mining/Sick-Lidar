@@ -12,13 +12,20 @@
 
 #include <pcl/pcl_config.h>
 
+#ifndef USING_WPILIB
+#define USING_WPILIB false
+#endif
+
 #if USING_WPILIB
 #include <frc/geometry/Pose3d.h>
+#include <frc/interpolation/TimeInterpolatableBuffer.h>
 #include <networktables/NetworkTableInstance.h>
 #include <networktables/NetworkTable.h>
 #include <networktables/IntegerTopic.h>
+#include <networktables/DoubleTopic.h>
 #include <networktables/FloatArrayTopic.h>
 #include <networktables/DoubleArrayTopic.h>
+#include <DataLogManager.h>
 #endif
 
 #include "sick_scansegment_xd/config.h"
@@ -29,10 +36,12 @@
 #include "sick_scan/sick_cloud_transform.h"
 
 
+/** Util Definitions */
+
 namespace std {
 	namespace chrono {
 		using hrc = high_resolution_clock;
-#if !_HAS_CXX20
+#if __cplusplus <= 201703L		// sourced from C++20 definition
 		template <class _Clock, class = void>
 		inline constexpr bool _Is_clock_v = false;
 
@@ -55,8 +64,10 @@ namespace crno = std::chrono;
 
 
 
+/** TimestampedQueue utility datastructure */
+
 template<typename V, typename C = crno::high_resolution_clock>
-class TimestampedQueue {
+class TimestampedQueue {	// use wpilib (wpimath) frc::TimeInterpolatableBuffer instead
 	static_assert(crno::is_clock<C>::value, "");
 public:
 	using Value_T = V;
@@ -128,6 +139,23 @@ protected:
 
 
 
+/** Wpilib TimeInterpolatableBuffer helpers */
+#if USING_WPILIB
+template<typename T>
+static T&& lerpClosest(T&& a, T&& b, double t) {	// t is nominally in [0, 1]
+	return (abs(t) < abs(1.0 - t)) ? std::forward<T>(a) : std::forward<T>(b);
+}
+static frc::Pose3d lerpPose3d(const frc::Pose3d& a, const frc::Pose3d& b, double t) {	// t is nominally in [0, 1]
+	return a.Exp(a.Log(b) * t);
+}
+#endif
+
+
+
+
+
+/** Main interface namespace */
+
 namespace ldrp {
 
 #ifndef LOG_DEBUG
@@ -158,19 +186,20 @@ namespace ldrp {
 #endif
 
 
-	/** Interfacing and Filtering Implementation */
+	/** Interfacing and Filtering Implementation (singleton usage) */
 	struct LidarImpl {
 	public:
 		LidarImpl() {
-			nt::NetworkTableInstance::GetDefault().StartServer();
+			this->initNT();
+
 			LDRP_LOG( LOG_ALWAYS, "LDRP global instance initialized." << std::endl )
 		}
 		~LidarImpl() {
-			this->_enable_thread.store(false);
-			if(this->_thread->joinable()) {
-				this->_thread->join();
+			this->_enable_threads.store(false);
+			if(this->_lidar_thread->joinable()) {
+				this->_lidar_thread->join();
 			}
-			nt::NetworkTableInstance::GetDefault().StopServer();
+			this->shutdownNT();
 
 			LDRP_LOG( LOG_ALWAYS, "LDRP global instance destroyed." << std::endl )
 		}
@@ -185,6 +214,18 @@ namespace ldrp {
 #else
 			return (*this->_log_output);
 #endif
+		}
+
+
+		void initNT() {
+			nt::NetworkTableInstance inst = nt::NetworkTableInstance::GetDefault();
+
+			inst.StartServer();
+			this->_nt.base = inst.GetTable("Perception");
+			this->_nt.frame_accum_time = this->_nt.base->GetDoubleTopic("frame time").GetEntry(0.0);
+		}
+		void shutdownNT() {
+			nt::NetworkTableInstance::GetDefault().StopServer();
 		}
 
 
@@ -211,8 +252,12 @@ namespace ldrp {
 			PipelineConfig pipeline_config{};
 		} _config;
 
-		std::unique_ptr<std::thread> _thread;
-		std::atomic<bool> _enable_thread{false};
+		bool _dlm_started{ false };		// DataLogManager
+
+		std::unique_ptr<std::thread>
+			_lidar_thread,
+			_filter_thread;
+		std::atomic<bool> _enable_threads{false};
 		// std::deque<ScanSlice<pcl::PointXYZ> > _points_queue;
 		std::mutex
 			// _points_mutex{},
@@ -220,15 +265,21 @@ namespace ldrp {
 		struct {
 			
 		} _processing;
+		struct {
+			std::shared_ptr<nt::NetworkTable> base;
+			nt::DoubleEntry frame_accum_time;
+		} _nt;
 
 
-
+		void filterWorker() {
+			// this function represents the alternative thread that filters the newest collection of points
+		}
 		void lidarWorker() {
 
 			// (the next 30 lines or so are converted from scansegment_threads.cpp: sick_scansegment_xd::MsgPackThreads::runThreadCb())
 			// init udp receiver
 			sick_scansegment_xd::UdpReceiver* udp_receiver = nullptr;
-			for(;!udp_receiver && _enable_thread.load();) {
+			for(;!udp_receiver && _enable_threads.load();) {
 				udp_receiver = new sick_scansegment_xd::UdpReceiver{};
 				if(udp_receiver->Init(	// use actual configuration parameter!
 					"10.11.11.3",	// udp receiver
@@ -267,14 +318,16 @@ namespace ldrp {
 			sick_scansegment_xd::ScanSegmentParserOutput scan_segment{};
 			fifo_timestamp scan_timestamp{};
 			size_t scan_counter{0};
-			for(;_enable_thread.load();) {
-				// crno::hrc::time_point n = crno::hrc::now();
+			for(;_enable_threads.load();) {
+				crno::hrc::time_point n = crno::hrc::now();
 
 				for(int i = 0; i < 12; i++) {
 					if(msgpack_converter.Fifo()->Pop(scan_segment, scan_timestamp, scan_counter)) {
 						LDRP_LOG( LOG_DEBUG, "Fifo loop: popped scan segment with id " << scan_segment.segmentIndex << std::endl )
 					}
 				}
+
+				this->_nt.frame_accum_time.Set( crno::duration<double>{crno::hrc::now() - n}.count() );
 
 				// export from fifo!
 				//LDRP_LOG( LOG_DEBUG, "lidar processing internal worker called!" << std::endl)
@@ -304,8 +357,11 @@ namespace ldrp {
 
 /** Static API */
 
-	char const* pclVer() {
+	const char* pclVer() {
 		return PCL_VERSION_PRETTY;
+	}
+	const bool hasWpilib() {
+		return USING_WPILIB;
 	}
 	const PipelineConfig& getDefaultPipelineConfig() {
 		return PipelineConfig{};
@@ -328,9 +384,9 @@ namespace ldrp {
 
 	const status_t lidarInit() {
 		if(LidarImpl::_global) {
-			if(!LidarImpl::_global->_thread || !LidarImpl::_global->_thread->joinable()) {
-				LidarImpl::_global->_enable_thread.store(true);
-				LidarImpl::_global->_thread.reset(
+			if(!LidarImpl::_global->_lidar_thread || !LidarImpl::_global->_lidar_thread->joinable()) {
+				LidarImpl::_global->_enable_threads.store(true);
+				LidarImpl::_global->_lidar_thread.reset(
 					new std::thread{ &LidarImpl::lidarWorker, LidarImpl::_global.get() }
 				);
 				return STATUS_SUCCESS;
@@ -342,12 +398,12 @@ namespace ldrp {
 	const status_t lidarShutdown() {
 		if(LidarImpl::_global) {
 			status_t s = STATUS_ALREADY_SATISFIED;
-			LidarImpl::_global->_enable_thread.store(false);
-			if(LidarImpl::_global->_thread && LidarImpl::_global->_thread->joinable()) {
-				LidarImpl::_global->_thread->join();
+			LidarImpl::_global->_enable_threads.store(false);
+			if(LidarImpl::_global->_lidar_thread && LidarImpl::_global->_lidar_thread->joinable()) {
+				LidarImpl::_global->_lidar_thread->join();
 				s = STATUS_SUCCESS;
 			}
-			LidarImpl::_global->_thread.reset(nullptr);		// don't need to do this but probably good to explicitly signify the thread isn't valid
+			LidarImpl::_global->_lidar_thread.reset(nullptr);		// don't need to do this but probably good to explicitly signify the thread isn't valid
 			return s;
 		}
 		return STATUS_PREREQ_UNINITIALIZED;
@@ -370,6 +426,28 @@ namespace ldrp {
 			return STATUS_SUCCESS;
 		}
 		return STATUS_PREREQ_UNINITIALIZED;
+	}
+	const status_t startLogManager(const char* dir, const char* fname, double period) {
+		if(LidarImpl::_global) {
+			if(LidarImpl::_global->_dlm_started)
+				return STATUS_ALREADY_SATISFIED;
+			wpi::DataLogManager::Start(dir, fname, period);
+			wpi::DataLogManager::Log("Test Log!? :)");
+			LidarImpl::_global->_dlm_started = true;
+			return STATUS_SUCCESS;
+		}
+		return STATUS_PREREQ_UNINITIALIZED;
+	}
+	const status_t stopLogManager() {
+		if(LidarImpl::_global) {
+			if(!LidarImpl::_global->_dlm_started)
+				return STATUS_ALREADY_SATISFIED;
+			wpi::DataLogManager::Log("Stopping log...");
+			wpi::DataLogManager::Stop();
+			LidarImpl::_global->_dlm_started = false;
+			return STATUS_SUCCESS;
+		}
+		return STATUS_PREREQ_UNINITIALIZED | STATUS_ALREADY_SATISFIED;
 	}
 
 	const status_t setMaxFrequency(const size_t f_hz) {

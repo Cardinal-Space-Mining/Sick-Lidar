@@ -9,6 +9,7 @@ endif()
 
 #sick scan files
 set(SICK_SCAN_DIR "${PROJECT_SOURCE_DIR}/submodule-deps/sick_scan_xd")
+set(WPILIB_DIR "${PROJECT_SOURCE_DIR}/submodule-deps/allwpilib")
 
 # SSXD CMakeLists.txt line 53
 # if(NOT WIN32)
@@ -188,17 +189,22 @@ if(${LDRP_ENABLE_SAFETY_CHECKS})
 	list(APPEND _PROJECT_DEFINES -DLDRP_SAFETY_CHECKS)
 endif()
 
-set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
+set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS OFF)
 set(CMAKE_CXX_STANDARD ${PROJECT_CXX_STANDARD})
 
 file(GLOB _shared_sources "${CMAKE_CURRENT_LIST_DIR}/*.cpp")
 file(GLOB _target_headers "${CMAKE_CURRENT_LIST_DIR}/*.h")
+if(${USE_WPILIB})	# compile DataLogManager directly into our library
+list(APPEND _shared_sources "${WPILIB_DIR}/ntcoreffi/src/main/native/cpp/DataLogManager.cpp")
+list(APPEND _include_dirs "${WPILIB_DIR}/ntcoreffi/src/main/native/include")
+endif()
 # set(SHARED_TARGET   "${PROJECT_NAME}_Shared")
 add_library(${PROJECT_NAME}_shared
 	SHARED ${_shared_sources}
 )
 target_include_directories(${PROJECT_NAME}_shared
 	PUBLIC "${CMAKE_CURRENT_LIST_DIR}"
+	PUBLIC ${_include_dirs}
 	# PRIVATE "${PROJECT_SOURCE_DIR}/submodule-deps/sick_scan_xd/include"
 	PRIVATE ${PCL_INCLUDE_DIRS}
 )
