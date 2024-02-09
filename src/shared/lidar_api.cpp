@@ -1,5 +1,7 @@
 #include "lidar_api.h"
 
+#include "mem_utils.h"
+
 #include <type_traits>
 #include <algorithm>
 #include <iostream>
@@ -306,6 +308,11 @@ namespace ldrp {
 				static sick_scansegment_xd::MsgPackValidator default_validator{};
 				static sick_scansegment_xd::ScanSegmentParserConfig default_parser_config{};
 
+				std::vector<
+					std::deque<
+						sick_scansegment_xd::ScanSegmentParserOutput
+				> > frame_segments{ countBits(this->_config.enabled_segments) };
+
 				sick_scansegment_xd::PayloadFifo* udp_fifo = udp_receiver->Fifo();
 				std::vector<uint8_t> payload_bytes{};
 				sick_scansegment_xd::ScanSegmentParserOutput parsed_segment{};
@@ -314,7 +321,8 @@ namespace ldrp {
 				for(;this->_state.enable_threads.load();) {
 					crno::hrc::time_point n = crno::hrc::now();
 
-					for(int i = 0; this->_state.enable_threads && i < this->_config.buffered_scans * SEGMENTS_PER_FRAME; i++) {
+					uint64_t filled_segments = 0;
+					for(int i = 0; this->_state.enable_threads && i < filled_segments < this->_config.enabled_segments; i++) {
 						if(udp_fifo->Pop(payload_bytes, scan_timestamp, scan_counter)) {
 
 							if(this->_config.use_msgpack ?
@@ -328,12 +336,27 @@ namespace ldrp {
 									true, LOG_VERBOSE)
 							) {	// if successful parse
 								LDRP_LOG( LOG_DEBUG, "LDRP Worker [Parse Loop]: Successfully parsed scan segment idx {}!", parsed_segment.segmentIndex )
+							
+								const uint64_t seg_bit = (1Ui64 << parsed_segment.segmentIndex);
+								if(this->_config.enabled_segments & seg_bit) {	// if the segment'th bit is set
+									size_t idx = enabledBitIdx(this->_config.enabled_segments, parsed_segment.segmentIndex);	// get the index of the enabled bit (into our buffer)
+
+									frame_segments[idx].emplace_front();	// create empty segment buffer
+									std::swap(frame_segments[idx].front(), parsed_segment);		// specialize this overload to ensure this does what we want (not copy buffers! swap them!)
+									if(frame_segments[idx].size() >= this->_config.buffered_scans) {
+										filled_segments |= seg_bit;		// save this segment as finished by enabling it's bit
+										frame_segments[idx].resize(this->_config.buffered_scans);	// cut off oldest scans beyond the buffer size
+									}
+								}
+
 							} else {
 								LDRP_LOG( LOG_DEBUG, "LDRP Worker [Parse Loop]: Failed to parse bytes from UdpReceiver." )
 							}
 
 						}
 					}
+
+					// send collected segments buffer to a thread for filtering!
 
 					this->_nt.frame_accum_time.Set( crno::duration<double>{crno::hrc::now() - n}.count() );
 

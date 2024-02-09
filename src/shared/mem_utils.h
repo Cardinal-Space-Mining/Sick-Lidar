@@ -54,6 +54,43 @@ bool compare_mem_snapshot(const T& val, std::unique_ptr<uint8_t[]>& snap) {
 	return !memcmp(&val, snap.get(), sizeof(T));
 }
 
+inline const size_t countBits32(const uint32_t u) {
+	uint32_t uCount = u - ((u >> 1) & 033333333333) - ((u >> 2) & 011111111111);
+	return ((uCount + (uCount >> 3)) & 030707070707) % 63;
+}
+inline const size_t countBits64(const uint64_t u64) {
+	return countBits32(static_cast<uint32_t>(u64 & 0xFFFFFFFFUi64)) + countBits32(static_cast<uint32_t>((u64 >> 32) & 0xFFFFFFFFUi64));
+}
+inline const uint64_t maskLowerN(const size_t n) {
+	return ((1ULL << (n & 0x3F)) & -(n != 64)) - 1;
+}
+
+template<typename T>
+const size_t countBits(const T u) {
+	static_assert(std::is_integral<T>::value, "");
+	using uT = typename std::make_unsigned<T>::type;
+
+	if constexpr(sizeof(u) > 4) {
+		return countBits64( static_cast<const uint64_t>( *reinterpret_cast<const uT*>(&u) ) );
+	} else {
+		return countBits32( static_cast<const uint32_t>( *reinterpret_cast<const uT*>(&u) ) );
+	}
+}
+template<typename T>
+const size_t countLowerNBits(const T u, const size_t n) {
+	static_assert(std::is_integral<T>::value, "");
+	using uT = typename std::make_unsigned<T>::type;
+
+	if constexpr(sizeof(u) > 4) {
+		return countBits64( static_cast<const uint64_t>( *reinterpret_cast<const uT*>(&u) ) << (63 - n) );
+	} else {
+		return countBits64( static_cast<const uint32_t>( *reinterpret_cast<const uT*>(&u) ) << (31 - n) );
+	}
+}
+template<typename T>
+const size_t enabledBitIdx(const T u, const size_t n) {
+	return countLowerNBits<T>(u, n) - 1;
+}
 
 
 #ifdef WITH_ENGINE
@@ -154,6 +191,7 @@ static bool memSwap(std::vector<T, Alloc_A>& a, std::vector<T, Alloc_B>& b) {
 
 
 
+#ifdef _LIB_SOURCE
 #include <pcl/point_cloud.h>
 #include <pcl/types.h>
 
@@ -169,4 +207,5 @@ template<
 static void pointSwap(pcl::PointCloud<PointT>& cloud, std::vector<PointT>& vec) {
 	::pointSwap<PointT>(vec, cloud);
 }
+#endif
 
