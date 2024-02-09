@@ -322,7 +322,7 @@ namespace ldrp {
 					crno::hrc::time_point n = crno::hrc::now();
 
 					uint64_t filled_segments = 0;
-					for(int i = 0; this->_state.enable_threads && i < filled_segments < this->_config.enabled_segments; i++) {
+					for(int i = 0; this->_state.enable_threads && (filled_segments < this->_config.enabled_segments); i++) {
 						if(udp_fifo->Pop(payload_bytes, scan_timestamp, scan_counter)) {
 
 							if(this->_config.use_msgpack ?
