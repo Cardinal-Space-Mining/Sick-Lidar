@@ -298,6 +298,7 @@ namespace ldrp {
 			SampleBuffer samples{};
 			std::condition_variable link_state;
 			std::mutex link_mutex;
+			uint32_t index;
 		};
 
 	public:
@@ -377,12 +378,23 @@ namespace ldrp {
 							// attempt to find or create a thread for processing the frame
 
 							// THREAD POOL RAAAAAHHHHH :O
-							// this->_finished_queue_mutex.lock();
-							// if(this->_finished_threads.size() > 0) {
-							// 	const uint32_t filter_idx = this->_finished_threads.
-							// }
-
-							break;	// if successful
+							this->_finished_queue_mutex.lock();	// aquire mutex for queue
+							if(this->_finished_threads.size() > 0) {
+								const uint32_t filter_idx = this->_finished_threads.pop_back();	// maybe check that this is valid?
+								this->_finished_queue_mutex.unlock();
+								FilterContext& ctx = this->_filter_threads[filter_idx];
+								std::swap(ctx.samples, frame_segments);		// figure out where we want to clear the buffer that is swapped in so we don't start with old data in the queues
+								ctx.link_state.notify_all();
+								break;
+							} else if(this->_filter_threads.size() < this->_config.max_filter_threads) {	// start a new thread
+								// create a new thread a swap in the sample
+								this->_filter_threads.push_back();
+								FilterContext& ctx = this->_filter_threads.back();
+								ctx.index = this->_filter_threads.size() - 1;
+								std::swap(ctx.samples, frame_segments);
+								ctx.thread.reset( new std::thread{&LidarImpl::filterWorker, this, &ctx} );
+								break;
+							}
 						}	// insufficient samples or no thread available... (keep updating the current frame)
 						if(udp_fifo->Pop(udp_payload_bytes, scan_timestamp, scan_count)) {	// blocks until packet is received
 
