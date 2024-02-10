@@ -59,7 +59,7 @@ inline const size_t countBits32(const uint32_t u) {
 	return ((uCount + (uCount >> 3)) & 030707070707) % 63;
 }
 inline const size_t countBits64(const uint64_t u64) {
-	return countBits32(static_cast<uint32_t>(u64 & 0xFFFFFFFFUi64)) + countBits32(static_cast<uint32_t>((u64 >> 32) & 0xFFFFFFFFUi64));
+	return countBits32(static_cast<uint32_t>(u64 & 0xFFFFFFFF)) + countBits32(static_cast<uint32_t>((u64 >> 32) & 0xFFFFFFFF));
 }
 inline const uint64_t maskLowerN(const size_t n) {
 	return ((1ULL << (n & 0x3F)) & -(n != 64)) - 1;
@@ -88,8 +88,8 @@ const size_t countLowerNBits(const T u, const size_t n) {
 	}
 }
 template<typename T>
-const size_t enabledBitIdx(const T u, const size_t n) {
-	return countLowerNBits<T>(u, n) - 1;
+const size_t countBitsBeforeN(const T u, const size_t n) {
+	return countLowerNBits<T>(u, n) - static_cast<bool>(u & (1ULL << n));
 }
 
 

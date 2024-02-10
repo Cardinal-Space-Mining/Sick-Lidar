@@ -18,7 +18,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}" CACHE STRING "" FORCE
 set(CMAKE_INSTALL_PREFIX "${PROJECT_SOURCE_DIR}/install" CACHE STRING "" FORCE)
 
 # options
-option(USE_WPILIB "Enable the compiling and internal usage of Wpilib (results in a multistage build process)" OFF)
+option(USE_WPILIB "Enable the compiling and internal usage of Wpilib (results in a multistage build process)" ON)
 # cmake_dependent_option(MULTISTAGE_STEP
 # 	"Which step (0 or 1) of the multistage build should be configured. Default of -1 for autodetect (unused when wpilib is not included)"
 # 	-1 USE_WPILIB 1
