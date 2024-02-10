@@ -1,4 +1,4 @@
-find_package(PCL REQUIRED)
+find_package(PCL REQUIRED COMPONENTS common io filters features kdtree octree segmentation sample_consensus)
 
 # NOTE: add logic + defines for disabling wpilib, disabling debug prints, etc.
 
@@ -141,10 +141,10 @@ add_library(SickScanInternal_lib STATIC ${SICK_SCAN_LIB_SRC})
 
 # converted options from above specific to lib target
 target_compile_options(SickScanInternal_lib PUBLIC
-	-DBOOST_NO_AUTO_PTR
 	-D__ROS_VERSION=0
 	-DROSSIMU
-	-DSCANSEGMENT_XD_SUPPORT=1)
+	-DSCANSEGMENT_XD_SUPPORT=1
+	PRIVATE -DBOOST_NO_AUTO_PTR)
 if(WIN32)
 	target_compile_options(SickScanInternal_lib PUBLIC
 		-D_WINSOCK_DEPRECATED_NO_WARNINGS
@@ -212,6 +212,16 @@ target_include_directories(${PROJECT_NAME}_shared
 )
 target_link_directories(${PROJECT_NAME}_shared
 	PRIVATE ${PCL_LIBRARY_DIRS}
+)
+set(PCL_SELECTED_LIBRARIES	# did not work :(
+	PCL_COMMON_LIBRARIES
+	PCL_IO_LIBRARIES
+	PCL_FILTERS_LIBRARIES
+	PCL_FEATURES_LIBRARIES
+	PCL_KDTREE_LIBRARIES
+	PCL_OCTREE_LIBRARIES
+	PCL_SEGMENTATION_LIBRARIES
+	PCL_SAMPLE_CONSENSUS_LIBRARIES
 )
 target_link_libraries(${PROJECT_NAME}_shared
 	PRIVATE ${PCL_LIBRARIES}

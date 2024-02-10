@@ -12,31 +12,31 @@ static std::atomic<bool> _program_running = true;
 static void _action(int sig) {
 	std::cout << "Caught signal. Stopping program..." << std::endl;
 	_program_running = false;
-	// ldrp::lidarShutdown();
-	// ldrp::apiDestroy();
+	ldrp::lidarShutdown();
+	ldrp::apiDestroy();
 }
 
 int main(int argc, char** argv) {
 
 	// test bit counting and indexing
-	{
-		const int64_t m = 0b0010110101001100011111101010100101101010010110100101001010100101ULL;
-		const int32_t n = 0b10111111010101001011010100101101UL;
-		const int8_t c = 0b10101011;
-		const int16_t h = 0b1010101010101100;
+// 	{
+// 		const int64_t m = 0b0010110101001100011111101010100101101010010110100101001010100101ULL;
+// 		const int32_t n = 0b10111111010101001011010100101101UL;
+// 		const int8_t c = 0b10101011;
+// 		const int16_t h = 0b1010101010101100;
 
-		std::cout << ::countBits(m) << std::endl;
-		std::cout << ::countBits(n) << std::endl;
-		std::cout << ::countBits(c) << std::endl;
-		std::cout << ::countBits(h) << std::endl;
+// 		std::cout << ::countBits(m) << std::endl;
+// 		std::cout << ::countBits(n) << std::endl;
+// 		std::cout << ::countBits(c) << std::endl;
+// 		std::cout << ::countBits(h) << std::endl;
 
-#define _VAR n
-		for(size_t i = 0; i < sizeof(_VAR) * 8; i++) {
-			if(_VAR & (1ULL << i)) {
-				std::cout << "bit " << i << " enabled: index " << ::countBitsBeforeN(_VAR, i) << std::endl;
-			}
-		}
-	}
+// #define _VAR n
+// 		for(size_t i = 0; i < sizeof(_VAR) * 8; i++) {
+// 			if(_VAR & (1ULL << i)) {
+// 				std::cout << "bit " << i << " enabled: index " << ::countBitsBeforeN(_VAR, i) << std::endl;
+// 			}
+// 		}
+// 	}
 
 	// std::cout << "Functional entrypoint!?" << std::endl;
 	// std::cout << "Internally Linked PCL v" << ldrp::pclVer() << std::endl;
@@ -44,8 +44,8 @@ int main(int argc, char** argv) {
 	using ldrp::status_t;
 
 	status_t s{0};
-	// s = ldrp::apiInit("", "lidar_log.wpilog");
-	// s = ldrp::lidarInit();
+	s = ldrp::apiInit("", "lidar_log.wpilog");
+	s = ldrp::lidarInit();
 
 // #ifdef WIN32
 	signal(SIGINT, _action);

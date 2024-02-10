@@ -2,6 +2,7 @@
 
 #include "mem_utils.h"
 
+#include <condition_variable>
 #include <type_traits>
 #include <algorithm>
 #include <iostream>
@@ -270,6 +271,7 @@ namespace ldrp {
 
 			const uint64_t enabled_segments{ 0b111111111111 };	// 12 sections --> first 12 bits enabled (enable all section)
 			const uint32_t buffered_scans{ 1 };		// how many samples of each segment we require per aquisition
+			const uint32_t max_filter_threads{ 1 };
 			const bool enable_pcd_logging{ true };
 		} _config;
 
@@ -279,6 +281,7 @@ namespace ldrp {
 			std::atomic<bool> enable_threads{false};
 		} _state;
 
+	protected:
 		struct {	// networktables
 			nt::NetworkTableInstance instance;
 			std::shared_ptr<nt::NetworkTable> base;
@@ -289,15 +292,28 @@ namespace ldrp {
 			nt::DoubleEntry aquisition_ftime;
 		} _nt;
 
+		using SampleBuffer = std::vector< std::deque< sick_scansegment_xd::ScanSegmentParserOutput > >;
+		struct FilterContext {	// storage for each filter instance that needs to be synced between threads
+			std::unique_ptr<std::thread> thread{ nullptr };
+			SampleBuffer samples{};
+			std::condition_variable link_state;
+			std::mutex link_mutex;
+		};
+
+	public:
 		std::unique_ptr<std::thread> _lidar_thread{ nullptr };
-		std::vector<std::thread> _filter_threads{ 0 };
-		std::mutex _pose_mutex{};
+		std::vector<ldrp::LidarImpl::FilterContext> _filter_threads{ 0 };
+		std::deque<uint32_t> _finished_threads{};
+		std::mutex
+			_finished_queue_mutex{};
+			_pose_mutex{};
 
 		struct {	// filtering static buffers
 			
 		} _processing;
 
 
+	public:
 		void filterWorker() {
 			// this function represents the alternative thread that filters the newest collection of points
 
@@ -341,10 +357,7 @@ namespace ldrp {
 				static sick_scansegment_xd::ScanSegmentParserConfig default_parser_config{};
 
 				// a queue for each segment we are sampling from so we can have a rolling set of aquired samples (when configured)
-				std::vector<
-					std::deque<
-						sick_scansegment_xd::ScanSegmentParserOutput
-				> > frame_segments{ ::countBits(this->_config.enabled_segments) };	// init size to the number of enabled segments
+				SampleBuffer frame_segments{ ::countBits(this->_config.enabled_segments) };	// init size to the number of enabled segments
 
 				sick_scansegment_xd::PayloadFifo* udp_fifo = udp_receiver->Fifo();
 				std::vector<uint8_t> udp_payload_bytes{};
@@ -359,11 +372,15 @@ namespace ldrp {
 					size_t aquisition_loop_count = 0;
 					for(uint64_t filled_segments = 0; this->_state.enable_threads; aquisition_loop_count++) {	// loop until thread exit is called... (internal break allows for exit as well)
 
-						if(filled_segments < this->_config.enabled_segments) {	// if we have aquired sufficient samples...
+						if(filled_segments >= this->_config.enabled_segments) {	// if we have aquired sufficient samples...
 							LDRP_LOG( LOG_DEBUG, "LDRP Worker [Aquisition Loop]: Aquisition quota satisfied after {} loops - exporting buffer to thread...", aquisition_loop_count )
 							// attempt to find or create a thread for processing the frame
 
 							// THREAD POOL RAAAAAHHHHH :O
+							// this->_finished_queue_mutex.lock();
+							// if(this->_finished_threads.size() > 0) {
+							// 	const uint32_t filter_idx = this->_finished_threads.
+							// }
 
 							break;	// if successful
 						}	// insufficient samples or no thread available... (keep updating the current frame)
