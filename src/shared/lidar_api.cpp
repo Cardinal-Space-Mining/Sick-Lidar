@@ -16,6 +16,8 @@
 #include <vector>
 
 #include <pcl/pcl_config.h>
+#include <pcl/point_cloud.h>
+#include <pcl/point_types.h>
 
 #ifndef USING_WPILIB
   #define USING_WPILIB false
@@ -306,8 +308,10 @@ namespace ldrp {
 		std::vector<ldrp::LidarImpl::FilterContext> _filter_threads{ 0 };
 		std::deque<uint32_t> _finished_threads{};
 		std::mutex
-			_finished_queue_mutex{};
+			_finished_queue_mutex{},
 			_pose_mutex{};
+		frc::TimeInterpolatableBuffer<frc::Pose3d> _pose_buffer;
+
 
 		struct {	// filtering static buffers
 			
@@ -315,10 +319,48 @@ namespace ldrp {
 
 
 	public:
-		void filterWorker() {
+		void filterWorker(FilterContext* ctx) {
 			// this function represents the alternative thread that filters the newest collection of points
 
 			// 1. transform points based on timestamp
+
+			pcl::PointCloud<pcl::PointXYZ> point_cloud;
+
+			for(size_t i = 0; i < ctx->samples.size(); i++){
+				for(size_t j = 0; j < ctx->samples[i].size(); j++){
+					sick_scansegment_xd::ScanSegmentParserOutput& segment = ctx->samples[i][j];
+
+					for(sick_scansegment_xd::ScanSegmentParserOutput::Scangroup& scan_group : segment.scandata){
+						for(sick_scansegment_xd::ScanSegmentParserOutput::Scanline& scan_lines: scan_group.scanlines){
+							for(sick_scansegment_xd::ScanSegmentParserOutput::LidarPoint& lidar_point : scan_lines.points){
+								point_cloud.points.emplace_back(lidar_point.x, lidar_point.y, lidar_point.z);
+								
+							}
+						}
+					}
+					
+					double timestamp = segment.timestamp_sec + 1E-9 * segment.timestamp_nsec;
+
+					frc::Pose3d pose;
+
+					_pose_mutex.lock();
+					//maybe store previous pose incase of failure
+					
+					std::optional<frc::Pose3d> temp_pose = _pose_buffer.Sample(units::time::second_t{timestamp});
+
+					_pose_mutex.unlock();
+
+					if(!temp_pose.has_value()){
+						continue;
+					}
+
+					pose = *temp_pose;
+
+
+				}
+			}
+
+
 			// 2. run filtering on points
 			// 3. update accumulator
 			// 4. [when configured] update map
@@ -522,8 +564,16 @@ namespace ldrp {
 			LidarImpl::_global->_pose_mutex.lock();
 			{
 				// TODO - add to timestamped queue or whatever we callin it
+				
+				LidarImpl::_global->_pose_buffer.AddSample(
+					units::time::second_t{crno::duration<double>(crno::hrc::now().time_since_epoch()).count()},
+					 frc::Pose3d{units::meter_t{xyz[0]}, units::meter_t{xyz[1]}, units::meter_t{xyz[2]}, 
+					 	frc::Rotation3d{frc::Quaternion{qw, qxyz[1], qxyz[2], qxyz[3]}}});
+
 			}
 			LidarImpl::_global->_pose_mutex.unlock();
+
+			return STATUS_SUCCESS;
 		}
 		return STATUS_PREREQ_UNINITIALIZED;
 	}
