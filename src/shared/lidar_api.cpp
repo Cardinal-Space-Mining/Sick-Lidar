@@ -4,6 +4,7 @@
 #include "pcd_streaming.h"
 
 #include <condition_variable>
+#include <shared_mutex>
 #include <type_traits>
 #include <algorithm>
 #include <iostream>
@@ -217,6 +218,7 @@ namespace ldrp {
 
 			const uint32_t index;
 			SampleBuffer samples{};
+
 			std::unique_ptr<std::thread> thread{ nullptr };
 			std::mutex link_mutex;
 			std::condition_variable link_condition;
@@ -228,7 +230,8 @@ namespace ldrp {
 		std::vector<std::unique_ptr<FilterInstance> > _filter_threads{};	// need pointers since filter instance doesn't like to be copied (vector impl)
 		std::deque<uint32_t> _finished_queue{};
 		std::mutex
-			_finished_queue_mutex{},
+			_finished_queue_mutex{};
+		std::shared_mutex
 			_pose_mutex{};
 		frc::TimeInterpolatableBuffer<frc::Pose3d> _pose_buffer{
 			units::time::second_t{ _config.pose_storage_window },
@@ -254,10 +257,10 @@ namespace ldrp {
 					for(size_t j = 0; j < f_inst->samples[i].size(); j++) {
 						const sick_scansegment_xd::ScanSegmentParserOutput& segment = f_inst->samples[i][j];
 
-						_pose_mutex.lock();
+						_pose_mutex.lock_shared();	// other threads can read from the buffer as well
 						std::optional<frc::Pose3d> ts_pose = this->_pose_buffer.Sample(
 								units::time::second_t{ segment.timestamp_sec + (segment.timestamp_nsec * 1E-9) } );
-						_pose_mutex.unlock();
+						_pose_mutex.unlock_shared();
 
 						if(!ts_pose.has_value()) continue;	// maybe store more recent pose incase of failure?
 						const frc::Pose3d pose = *ts_pose;	// need to convert to transform matrix
@@ -359,31 +362,8 @@ namespace ldrp {
 
 						if(filled_segments >= this->_config.enabled_segments) {	// if we have aquired sufficient samples...
 							LDRP_LOG( LOG_DEBUG, "LDRP Worker [Aquisition Loop]: Aquisition quota satisfied after {} loops - exporting buffer to thread...", aquisition_loop_count )
+
 							// attempt to find or create a thread for processing the frame
-
-							// DIRTY TEST
-							// pcl::PointCloud<pcl::PointXYZ> point_cloud;
-							// for(size_t i = 0; i < frame_segments.size(); i++){
-							// 	for(size_t j = 0; j < frame_segments[i].size(); j++){
-							// 		sick_scansegment_xd::ScanSegmentParserOutput& segment = frame_segments[i][j];
-							// 		for(sick_scansegment_xd::ScanSegmentParserOutput::Scangroup& scan_group : segment.scandata){
-							// 			for(sick_scansegment_xd::ScanSegmentParserOutput::Scanline& scan_lines: scan_group.scanlines){
-							// 				for(sick_scansegment_xd::ScanSegmentParserOutput::LidarPoint& lidar_point : scan_lines.points){
-							// 					point_cloud.points.emplace_back(lidar_point.x, lidar_point.y, lidar_point.z);
-							// 				}
-							// 			}
-							// 		}
-
-							// 	}
-							// }
-							// point_cloud.width = point_cloud.points.size();
-							// point_cloud.height = 1;
-							// point_cloud.is_dense = true;
-							// this->pcd_writer.addCloud(point_cloud);
-							// break;
-							// END DIRTY TEST
-
-							// THREAD POOL RAAAAAHHHHH :O
 							this->_finished_queue_mutex.lock();	// aquire mutex for queue
 							if(this->_finished_queue.size() > 0) {
 
