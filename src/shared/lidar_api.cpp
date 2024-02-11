@@ -188,7 +188,7 @@ namespace ldrp {
 			const uint32_t buffered_scans{ 1 };		// how many samples of each segment we require per aquisition
 			const uint32_t max_filter_threads{ 1 };
 			const bool enable_pcd_logging{ true };
-			const std::string pcd_log_file{ "lidar_points.tar" };
+			const char* pcd_log_fname{ "lidar_points.tar" };
 			const double pose_storage_window{ 0.1 };	// how many seconds
 		} _config;
 
@@ -211,17 +211,22 @@ namespace ldrp {
 
 		using SampleBuffer = std::vector< std::deque< sick_scansegment_xd::ScanSegmentParserOutput > >;
 		struct FilterInstance {	// storage for each filter instance that needs to be synced between threads
-			std::unique_ptr<std::thread> thread{ nullptr };
+			FilterInstance(const uint32_t f_idx) : index{f_idx} {}
+			FilterInstance(const FilterInstance&) = delete;
+			FilterInstance(FilterInstance&&) = default;
+
+			const uint32_t index;
 			SampleBuffer samples{};
-			std::condition_variable link_state;
+			std::unique_ptr<std::thread> thread{ nullptr };
 			std::mutex link_mutex;
-			uint32_t index;
+			std::condition_variable link_condition;
+			uint32_t link_state{ 0 };
 		};
 
 	public:
 		std::unique_ptr<std::thread> _lidar_thread{ nullptr };
-		std::vector<ldrp::LidarImpl::FilterInstance> _filter_threads{ 0 };
-		std::deque<uint32_t> _finished_threads{};
+		std::vector<std::unique_ptr<FilterInstance> > _filter_threads{};	// need pointers since filter instance doesn't like to be copied (vector impl)
+		std::deque<uint32_t> _finished_queue{};
 		std::mutex
 			_finished_queue_mutex{},
 			_pose_mutex{};
@@ -240,56 +245,63 @@ namespace ldrp {
 		void filterWorker(FilterInstance* f_inst) {
 			// this function represents the alternative thread that filters the newest collection of points
 
-			// 1. transform points based on timestamp
 			for(;this->_state.enable_threads.load();) {
 
 				pcl::PointCloud<pcl::PointXYZ> point_cloud;
 
-				for(size_t i = 0; i < f_inst->samples.size(); i++){
-					for(size_t j = 0; j < f_inst->samples[i].size(); j++){
-						sick_scansegment_xd::ScanSegmentParserOutput& segment = f_inst->samples[i][j];
+				// 1. transform points based on timestamp
+				for(size_t i = 0; i < f_inst->samples.size(); i++) {
+					for(size_t j = 0; j < f_inst->samples[i].size(); j++) {
+						const sick_scansegment_xd::ScanSegmentParserOutput& segment = f_inst->samples[i][j];
 
-						for(sick_scansegment_xd::ScanSegmentParserOutput::Scangroup& scan_group : segment.scandata){
-							for(sick_scansegment_xd::ScanSegmentParserOutput::Scanline& scan_lines: scan_group.scanlines){
-								for(sick_scansegment_xd::ScanSegmentParserOutput::LidarPoint& lidar_point : scan_lines.points){
+						_pose_mutex.lock();
+						std::optional<frc::Pose3d> ts_pose = this->_pose_buffer.Sample(
+								units::time::second_t{ segment.timestamp_sec + (segment.timestamp_nsec * 1E-9) } );
+						_pose_mutex.unlock();
+
+						if(!ts_pose.has_value()) continue;	// maybe store more recent pose incase of failure?
+						const frc::Pose3d pose = *ts_pose;	// need to convert to transform matrix
+
+						for(const sick_scansegment_xd::ScanSegmentParserOutput::Scangroup& scan_group : segment.scandata) {
+							for(const sick_scansegment_xd::ScanSegmentParserOutput::Scanline& scan_lines: scan_group.scanlines) {
+								for(const sick_scansegment_xd::ScanSegmentParserOutput::LidarPoint& lidar_point : scan_lines.points) {
+
+									// also filter by range here?
 									point_cloud.points.emplace_back(lidar_point.x, lidar_point.y, lidar_point.z);
 									
 								}
 							}
-						}
-						
-						// double timestamp = segment.timestamp_sec + 1E-9 * segment.timestamp_nsec;
-
-						// frc::Pose3d pose;
-
-						// _pose_mutex.lock();
-						// //maybe store previous pose incase of failure
-						
-						// std::optional<frc::Pose3d> temp_pose = _pose_buffer.Sample(units::time::second_t{timestamp});
-
-						// _pose_mutex.unlock();
-
-						// if(!temp_pose.has_value()){
-						// 	continue;
-						// }
-
-						// pose = *temp_pose;
-
+						} // loop points per segment
 
 					}
+				} // loop segments
+
+				point_cloud.width = point_cloud.points.size();
+				point_cloud.height = 1;
+				point_cloud.is_dense = true;
+				// point_cloud.header.stamp = {};	// somehow average all the segment timestamps?
+
+				if(this->_config.enable_pcd_logging) {
+					this->pcd_writer.addCloud(point_cloud);
 				}
 
-				this->pcd_writer.addCloud(point_cloud);
+				// 2. run filtering on points
+				// 3. update accumulator
+				// 4. [when configured] update map
+
+				// processing finished, push instance idx to queue
+				f_inst->link_state = false;
 				this->_finished_queue_mutex.lock();
-				this->_finished_threads.push_front(f_inst->index);
+				this->_finished_queue.push_back(f_inst->index);
 				this->_finished_queue_mutex.unlock();
+				// wait for signal to continue...
+				std::unique_lock<std::mutex> lock{ f_inst->link_mutex };
+				for(;this->_state.enable_threads.load() && !f_inst->link_state;) {
+					f_inst->link_condition.wait(lock);
+				}
 
 			}
 
-
-			// 2. run filtering on points
-			// 3. update accumulator
-			// 4. [when configured] update map
 		}
 		void lidarWorker() {
 
@@ -335,7 +347,7 @@ namespace ldrp {
 				size_t scan_count{0};	// not used but we need for a param
 
 				if(this->_config.enable_pcd_logging) {
-					this->pcd_writer.setFile(this->_config.pcd_log_file.c_str());
+					this->pcd_writer.setFile(this->_config.pcd_log_fname);
 				}
 
 				// main loop!
@@ -350,46 +362,53 @@ namespace ldrp {
 							// attempt to find or create a thread for processing the frame
 
 							// DIRTY TEST
-							pcl::PointCloud<pcl::PointXYZ> point_cloud;
-							for(size_t i = 0; i < frame_segments.size(); i++){
-								for(size_t j = 0; j < frame_segments[i].size(); j++){
-									sick_scansegment_xd::ScanSegmentParserOutput& segment = frame_segments[i][j];
-									for(sick_scansegment_xd::ScanSegmentParserOutput::Scangroup& scan_group : segment.scandata){
-										for(sick_scansegment_xd::ScanSegmentParserOutput::Scanline& scan_lines: scan_group.scanlines){
-											for(sick_scansegment_xd::ScanSegmentParserOutput::LidarPoint& lidar_point : scan_lines.points){
-												point_cloud.points.emplace_back(lidar_point.x, lidar_point.y, lidar_point.z);
-											}
-										}
-									}
+							// pcl::PointCloud<pcl::PointXYZ> point_cloud;
+							// for(size_t i = 0; i < frame_segments.size(); i++){
+							// 	for(size_t j = 0; j < frame_segments[i].size(); j++){
+							// 		sick_scansegment_xd::ScanSegmentParserOutput& segment = frame_segments[i][j];
+							// 		for(sick_scansegment_xd::ScanSegmentParserOutput::Scangroup& scan_group : segment.scandata){
+							// 			for(sick_scansegment_xd::ScanSegmentParserOutput::Scanline& scan_lines: scan_group.scanlines){
+							// 				for(sick_scansegment_xd::ScanSegmentParserOutput::LidarPoint& lidar_point : scan_lines.points){
+							// 					point_cloud.points.emplace_back(lidar_point.x, lidar_point.y, lidar_point.z);
+							// 				}
+							// 			}
+							// 		}
 
-								}
-							}
-							point_cloud.width = point_cloud.points.size();
-							point_cloud.height = 1;
-							point_cloud.is_dense = true;
-							this->pcd_writer.addCloud(point_cloud);
-							break;
+							// 	}
+							// }
+							// point_cloud.width = point_cloud.points.size();
+							// point_cloud.height = 1;
+							// point_cloud.is_dense = true;
+							// this->pcd_writer.addCloud(point_cloud);
+							// break;
 							// END DIRTY TEST
 
 							// THREAD POOL RAAAAAHHHHH :O
-							// this->_finished_queue_mutex.lock();	// aquire mutex for queue
-							// if(this->_finished_threads.size() > 0) {
-							// 	const uint32_t filter_idx = this->_finished_threads.back();	// maybe check that this is valid?
-							// 	this->_finished_threads.pop_back();
-							// 	this->_finished_queue_mutex.unlock();
-							// 	FilterInstance& f_inst = this->_filter_threads[filter_idx];
-							// 	std::swap(f_inst.samples, frame_segments);		// figure out where we want to clear the buffer that is swapped in so we don't start with old data in the queues
-							// 	f_inst.link_state.notify_all();
-							// 	break;
-							// } else if(this->_filter_threads.size() < this->_config.max_filter_threads) {	// start a new thread
-							// 	// create a new thread and swap in the sample
-							// 	this->_filter_threads.emplace_back();
-							// 	FilterInstance& f_inst = this->_filter_threads.back();
-							// 	f_inst.index = this->_filter_threads.size() - 1;
-							// 	std::swap(f_inst.samples, frame_segments);
-							// 	f_inst.thread.reset( new std::thread{&LidarImpl::filterWorker, this, &f_inst} );
-							// 	break;
-							// }
+							this->_finished_queue_mutex.lock();	// aquire mutex for queue
+							if(this->_finished_queue.size() > 0) {
+
+								const uint32_t filter_idx = this->_finished_queue.front();	// maybe check that this is valid?
+								this->_finished_queue.pop_front();
+								this->_finished_queue_mutex.unlock();
+								FilterInstance& f_inst = *this->_filter_threads[filter_idx];
+								std::swap(f_inst.samples, frame_segments);		// figure out where we want to clear the buffer that is swapped in so we don't start with old data in the queues
+								f_inst.link_state = true;
+								f_inst.link_condition.notify_all();
+								break;
+
+							} else {
+								this->_finished_queue_mutex.unlock();
+								if(this->_filter_threads.size() < this->_config.max_filter_threads) {	// start a new thread
+
+									// create a new thread and swap in the sample
+									this->_filter_threads.emplace_back( std::make_unique<FilterInstance>( static_cast<uint32_t>(this->_filter_threads.size()) ) );
+									FilterInstance& f_inst = *this->_filter_threads.back();
+									std::swap(f_inst.samples, frame_segments);
+									f_inst.thread.reset( new std::thread{&LidarImpl::filterWorker, this, &f_inst} );
+									break;
+
+								}
+							}
 						}	// insufficient samples or no thread available... (keep updating the current frame)
 						if(udp_fifo->Pop(udp_payload_bytes, scan_timestamp, scan_count)) {	// blocks until packet is received
 
@@ -438,11 +457,11 @@ namespace ldrp {
 			this->pcd_writer.closeIO();
 
 			// join and delete all filter instances
-			for(FilterInstance& f_inst : this->_filter_threads) {
-				if(f_inst.thread && f_inst.thread->joinable()) {
-					f_inst.thread->join();
+			for(std::unique_ptr<FilterInstance>& f_inst : this->_filter_threads) {
+				if(f_inst->thread && f_inst->thread->joinable()) {
+					f_inst->thread->join();
 				}
-				delete f_inst.thread.release();
+				delete f_inst->thread.release();
 			}
 
 			// close and deallocate udp receiver
