@@ -84,17 +84,17 @@ namespace ldrp {
 	__API const status_t setLogLevel(const int32_t lvl);
 
 	/** Apply a new world pose for the lidar -- used directly to transform points to world space.
-	 * The q** params represent quaternion components */
-	__API const status_t updateWorldPose(const float* xyz, const float* qxyz, const float qw);
+	 * Note that the position is internally interpreted as being in meters! The q** params represent quaternion components. */
+	__API const status_t updateWorldPose(const float* xyz, const float* qxyz, const float qw, const uint64_t ts_microseconds = 0);
 	/** Apply a new world pose for the lidar -- used directly to transform points to world space.
 	 * The provided buffer is expected to contain an xyz position and quaternion component -
 	 * the _** params represent the respective offsets of each component in the buffer */
-	inline const status_t updateWorldPose(const float* pose3, const size_t _xyz = 0, const size_t _qxyz = 3, const size_t _qw = 6)
-		{ return updateWorldPose(pose3 + _xyz, pose3 + _qxyz, pose3[_qw]); }
+	inline const status_t updateWorldPose(const float* pose3, const size_t _xyz = 0, const size_t _qxyz = 3, const size_t _qw = 6, const uint64_t ts_microseconds = 0)
+		{ return updateWorldPose(pose3 + _xyz, pose3 + _qxyz, pose3[_qw], ts_microseconds); }
 	/** Apply a new world pose for the lidar -- used directly to transform points to world space.
 	 * This method assumes the quaternion components are ordered X, Y, Z, W */
-	inline const status_t updateWorldPose(const float* xyz, const float* qxyzw)
-		{ return updateWorldPose(xyz, qxyzw, qxyzw[3]); }
+	inline const status_t updateWorldPose(const float* xyz, const float* qxyzw, const uint64_t ts_microseconds = 0)
+		{ return updateWorldPose(xyz, qxyzw, qxyzw[3], ts_microseconds); }
 
 	/** Access the accumulator map */
 	__API const status_t getAccumulator(std::shared_ptr<void>& out_inst);	// not finalized
