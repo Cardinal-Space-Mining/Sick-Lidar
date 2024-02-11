@@ -26,16 +26,20 @@ bool PCDTarWriter::setFile(const char* fname) {
 	}
 	return true;
 }
-bool PCDTarWriter::isOpen() {
-	return this->fio.is_open();
-}
 void PCDTarWriter::closeIO() {
 	if (this->isOpen()) {
 		this->fio.close();
 	}
 	this->status_bits &= ~0b1;
 }
-void PCDTarWriter::addCloud(const pcl::PCLPointCloud2& cloud, const Eigen::Vector4f& origin, const Eigen::Quaternionf& orient, bool compress, const char* pcd_fname) {
+bool PCDTarWriter::isOpen() {
+	return this->fio.is_open();
+}
+uint32_t PCDTarWriter::checkStatus() {
+	return this->status_bits;
+}
+
+bool PCDTarWriter::addCloud(const pcl::PCLPointCloud2& cloud, const Eigen::Vector4f& origin, const Eigen::Quaternionf& orient, bool compress, const char* pcd_fname) {
 	if (this->isOpen() && !(this->status_bits & 0b1)) {
 		const spos_t start = this->append_pos;
 
@@ -55,7 +59,7 @@ void PCDTarWriter::addCloud(const pcl::PCLPointCloud2& cloud, const Eigen::Vecto
 		{
 			status = this->writer.writeBinaryCompressed(this->fio, cloud, origin, orient);
 		}
-		if (status) return;	// keep the same append position so we overwrite next time
+		if (status) return false;	// keep the same append position so we overwrite next time
 
 		const spos_t pcd_end = this->fio.tellp();
 		const size_t
@@ -103,7 +107,10 @@ void PCDTarWriter::addCloud(const pcl::PCLPointCloud2& cloud, const Eigen::Vecto
 		this->fio.seekp(start);
 		this->fio.write(reinterpret_cast<char*>(this->head_buff),
 			(this->head_buff->uname - this->head_buff->file_name));		// only re-write the byte range that we have modified
+
+		return true;
 	}
+	return false;
 }
 
 // end PCDWriter impl

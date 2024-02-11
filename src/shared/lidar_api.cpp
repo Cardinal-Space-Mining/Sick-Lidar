@@ -1,8 +1,10 @@
 #include "lidar_api.h"
 
 #include "mem_utils.h"
+#include "pcd_streaming.h"
 
 #include <condition_variable>
+#include <shared_mutex>
 #include <type_traits>
 #include <algorithm>
 #include <iostream>
@@ -16,6 +18,9 @@
 #include <vector>
 
 #include <pcl/pcl_config.h>
+#include <pcl/point_cloud.h>
+#include <pcl/point_types.h>
+#include <pcl/io/pcd_io.h>
 
 #ifndef USING_WPILIB
   #define USING_WPILIB false
@@ -47,21 +52,6 @@
 namespace std {
 	namespace chrono {
 		using hrc = high_resolution_clock;
-#if __cplusplus <= 201703L		// sourced from C++20 definition
-		template <class _Clock, class = void>
-		inline constexpr bool _Is_clock_v = false;
-
-		template <class _Clock>
-		inline constexpr bool
-			_Is_clock_v<_Clock, std::void_t<typename _Clock::rep, typename _Clock::period, typename _Clock::duration,
-									typename _Clock::time_point, decltype(_Clock::is_steady), decltype(_Clock::now())>> =
-				true;
-
-		template <class _Clock>
-		struct is_clock : bool_constant<_Is_clock_v<_Clock>> {};
-		template <class _Clock>
-		inline constexpr bool is_clock_v = _Is_clock_v<_Clock>;
-#endif
 	}
 }
 namespace crno = std::chrono;
@@ -70,87 +60,13 @@ namespace crno = std::chrono;
 
 
 
-/** TimestampedQueue utility datastructure */
-
-template<typename V, typename C = crno::high_resolution_clock>
-class TimestampedQueue {	// use wpilib (wpimath) frc::TimeInterpolatableBuffer instead
-	static_assert(crno::is_clock<C>::value, "");
-public:
-	using Value_T = V;
-	using Clock_T = C;
-	using Duration_T = typename Clock_T::duration;
-	using TimeStamp_T = crno::time_point<Clock_T>;
-	using Data_T = std::pair<TimeStamp_T, Value_T>;
-
-public:
-	TimestampedQueue() {}
-	~TimestampedQueue() {}
-
-	void add(const Value_T& value, const TimeStamp_T ts = Clock_T::now()) {
-		this->_queue.push_front(
-			Data_T{ value, ts }
-		);
-	}
-	void add(Value_T&& value, const TimeStamp_T ts = Clock_T::now()) {
-		this->_queue.push_front(
-			Data_T{ std::move(value), ts }
-		);
-	}
-
-	Value_T* getClosest(const TimeStamp_T ts = Clock_T::now()) {
-		// DO NOT USE -- TODO: implement a functional algorithm
-		if(this->_queue.empty()) {
-			return nullptr;
-		} else if(ts > this->_queue.front().first) {
-			return &(this->_queue.front().second);
-		}
-		for(size_t i = this->_queue.size() / 2;;) {
-			if(i + 1 >= this->_queue.size()) {
-				return &this->_queue.back().second;
-			}
-			const TimeStamp_T
-				&f = this->_queue[i].first,
-				&b = this->_queue[i + 1].first;
-			const Duration_T
-				_f = (f - ts),
-				_b = (ts - b);
-			if(_f >= 0 && _b >= 0) {
-				return _f < _b ? &this->_queue[i].second : &this->_queue[i + 1].second;	// return value that is closest
-			} else if(_f < 0) {
-				i /= 2;		// go forwards
-			} else {	// _b < 0
-				i += (i / 2);	// go backwards
-			}
-		}
-	}
-	// const Value_T& getClosest(const TimeStamp_T ts = Clock_T::now()) const {
-
-	// }
-
-protected:
-	void truncate(const Duration_T window_size) {
-		const TimeStamp_T min = this->_queue.front().first - window_size;
-		for(;this->_queue.back().first < min;) {
-			this->_queue.pop_back();
-		}
-	}
-
-protected:
-	std::deque<Data_T> _queue;
-
-
-};
-
-
-
-
-
 /** Wpilib TimeInterpolatableBuffer helpers */
-#if USING_WPILIB
+
 template<typename T>
 static T&& lerpClosest(T&& a, T&& b, double t) {	// t is nominally in [0, 1]
 	return (abs(t) < abs(1.0 - t)) ? std::forward<T>(a) : std::forward<T>(b);
 }
+#if USING_WPILIB
 static frc::Pose3d lerpPose3d(const frc::Pose3d& a, const frc::Pose3d& b, double t) {	// t is nominally in [0, 1]
 	return a.Exp(a.Log(b) * t);
 }
@@ -273,6 +189,8 @@ namespace ldrp {
 			const uint32_t buffered_scans{ 1 };		// how many samples of each segment we require per aquisition
 			const uint32_t max_filter_threads{ 1 };
 			const bool enable_pcd_logging{ true };
+			const char* pcd_log_fname{ "lidar_points.tar" };
+			const double pose_storage_window{ 0.1 };	// how many seconds
 		} _config;
 
 		struct {	// states to be connunicated across threads
@@ -293,20 +211,33 @@ namespace ldrp {
 		} _nt;
 
 		using SampleBuffer = std::vector< std::deque< sick_scansegment_xd::ScanSegmentParserOutput > >;
-		struct FilterContext {	// storage for each filter instance that needs to be synced between threads
-			std::unique_ptr<std::thread> thread{ nullptr };
+		struct FilterInstance {	// storage for each filter instance that needs to be synced between threads
+			FilterInstance(const uint32_t f_idx) : index{f_idx} {}
+			FilterInstance(const FilterInstance&) = delete;
+			FilterInstance(FilterInstance&&) = default;
+
+			const uint32_t index;
 			SampleBuffer samples{};
-			std::condition_variable link_state;
+
+			std::unique_ptr<std::thread> thread{ nullptr };
 			std::mutex link_mutex;
+			std::condition_variable link_condition;
+			uint32_t link_state{ 0 };
 		};
 
 	public:
 		std::unique_ptr<std::thread> _lidar_thread{ nullptr };
-		std::vector<ldrp::LidarImpl::FilterContext> _filter_threads{ 0 };
-		std::deque<uint32_t> _finished_threads{};
+		std::vector<std::unique_ptr<FilterInstance> > _filter_threads{};	// need pointers since filter instance doesn't like to be copied (vector impl)
+		std::deque<uint32_t> _finished_queue{};
 		std::mutex
 			_finished_queue_mutex{};
+		std::shared_mutex
 			_pose_mutex{};
+		frc::TimeInterpolatableBuffer<frc::Pose3d> _pose_buffer{
+			units::time::second_t{ _config.pose_storage_window },
+			&lerpClosest<const frc::Pose3d&>
+		};
+		PCDTarWriter pcd_writer{};
 
 		struct {	// filtering static buffers
 			
@@ -314,13 +245,66 @@ namespace ldrp {
 
 
 	public:
-		void filterWorker() {
+		void filterWorker(FilterInstance* f_inst) {
 			// this function represents the alternative thread that filters the newest collection of points
 
-			// 1. transform points based on timestamp
-			// 2. run filtering on points
-			// 3. update accumulator
-			// 4. [when configured] update map
+			for(;this->_state.enable_threads.load();) {
+
+				pcl::PointCloud<pcl::PointXYZ> point_cloud;
+
+				// 1. transform points based on timestamp
+				for(size_t i = 0; i < f_inst->samples.size(); i++) {
+					for(size_t j = 0; j < f_inst->samples[i].size(); j++) {
+						const sick_scansegment_xd::ScanSegmentParserOutput& segment = f_inst->samples[i][j];
+
+						_pose_mutex.lock_shared();	// other threads can read from the buffer as well
+						std::optional<frc::Pose3d> ts_pose = this->_pose_buffer.Sample(
+								units::time::second_t{ segment.timestamp_sec + (segment.timestamp_nsec * 1E-9) } );
+						_pose_mutex.unlock_shared();
+
+						if(!ts_pose.has_value()) continue;	// maybe store more recent pose incase of failure?
+						const frc::Pose3d pose = *ts_pose;	// need to convert to transform matrix
+
+						for(const sick_scansegment_xd::ScanSegmentParserOutput::Scangroup& scan_group : segment.scandata) {
+							for(const sick_scansegment_xd::ScanSegmentParserOutput::Scanline& scan_lines: scan_group.scanlines) {
+								for(const sick_scansegment_xd::ScanSegmentParserOutput::LidarPoint& lidar_point : scan_lines.points) {
+
+									// also filter by range here?
+									point_cloud.points.emplace_back(lidar_point.x, lidar_point.y, lidar_point.z);
+									
+								}
+							}
+						} // loop points per segment
+
+					}
+				} // loop segments
+
+				point_cloud.width = point_cloud.points.size();
+				point_cloud.height = 1;
+				point_cloud.is_dense = true;
+				// point_cloud.header.stamp = {};	// somehow average all the segment timestamps?
+
+				if(this->_config.enable_pcd_logging) {
+					this->pcd_writer.addCloud(point_cloud);
+				}
+
+				// 2. run filtering on points
+				// 3. update accumulator
+				// 4. [when configured] update map
+
+				// processing finished, push instance idx to queue
+				f_inst->link_state = false;
+				this->_finished_queue_mutex.lock();
+				this->_finished_queue.push_back(f_inst->index);
+				this->_finished_queue_mutex.unlock();
+				// wait for signal to continue...
+				std::unique_lock<std::mutex> lock{ f_inst->link_mutex };
+				for(;this->_state.enable_threads.load() && !f_inst->link_state;) {
+					f_inst->link_condition.wait(lock);
+				}
+
+			}
+
 		}
 		void lidarWorker() {
 
@@ -365,6 +349,10 @@ namespace ldrp {
 				fifo_timestamp scan_timestamp{};
 				size_t scan_count{0};	// not used but we need for a param
 
+				if(this->_config.enable_pcd_logging) {
+					this->pcd_writer.setFile(this->_config.pcd_log_fname);
+				}
+
 				// main loop!
 				for(;this->_state.enable_threads.load();) {
 
@@ -374,15 +362,33 @@ namespace ldrp {
 
 						if(filled_segments >= this->_config.enabled_segments) {	// if we have aquired sufficient samples...
 							LDRP_LOG( LOG_DEBUG, "LDRP Worker [Aquisition Loop]: Aquisition quota satisfied after {} loops - exporting buffer to thread...", aquisition_loop_count )
+
 							// attempt to find or create a thread for processing the frame
+							this->_finished_queue_mutex.lock();	// aquire mutex for queue
+							if(this->_finished_queue.size() > 0) {
 
-							// THREAD POOL RAAAAAHHHHH :O
-							// this->_finished_queue_mutex.lock();
-							// if(this->_finished_threads.size() > 0) {
-							// 	const uint32_t filter_idx = this->_finished_threads.
-							// }
+								const uint32_t filter_idx = this->_finished_queue.front();	// maybe check that this is valid?
+								this->_finished_queue.pop_front();
+								this->_finished_queue_mutex.unlock();
+								FilterInstance& f_inst = *this->_filter_threads[filter_idx];
+								std::swap(f_inst.samples, frame_segments);		// figure out where we want to clear the buffer that is swapped in so we don't start with old data in the queues
+								f_inst.link_state = true;
+								f_inst.link_condition.notify_all();
+								break;
 
-							break;	// if successful
+							} else {
+								this->_finished_queue_mutex.unlock();
+								if(this->_filter_threads.size() < this->_config.max_filter_threads) {	// start a new thread
+
+									// create a new thread and swap in the sample
+									this->_filter_threads.emplace_back( std::make_unique<FilterInstance>( static_cast<uint32_t>(this->_filter_threads.size()) ) );
+									FilterInstance& f_inst = *this->_filter_threads.back();
+									std::swap(f_inst.samples, frame_segments);
+									f_inst.thread.reset( new std::thread{&LidarImpl::filterWorker, this, &f_inst} );
+									break;
+
+								}
+							}
 						}	// insufficient samples or no thread available... (keep updating the current frame)
 						if(udp_fifo->Pop(udp_payload_bytes, scan_timestamp, scan_count)) {	// blocks until packet is received
 
@@ -409,7 +415,7 @@ namespace ldrp {
 										filled_segments |= seg_bit;		// save this segment as finished by enabling it's bit
 									}
 								}
-								this->_nt.last_parsed_seg_idx.Set( parsed_segment.segmentIndex );
+								this->_nt.last_parsed_seg_idx.Set( log2(seg_bit) );
 
 							} else {
 								LDRP_LOG( LOG_DEBUG && LOG_VERBOSE, "LDRP Worker [Aquisition Loop]: Failed to parse bytes from UdpReceiver." )
@@ -426,6 +432,16 @@ namespace ldrp {
 
 			} else {	// udp receiver launch thread
 				LDRP_LOG( LOG_STANDARD, "LDRP Worker [Init]: UdpReceiver thread failed to start. Exitting..." )
+			}
+
+			this->pcd_writer.closeIO();
+
+			// join and delete all filter instances
+			for(std::unique_ptr<FilterInstance>& f_inst : this->_filter_threads) {
+				if(f_inst->thread && f_inst->thread->joinable()) {
+					f_inst->thread->join();
+				}
+				delete f_inst->thread.release();
 			}
 
 			// close and deallocate udp receiver
@@ -505,13 +521,32 @@ namespace ldrp {
 		return STATUS_PREREQ_UNINITIALIZED;
 	}
 
-	const status_t updateWorldPose(const float* xyz, const float* qxyz, const float qw) {
+	const status_t updateWorldPose(const float* xyz, const float* qxyz, const float qw, const uint64_t ts_ms) {
 		if(LidarImpl::_global) {
+			const units::time::second_t timestamp{
+				ts_ms == 0 ?
+					crno::duration<double>{ crno::hrc::now().time_since_epoch() }.count() :
+					(double)ts_ms / 1e6
+			};
 			LidarImpl::_global->_pose_mutex.lock();
-			{
-				// TODO - add to timestamped queue or whatever we callin it
-			}
+			LidarImpl::_global->_pose_buffer.AddSample(
+				timestamp,
+				frc::Pose3d{
+					units::meter_t{ xyz[0] },
+					units::meter_t{ xyz[1] },
+					units::meter_t{ xyz[2] },
+					frc::Rotation3d{
+						frc::Quaternion{
+							qw,
+							qxyz[1],
+							qxyz[2],
+							qxyz[3]
+						}
+					}
+				}
+			);
 			LidarImpl::_global->_pose_mutex.unlock();
+			return STATUS_SUCCESS;
 		}
 		return STATUS_PREREQ_UNINITIALIZED;
 	}
