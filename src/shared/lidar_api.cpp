@@ -31,6 +31,7 @@
 #include <frc/interpolation/TimeInterpolatableBuffer.h>
 #include <networktables/NetworkTableInstance.h>
 #include <networktables/NetworkTable.h>
+#include <networktables/BooleanTopic.h>
 #include <networktables/IntegerTopic.h>
 #include <networktables/DoubleTopic.h>
 #include <networktables/FloatArrayTopic.h>
@@ -220,9 +221,13 @@ namespace ldrp {
 			SampleBuffer samples{};
 
 			std::unique_ptr<std::thread> thread{ nullptr };
-			std::mutex link_mutex;
+			// std::mutex link_mutex;
 			std::condition_variable link_condition;
 			uint32_t link_state{ 0 };
+
+			struct {
+				nt::BooleanEntry is_active;
+			} nt;
 		};
 
 	public:
@@ -248,8 +253,11 @@ namespace ldrp {
 		void filterWorker(FilterInstance* f_inst) {
 			// this function represents the alternative thread that filters the newest collection of points
 
+			f_inst->nt.is_active = this->_nt.base->GetSubTable("Filter Theads")->GetBooleanTopic( fmt::format("inst {} activity") ).GetEntry(false);
+
 			for(;this->_state.enable_threads.load();) {
 
+				f_inst->nt.is_active.Set(true);
 				pcl::PointCloud<pcl::PointXYZ> point_cloud;
 
 				// 1. transform points based on timestamp
@@ -259,7 +267,7 @@ namespace ldrp {
 
 						_pose_mutex.lock_shared();	// other threads can read from the buffer as well
 						std::optional<frc::Pose3d> ts_pose = this->_pose_buffer.Sample(
-								units::time::second_t{ segment.timestamp_sec + (segment.timestamp_nsec * 1E-9) } );
+							units::time::second_t{ segment.timestamp_sec + (segment.timestamp_nsec * 1E-9) } );
 						_pose_mutex.unlock_shared();
 
 						if(!ts_pose.has_value()) continue;	// maybe store more recent pose incase of failure?
@@ -293,12 +301,11 @@ namespace ldrp {
 				// 4. [when configured] update map
 
 				// processing finished, push instance idx to queue
+				f_inst->nt.is_active.Set(false);
 				f_inst->link_state = false;
-				this->_finished_queue_mutex.lock();
+				std::unique_lock<std::mutex> lock{ this->_finished_queue_mutex };
 				this->_finished_queue.push_back(f_inst->index);
-				this->_finished_queue_mutex.unlock();
 				// wait for signal to continue...
-				std::unique_lock<std::mutex> lock{ f_inst->link_mutex };
 				for(;this->_state.enable_threads.load() && !f_inst->link_state;) {
 					f_inst->link_condition.wait(lock);
 				}
