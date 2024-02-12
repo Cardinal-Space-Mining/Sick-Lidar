@@ -55,6 +55,7 @@ namespace std {
 	}
 }
 namespace crno = std::chrono;
+using namespace std::chrono_literals;
 
 
 
@@ -187,7 +188,7 @@ namespace ldrp {
 
 			const uint64_t enabled_segments{ 0b111111111111 };	// 12 sections --> first 12 bits enabled (enable all section)
 			const uint32_t buffered_scans{ 1 };		// how many samples of each segment we require per aquisition
-			const uint32_t max_filter_threads{ 1 };
+			const uint32_t max_filter_threads{ 3 };
 			const bool enable_pcd_logging{ true };
 			const char* pcd_log_fname{ "lidar_points.tar" };
 			const double pose_storage_window{ 0.1 };	// how many seconds
@@ -220,7 +221,7 @@ namespace ldrp {
 			SampleBuffer samples{};
 
 			std::unique_ptr<std::thread> thread{ nullptr };
-			std::mutex link_mutex;
+			// std::mutex link_mutex;
 			std::condition_variable link_condition;
 			uint32_t link_state{ 0 };
 		};
@@ -248,110 +249,121 @@ namespace ldrp {
 		void filterWorker(FilterInstance* f_inst) {
 			// this function represents the alternative thread that filters the newest collection of points
 
+			LDRP_LOG( LOG_DEBUG, "LDRP Filter Thread: Instance initialized with id {}.", f_inst->index )
+
 			for(;this->_state.enable_threads.load();) {
 
-				pcl::PointCloud<pcl::PointXYZ> point_cloud;
+				// pcl::PointCloud<pcl::PointXYZ> point_cloud;
 
 				// 1. transform points based on timestamp
-				for(size_t i = 0; i < f_inst->samples.size(); i++) {
-					for(size_t j = 0; j < f_inst->samples[i].size(); j++) {
-						const sick_scansegment_xd::ScanSegmentParserOutput& segment = f_inst->samples[i][j];
+				// for(size_t i = 0; i < f_inst->samples.size(); i++) {
+				// 	for(size_t j = 0; j < f_inst->samples[i].size(); j++) {
+				// 		const sick_scansegment_xd::ScanSegmentParserOutput& segment = f_inst->samples[i][j];
 
-						_pose_mutex.lock_shared();	// other threads can read from the buffer as well
-						std::optional<frc::Pose3d> ts_pose = this->_pose_buffer.Sample(
-								units::time::second_t{ segment.timestamp_sec + (segment.timestamp_nsec * 1E-9) } );
-						_pose_mutex.unlock_shared();
+				// 		_pose_mutex.lock_shared();	// other threads can read from the buffer as well
+				// 		std::optional<frc::Pose3d> ts_pose = this->_pose_buffer.Sample(
+				// 				units::time::second_t{ segment.timestamp_sec + (segment.timestamp_nsec * 1E-9) } );
+				// 		_pose_mutex.unlock_shared();
 
-						if(!ts_pose.has_value()) continue;	// maybe store more recent pose incase of failure?
-						const frc::Pose3d pose = *ts_pose;	// need to convert to transform matrix
+				// 		if(!ts_pose.has_value()) continue;	// maybe store more recent pose incase of failure?
+				// 		const frc::Pose3d pose = *ts_pose;	// need to convert to transform matrix
 
-						for(const sick_scansegment_xd::ScanSegmentParserOutput::Scangroup& scan_group : segment.scandata) {
-							for(const sick_scansegment_xd::ScanSegmentParserOutput::Scanline& scan_lines: scan_group.scanlines) {
-								for(const sick_scansegment_xd::ScanSegmentParserOutput::LidarPoint& lidar_point : scan_lines.points) {
+				// 		for(const sick_scansegment_xd::ScanSegmentParserOutput::Scangroup& scan_group : segment.scandata) {
+				// 			for(const sick_scansegment_xd::ScanSegmentParserOutput::Scanline& scan_lines: scan_group.scanlines) {
+				// 				for(const sick_scansegment_xd::ScanSegmentParserOutput::LidarPoint& lidar_point : scan_lines.points) {
 
-									// also filter by range here?
-									point_cloud.points.emplace_back(lidar_point.x, lidar_point.y, lidar_point.z);
+				// 					// also filter by range here?
+				// 					point_cloud.points.emplace_back(lidar_point.x, lidar_point.y, lidar_point.z);
 									
-								}
-							}
-						} // loop points per segment
+				// 				}
+				// 			}
+				// 		} // loop points per segment
 
-					}
-				} // loop segments
+				// 	}
+				// } // loop segments
 
-				point_cloud.width = point_cloud.points.size();
-				point_cloud.height = 1;
-				point_cloud.is_dense = true;
-				// point_cloud.header.stamp = {};	// somehow average all the segment timestamps?
+				// point_cloud.width = point_cloud.points.size();
+				// point_cloud.height = 1;
+				// point_cloud.is_dense = true;
+				// // point_cloud.header.stamp = {};	// somehow average all the segment timestamps?
 
-				if(this->_config.enable_pcd_logging) {
-					this->pcd_writer.addCloud(point_cloud);
-				}
+				// if(this->_config.enable_pcd_logging) {
+				// 	this->pcd_writer.addCloud(point_cloud);
+				// }
 
 				// 2. run filtering on points
 				// 3. update accumulator
 				// 4. [when configured] update map
 
+				// TEST
+				LDRP_LOG( LOG_DEBUG, "LDRP Filter Thread [TEST]: Thread {} running... sleeping for 2.7 seconds.", f_inst->index )
+				std::this_thread::sleep_for(2.7s);
+				LDRP_LOG( LOG_DEBUG, "LDRP Filter Thread [TEST]: Thread {} finished sleeping.", f_inst->index )
+
 				// processing finished, push instance idx to queue
 				f_inst->link_state = false;
-				this->_finished_queue_mutex.lock();
+				// this->_finished_queue_mutex.lock();
+				std::unique_lock<std::mutex> lock{ this->_finished_queue_mutex };
 				this->_finished_queue.push_back(f_inst->index);
-				this->_finished_queue_mutex.unlock();
+				// this->_finished_queue_mutex.unlock();
 				// wait for signal to continue...
-				std::unique_lock<std::mutex> lock{ f_inst->link_mutex };
+				// std::unique_lock<std::mutex> lock{ f_inst->link_mutex };
 				for(;this->_state.enable_threads.load() && !f_inst->link_state;) {
 					f_inst->link_condition.wait(lock);
 				}
+				LDRP_LOG( LOG_DEBUG, "LDRP Filter Thread [TEST]: Thread {} recieved notification!", f_inst->index )
 
 			}
+
+			LDRP_LOG( LOG_DEBUG, "LDRP Filter Thread: Instance id {} exitted main loop. Waiting to be joined...", f_inst->index )
 
 		}
 		void lidarWorker() {
 
 			// (the next 30 lines or so are converted from scansegment_threads.cpp: sick_scansegment_xd::MsgPackThreads::runThreadCb())
 			// init udp receiver
-			sick_scansegment_xd::UdpReceiver* udp_receiver = nullptr;
-			for(;!udp_receiver && this->_state.enable_threads.load();) {
-				udp_receiver = new sick_scansegment_xd::UdpReceiver{};
-				if(udp_receiver->Init(
-					this->_config.lidar_hostname,	// udp receiver
-					this->_config.lidar_udp_port,	// udp port
-					this->_config.buffered_scans * SEGMENTS_PER_FRAME,	// udp fifo length -- really we should only need 1 or 2?
-					LOG_VERBOSE,						// verbose logging when our log level is verbose
-					false,								// should export to file?
-					this->_config.use_msgpack ? SCANDATA_MSGPACK : SCANDATA_COMPACT,	// scandata format (1 for msgpack)
-					nullptr	// fifo for payload data (for sharing a fifo)
-				)) {
-					LDRP_LOG( LOG_STANDARD, "LDRP Worker [Init]: UdpReceiver successfully connected to host {} on port {}!", this->_config.lidar_hostname, this->_config.lidar_udp_port )
-				} else {
-					LDRP_LOG( LOG_STANDARD, "LDRP Worker [Init]: UdpReceiver failed to connect to host {} on port {}. Retrying after 3 seconds...", this->_config.lidar_hostname, this->_config.lidar_udp_port )
-					delete udp_receiver;
-					udp_receiver = nullptr;
-					std::this_thread::sleep_for(crno::seconds{3});	// keep trying until successful
-				}
-			}
+			// sick_scansegment_xd::UdpReceiver* udp_receiver = nullptr;
+			// for(;!udp_receiver && this->_state.enable_threads.load();) {
+			// 	udp_receiver = new sick_scansegment_xd::UdpReceiver{};
+			// 	if(udp_receiver->Init(
+			// 		this->_config.lidar_hostname,	// udp receiver
+			// 		this->_config.lidar_udp_port,	// udp port
+			// 		this->_config.buffered_scans * SEGMENTS_PER_FRAME,	// udp fifo length -- really we should only need 1 or 2?
+			// 		LOG_VERBOSE,						// verbose logging when our log level is verbose
+			// 		false,								// should export to file?
+			// 		this->_config.use_msgpack ? SCANDATA_MSGPACK : SCANDATA_COMPACT,	// scandata format (1 for msgpack)
+			// 		nullptr	// fifo for payload data (for sharing a fifo)
+			// 	)) {
+			// 		LDRP_LOG( LOG_STANDARD, "LDRP Worker [Init]: UdpReceiver successfully connected to host {} on port {}!", this->_config.lidar_hostname, this->_config.lidar_udp_port )
+			// 	} else {
+			// 		LDRP_LOG( LOG_STANDARD, "LDRP Worker [Init]: UdpReceiver failed to connect to host {} on port {}. Retrying after 3 seconds...", this->_config.lidar_hostname, this->_config.lidar_udp_port )
+			// 		delete udp_receiver;
+			// 		udp_receiver = nullptr;
+			// 		std::this_thread::sleep_for(crno::seconds{3});	// keep trying until successful
+			// 	}
+			// }
 			// launch udp receiver
-			if(udp_receiver->Start()) {
-				LDRP_LOG( LOG_STANDARD, "LDRP Worker [Init]: UdpReceiver thread successfully launched!" )
+			// if(udp_receiver->Start()) {
+			// 	LDRP_LOG( LOG_STANDARD, "LDRP Worker [Init]: UdpReceiver thread successfully launched!" )
 
-				// defaults for crap we don't use
-				static sick_scan_xd::SickCloudTransform no_transform{};
-				static sick_scansegment_xd::MsgPackValidatorData default_validator_data_collector{};
-				static sick_scansegment_xd::MsgPackValidator default_validator{};
-				static sick_scansegment_xd::ScanSegmentParserConfig default_parser_config{};
+			// 	// defaults for crap we don't use
+			// 	static sick_scan_xd::SickCloudTransform no_transform{};
+			// 	static sick_scansegment_xd::MsgPackValidatorData default_validator_data_collector{};
+			// 	static sick_scansegment_xd::MsgPackValidator default_validator{};
+			// 	static sick_scansegment_xd::ScanSegmentParserConfig default_parser_config{};
 
-				// a queue for each segment we are sampling from so we can have a rolling set of aquired samples (when configured)
-				SampleBuffer frame_segments{ ::countBits(this->_config.enabled_segments) };	// init size to the number of enabled segments
+			// 	// a queue for each segment we are sampling from so we can have a rolling set of aquired samples (when configured)
+			// 	SampleBuffer frame_segments{ ::countBits(this->_config.enabled_segments) };	// init size to the number of enabled segments
 
-				sick_scansegment_xd::PayloadFifo* udp_fifo = udp_receiver->Fifo();
-				std::vector<uint8_t> udp_payload_bytes{};
-				sick_scansegment_xd::ScanSegmentParserOutput parsed_segment{};
-				fifo_timestamp scan_timestamp{};
-				size_t scan_count{0};	// not used but we need for a param
+			// 	sick_scansegment_xd::PayloadFifo* udp_fifo = udp_receiver->Fifo();
+			// 	std::vector<uint8_t> udp_payload_bytes{};
+			// 	sick_scansegment_xd::ScanSegmentParserOutput parsed_segment{};
+			// 	fifo_timestamp scan_timestamp{};
+			// 	size_t scan_count{0};	// not used but we need for a param
 
-				if(this->_config.enable_pcd_logging) {
-					this->pcd_writer.setFile(this->_config.pcd_log_fname);
-				}
+			// 	if(this->_config.enable_pcd_logging) {
+			// 		this->pcd_writer.setFile(this->_config.pcd_log_fname);
+			// 	}
 
 				// main loop!
 				for(;this->_state.enable_threads.load();) {
@@ -370,8 +382,9 @@ namespace ldrp {
 								const uint32_t filter_idx = this->_finished_queue.front();	// maybe check that this is valid?
 								this->_finished_queue.pop_front();
 								this->_finished_queue_mutex.unlock();
+								LDRP_LOG( LOG_DEBUG, "LDRP Worker [Aquisition Loop]: Popped filter instance {} from finished queue. Notifying...", filter_idx )
 								FilterInstance& f_inst = *this->_filter_threads[filter_idx];
-								std::swap(f_inst.samples, frame_segments);		// figure out where we want to clear the buffer that is swapped in so we don't start with old data in the queues
+								// std::swap(f_inst.samples, frame_segments);		// figure out where we want to clear the buffer that is swapped in so we don't start with old data in the queues
 								f_inst.link_state = true;
 								f_inst.link_condition.notify_all();
 								break;
@@ -383,58 +396,67 @@ namespace ldrp {
 									// create a new thread and swap in the sample
 									this->_filter_threads.emplace_back( std::make_unique<FilterInstance>( static_cast<uint32_t>(this->_filter_threads.size()) ) );
 									FilterInstance& f_inst = *this->_filter_threads.back();
-									std::swap(f_inst.samples, frame_segments);
+									// std::swap(f_inst.samples, frame_segments);
 									f_inst.thread.reset( new std::thread{&LidarImpl::filterWorker, this, &f_inst} );
 									break;
 
 								}
 							}
 						}	// insufficient samples or no thread available... (keep updating the current frame)
-						if(udp_fifo->Pop(udp_payload_bytes, scan_timestamp, scan_count)) {	// blocks until packet is received
+						// if(udp_fifo->Pop(udp_payload_bytes, scan_timestamp, scan_count)) {	// blocks until packet is received
 
-							if(this->_config.use_msgpack ?	// parse based on format
-								sick_scansegment_xd::MsgPackParser::Parse(
-									udp_payload_bytes, scan_timestamp, no_transform, parsed_segment,
-									default_validator_data_collector, default_validator,
-									false, false, true, LOG_VERBOSE)
-								:
-								sick_scansegment_xd::CompactDataParser::Parse(default_parser_config,
-									udp_payload_bytes, scan_timestamp, no_transform, parsed_segment,
-									true, LOG_VERBOSE)
-							) {	// if successful parse
-								LDRP_LOG( LOG_DEBUG && LOG_VERBOSE, "LDRP Worker [Aquisition Loop]: Successfully parsed scan segment idx {}!", parsed_segment.segmentIndex )
+						// 	if(this->_config.use_msgpack ?	// parse based on format
+						// 		sick_scansegment_xd::MsgPackParser::Parse(
+						// 			udp_payload_bytes, scan_timestamp, no_transform, parsed_segment,
+						// 			default_validator_data_collector, default_validator,
+						// 			false, false, true, LOG_VERBOSE)
+						// 		:
+						// 		sick_scansegment_xd::CompactDataParser::Parse(default_parser_config,
+						// 			udp_payload_bytes, scan_timestamp, no_transform, parsed_segment,
+						// 			true, LOG_VERBOSE)
+						// 	) {	// if successful parse
+						// 		LDRP_LOG( LOG_DEBUG && LOG_VERBOSE, "LDRP Worker [Aquisition Loop]: Successfully parsed scan segment idx {}!", parsed_segment.segmentIndex )
 
-								const uint64_t seg_bit = (1ULL << parsed_segment.segmentIndex);
-								if(this->_config.enabled_segments & seg_bit) {	// if the segment'th bit is set
-									size_t idx = ::countBitsBeforeN(this->_config.enabled_segments, parsed_segment.segmentIndex);	// get the index of the enabled bit (for our buffer)
+						// 		const uint64_t seg_bit = (1ULL << parsed_segment.segmentIndex);
+						// 		if(this->_config.enabled_segments & seg_bit) {	// if the segment'th bit is set
+						// 			size_t idx = ::countBitsBeforeN(this->_config.enabled_segments, parsed_segment.segmentIndex);	// get the index of the enabled bit (for our buffer)
 
-									frame_segments[idx].emplace_front();	// create empty segment buffer
-									::swapSegmentsNoIMU(frame_segments[idx].front(), parsed_segment);		// efficient buffer transfer (no deep copying!)
-									if(frame_segments[idx].size() >= this->_config.buffered_scans) {
-										frame_segments[idx].resize(this->_config.buffered_scans);	// cut off oldest scans beyond the buffer size (resize() removes from the back)
-										filled_segments |= seg_bit;		// save this segment as finished by enabling it's bit
-									}
-								}
-								this->_nt.last_parsed_seg_idx.Set( log2(seg_bit) );
+						// 			frame_segments[idx].emplace_front();	// create empty segment buffer
+						// 			::swapSegmentsNoIMU(frame_segments[idx].front(), parsed_segment);		// efficient buffer transfer (no deep copying!)
+						// 			if(frame_segments[idx].size() >= this->_config.buffered_scans) {
+						// 				frame_segments[idx].resize(this->_config.buffered_scans);	// cut off oldest scans beyond the buffer size (resize() removes from the back)
+						// 				filled_segments |= seg_bit;		// save this segment as finished by enabling it's bit
+						// 			}
+						// 		}
+						// 		this->_nt.last_parsed_seg_idx.Set( log2(seg_bit) );
 
-							} else {
-								LDRP_LOG( LOG_DEBUG && LOG_VERBOSE, "LDRP Worker [Aquisition Loop]: Failed to parse bytes from UdpReceiver." )
-								this->_nt.last_parsed_seg_idx.Set( -1 );
-							}
+						// 	} else {
+						// 		LDRP_LOG( LOG_DEBUG && LOG_VERBOSE, "LDRP Worker [Aquisition Loop]: Failed to parse bytes from UdpReceiver." )
+						// 		this->_nt.last_parsed_seg_idx.Set( -1 );
+						// 	}
 
-						}
+						// }
+
+						// TEST
+						filled_segments |= (1ULL << aquisition_loop_count);
+						std::this_thread::sleep_for(100ms);
+
 					}
+
+					this->_finished_queue_mutex.lock();
+					LDRP_LOG( LOG_DEBUG, "LDRP Worker [TEST]: Aquisition cycle complete. Total threads spawned: {} | Total threads active: {} | Total threads in queue: {}.", this->_filter_threads.size(), this->_filter_threads.size() - this->_finished_queue.size(), this->_finished_queue.size() )
+					this->_finished_queue_mutex.unlock();
 
 					this->_nt.aquisition_ftime.Set( crno::duration<double>{crno::hrc::now() - aquisition_start}.count() );
 					this->_nt.aquisition_cycles.Set( aquisition_loop_count );
 
 				}
 
-			} else {	// udp receiver launch thread
-				LDRP_LOG( LOG_STANDARD, "LDRP Worker [Init]: UdpReceiver thread failed to start. Exitting..." )
-			}
+			// } else {	// udp receiver launch thread
+			// 	LDRP_LOG( LOG_STANDARD, "LDRP Worker [Init]: UdpReceiver thread failed to start. Exitting..." )
+			// }
 
-			this->pcd_writer.closeIO();
+			// this->pcd_writer.closeIO();
 
 			// join and delete all filter instances
 			for(std::unique_ptr<FilterInstance>& f_inst : this->_filter_threads) {
@@ -445,9 +467,9 @@ namespace ldrp {
 			}
 
 			// close and deallocate udp receiver
-			udp_receiver->Fifo()->Shutdown();
-			udp_receiver->Close();
-			delete udp_receiver;
+			// udp_receiver->Fifo()->Shutdown();
+			// udp_receiver->Close();
+			// delete udp_receiver;
 
 		}	// lidarWorker
 
