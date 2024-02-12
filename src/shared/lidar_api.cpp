@@ -253,7 +253,7 @@ namespace ldrp {
 		void filterWorker(FilterInstance* f_inst) {
 			// this function represents the alternative thread that filters the newest collection of points
 
-			f_inst->nt.is_active = this->_nt.base->GetSubTable("Filter Theads")->GetBooleanTopic( fmt::format("inst {} activity") ).GetEntry(false);
+			f_inst->nt.is_active = this->_nt.base->GetSubTable("Filter Theads")->GetBooleanTopic( fmt::format("inst {} activity", f_inst->index) ).GetEntry(false);
 
 			for(;this->_state.enable_threads.load();) {
 
