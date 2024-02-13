@@ -180,18 +180,41 @@ namespace ldrp {
 		inline static std::unique_ptr<LidarImpl> _global{ nullptr };
 
 
-		static constexpr size_t SEGMENTS_PER_FRAME = 12;
+		static constexpr size_t
+			MS100_SEGMENTS_PER_FRAME = 12U,
+			MS100_POINTS_PER_SEGMENT_ECHO = 10800U,
+			MS100_ECHOS_PER_POINT = 3U;
 		struct {	// configured constants/parameters
 			const std::string lidar_hostname{ "" };	// always fails when we give a specific hostname?
 			const int lidar_udp_port{ 2115 };
-			const bool use_msgpack{ true };
+			/* "While MSGPACK can be integrated easily using existing
+			 * libraries and is easy to parse, it requires more computing power and bandwidth than
+			 * the compact data format due to the descriptive names. Compact is significantly more
+			 * efficient and has a lower bandwidth." */
+			const bool use_msgpack{ false };
 
+			// NOTE: points within the same segment are not 'rotationally' aligned! (only temporally aligned)
 			const uint64_t enabled_segments{ 0b111111111111 };	// 12 sections --> first 12 bits enabled (enable all section)
 			const uint32_t buffered_scans{ 1 };		// how many samples of each segment we require per aquisition
 			const uint32_t max_filter_threads{ 1 };
 			const bool enable_pcd_logging{ true };
 			const char* pcd_log_fname{ "lidar_points.tar" };
 			const double pose_storage_window{ 0.1 };	// how many seconds
+
+			struct {
+				float
+					min_scan_theta,
+					max_scan_theta,
+					voxel_size_cm,
+					map_resolution_cm,
+					pmf_window_base_cm,
+					pmf_cell_size_cm,
+					pmf_init_distance_cm,
+					pmf_max_distance_cm,
+					pmf_slope;
+				int32_t
+					pmf_max_window_size;
+			} fpipeline;
 		} _config;
 
 		struct {	// states to be connunicated across threads
@@ -261,6 +284,9 @@ namespace ldrp {
 				pcl::PointCloud<pcl::PointXYZ> point_cloud;
 
 				// 1. transform points based on timestamp
+
+				// NOTE: we should presize the buffer based on expected number of points (see MS100_POINTS_PER_SEGMENT_ECHO)
+
 				for(size_t i = 0; i < f_inst->samples.size(); i++) {
 					for(size_t j = 0; j < f_inst->samples[i].size(); j++) {
 						const sick_scansegment_xd::ScanSegmentParserOutput& segment = f_inst->samples[i][j];
@@ -323,7 +349,7 @@ namespace ldrp {
 				if(udp_receiver->Init(
 					this->_config.lidar_hostname,	// udp receiver
 					this->_config.lidar_udp_port,	// udp port
-					this->_config.buffered_scans * SEGMENTS_PER_FRAME,	// udp fifo length -- really we should only need 1 or 2?
+					this->_config.buffered_scans * MS100_SEGMENTS_PER_FRAME,	// udp fifo length -- really we should only need 1 or 2?
 					LOG_VERBOSE,						// verbose logging when our log level is verbose
 					false,								// should export to file?
 					this->_config.use_msgpack ? SCANDATA_MSGPACK : SCANDATA_COMPACT,	// scandata format (1 for msgpack)
