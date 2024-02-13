@@ -8,6 +8,7 @@
 #include <type_traits>
 #include <algorithm>
 #include <iostream>
+#include <numbers>
 #include <cstdio>
 #include <memory>
 #include <chrono>
@@ -176,14 +177,14 @@ namespace ldrp {
 		}
 
 
-	public:
+	public:	// global inst, constant values, configs
 		inline static std::unique_ptr<LidarImpl> _global{ nullptr };
 
 
 		static constexpr size_t
 			MS100_SEGMENTS_PER_FRAME = 12U,
-			MS100_POINTS_PER_SEGMENT_ECHO = 10800U,
-			MS100_ECHOS_PER_POINT = 3U;
+			MS100_POINTS_PER_SEGMENT_ECHO = 900U,	// points per segment * segments per frame = 10800 points per frame (with 1 echo)
+			MS100_MAX_ECHOS_PER_POINT = 3U;			// echos get filterd when we apply different settings in the web dashboard
 		struct {	// configured constants/parameters
 			const std::string lidar_hostname{ "" };	// always fails when we give a specific hostname?
 			const int lidar_udp_port{ 2115 };
@@ -195,25 +196,30 @@ namespace ldrp {
 
 			// NOTE: points within the same segment are not 'rotationally' aligned! (only temporally aligned)
 			const uint64_t enabled_segments{ 0b111111111111 };	// 12 sections --> first 12 bits enabled (enable all section)
-			const uint32_t buffered_scans{ 1 };		// how many samples of each segment we require per aquisition
-			const uint32_t max_filter_threads{ 1 };
+			const uint32_t buffered_frames{ 1 };				// how many samples of each segment we require per aquisition
+			const uint32_t max_filter_threads{ (uint32_t)std::max((int)std::thread::hardware_concurrency() - 2, 1) };		// minimum of 1 thread, otherwise reserve the main thread and some extra margin for other processes
 			const bool enable_pcd_logging{ true };
 			const char* pcd_log_fname{ "lidar_points.tar" };
 			const double pose_storage_window{ 0.1 };	// how many seconds
+			const bool skip_invalid_pose_ts{ false };	// skip points for which we don't have a pose directly from localization
 
 			struct {
 				float
-					min_scan_theta,
-					max_scan_theta,
-					voxel_size_cm,
-					map_resolution_cm,
-					pmf_window_base_cm,
-					pmf_cell_size_cm,
-					pmf_init_distance_cm,
-					pmf_max_distance_cm,
-					pmf_slope;
+					min_scan_theta_deg =	-90.f,			// max scan theta angle used for cutoff -- see ms100 operating manual for coordinate system
+					max_scan_theta_deg =	+90.f,			// min scan theta angle used for cutoff
+					min_scan_range_cm =		10.f,			// the minimum scan range
+					// filter by intensity? (test this)
+
+					voxel_size_cm =			3.f,			// voxel cell size used during voxelization filter
+					map_resolution_cm =		5.f,		// the resolution of each grid cell
+					pmf_window_base_cm =	0.4f,
+					pmf_cell_size_cm =		5.f,
+					pmf_init_distance_cm =	5.f,
+					pmf_max_distance_cm =	12.f,
+					pmf_slope =				0.2f;
 				int32_t
-					pmf_max_window_size;
+					pmf_max_window_size =	40;
+
 			} fpipeline;
 		} _config;
 
@@ -223,7 +229,7 @@ namespace ldrp {
 			std::atomic<bool> enable_threads{false};
 		} _state;
 
-	protected:
+	protected:	// nt pointers and filter instance struct
 		struct {	// networktables
 			nt::NetworkTableInstance instance;
 			std::shared_ptr<nt::NetworkTable> base;
@@ -253,7 +259,7 @@ namespace ldrp {
 			} nt;
 		};
 
-	public:
+	public:	// main instance members
 		std::unique_ptr<std::thread> _lidar_thread{ nullptr };
 		std::vector<std::unique_ptr<FilterInstance> > _filter_threads{};	// need pointers since filter instance doesn't like to be copied (vector impl)
 		std::deque<uint32_t> _finished_queue{};
@@ -267,10 +273,6 @@ namespace ldrp {
 		};
 		PCDTarWriter pcd_writer{};
 
-		struct {	// filtering static buffers
-			
-		} _processing;
-
 
 	public:
 		void filterWorker(FilterInstance* f_inst) {
@@ -278,16 +280,24 @@ namespace ldrp {
 
 			f_inst->nt.is_active = this->_nt.base->GetSubTable("Filter Theads")->GetBooleanTopic( fmt::format("inst {} activity", f_inst->index) ).GetEntry(false);
 
+			// precalulcate values
+			const size_t max_points{ 
+				(MS100_POINTS_PER_SEGMENT_ECHO * MS100_MAX_ECHOS_PER_POINT)
+					* ::countBits(this->_config.enabled_segments)
+					* this->_config.buffered_frames
+			};
+			const frc::Pose3d default_pose{};
+			pcl::PointCloud<pcl::PointXYZ> point_cloud;		// reuse the buffer
+			point_cloud.points.reserve( max_points );
+
 			for(;this->_state.enable_threads.load();) {
 
 				f_inst->nt.is_active.Set(true);
-				pcl::PointCloud<pcl::PointXYZ> point_cloud;
 
 				// 1. transform points based on timestamp
+				point_cloud.clear();	// clear the vector and set w,h to 0
 
-				// NOTE: we should presize the buffer based on expected number of points (see MS100_POINTS_PER_SEGMENT_ECHO)
-
-				for(size_t i = 0; i < f_inst->samples.size(); i++) {
+				for(size_t i = 0; i < f_inst->samples.size(); i++) {			// we could theoretically multithread this part -- just use a mutex for inserting points into the master collection
 					for(size_t j = 0; j < f_inst->samples[i].size(); j++) {
 						const sick_scansegment_xd::ScanSegmentParserOutput& segment = f_inst->samples[i][j];
 
@@ -296,16 +306,30 @@ namespace ldrp {
 							units::time::second_t{ segment.timestamp_sec + (segment.timestamp_nsec * 1E-9) } );
 						_pose_mutex.unlock_shared();
 
-						if(!ts_pose.has_value()) continue;	// maybe store more recent pose incase of failure?
-						const frc::Pose3d pose = *ts_pose;	// need to convert to transform matrix
+						if(this->_config.skip_invalid_pose_ts && !ts_pose.has_value()) continue;
+						const frc::Pose3d& pose = ts_pose.has_value() ? *ts_pose : default_pose;	// need to convert to transform matrix
 
-						for(const sick_scansegment_xd::ScanSegmentParserOutput::Scangroup& scan_group : segment.scandata) {
-							for(const sick_scansegment_xd::ScanSegmentParserOutput::Scanline& scan_lines: scan_group.scanlines) {
-								for(const sick_scansegment_xd::ScanSegmentParserOutput::LidarPoint& lidar_point : scan_lines.points) {
+						for(const sick_scansegment_xd::ScanSegmentParserOutput::Scangroup& scan_group : segment.scandata) {		// "ms100 transmits 16 groups"
+#ifndef USE_FIRST_ECHO_ONLY
+							for(const sick_scansegment_xd::ScanSegmentParserOutput::Scanline& scan_line: scan_group.scanlines) {	// "each group has up to 3 echos"
+#else
+							if(scan_group.scanlines.size() > 0) {
+								const sick_scansegment_xd::ScanSegmentParserOutput::ScanLine& scan_line = scan_group.scanlines[0];
+#endif
+								for(const sick_scansegment_xd::ScanSegmentParserOutput::LidarPoint& lidar_point : scan_line.points) {
 
-									// also filter by range here?
-									point_cloud.points.emplace_back(lidar_point.x, lidar_point.y, lidar_point.z);
-									
+#ifndef DISABLE_PRELIM_POINT_FILTERING
+									const float azimuth_deg = lidar_point.azimuth * 180.f / std::numbers::pi_v<float>;
+									if(
+										(azimuth_deg <= this->_config.fpipeline.max_scan_theta_deg && azimuth_deg >= this->_config.fpipeline.max_scan_theta_deg)
+											&& (lidar_point.range * 1e2f > this->_config.fpipeline.min_scan_range_cm)
+									) {
+#else
+									{
+#endif
+										// transform point
+										point_cloud.points.emplace_back(lidar_point.x, lidar_point.y, lidar_point.z);
+									}
 								}
 							}
 						} // loop points per segment
@@ -349,7 +373,7 @@ namespace ldrp {
 				if(udp_receiver->Init(
 					this->_config.lidar_hostname,	// udp receiver
 					this->_config.lidar_udp_port,	// udp port
-					this->_config.buffered_scans * MS100_SEGMENTS_PER_FRAME,	// udp fifo length -- really we should only need 1 or 2?
+					this->_config.buffered_frames * MS100_SEGMENTS_PER_FRAME,	// udp fifo length -- really we should only need 1 or 2?
 					LOG_VERBOSE,						// verbose logging when our log level is verbose
 					false,								// should export to file?
 					this->_config.use_msgpack ? SCANDATA_MSGPACK : SCANDATA_COMPACT,	// scandata format (1 for msgpack)
@@ -363,7 +387,7 @@ namespace ldrp {
 					std::this_thread::sleep_for(crno::seconds{3});	// keep trying until successful
 				}
 			}
-			// launch udp receiver
+			// launch udp receiver -- if successful continue to main loop
 			if(udp_receiver->Start()) {
 				LDRP_LOG( LOG_STANDARD, "LDRP Worker [Init]: UdpReceiver thread successfully launched!" )
 
@@ -422,7 +446,7 @@ namespace ldrp {
 
 								}
 							}
-						}	// insufficient samples or no thread available... (keep updating the current frame)
+						}	// insufficient samples or no thread available... (keep updating the current framebuff)
 						if(udp_fifo->Pop(udp_payload_bytes, scan_timestamp, scan_count)) {	// blocks until packet is received
 
 							if(this->_config.use_msgpack ?	// parse based on format
@@ -443,8 +467,8 @@ namespace ldrp {
 
 									frame_segments[idx].emplace_front();	// create empty segment buffer
 									::swapSegmentsNoIMU(frame_segments[idx].front(), parsed_segment);		// efficient buffer transfer (no deep copying!)
-									if(frame_segments[idx].size() >= this->_config.buffered_scans) {
-										frame_segments[idx].resize(this->_config.buffered_scans);	// cut off oldest scans beyond the buffer size (resize() removes from the back)
+									if(frame_segments[idx].size() >= this->_config.buffered_frames) {
+										frame_segments[idx].resize(this->_config.buffered_frames);	// cut off oldest scans beyond the buffer size (resize() removes from the back)
 										filled_segments |= seg_bit;		// save this segment as finished by enabling it's bit
 									}
 								}
