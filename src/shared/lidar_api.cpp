@@ -17,6 +17,7 @@
 #include <deque>
 #include <mutex>
 #include <vector>
+#include <span>
 
 #include <pcl/pcl_config.h>
 #include <pcl/point_cloud.h>
@@ -170,6 +171,7 @@ namespace ldrp {
 			this->_nt.last_parsed_seg_idx = this->_nt.base->GetIntegerTopic("last segment").GetEntry(-1);
 			this->_nt.aquisition_cycles = this->_nt.base->GetIntegerTopic("aquisition loop count").GetEntry(0);
 			this->_nt.aquisition_ftime = this->_nt.base->GetDoubleTopic("aquisition frame time").GetEntry(0.0);
+			this->_nt.raw_scan_points = this->_nt.base->GetFloatArrayTopic("raw scan points").GetEntry( {} );
 		}
 		void shutdownNT() {
 			this->_nt.instance.Flush();
@@ -180,7 +182,11 @@ namespace ldrp {
 	public:	// global inst, constant values, configs
 		inline static std::unique_ptr<LidarImpl> _global{ nullptr };
 
-
+		enum : uint32_t {
+			PCD_LOGGING_NONE	= 0,
+			PCD_LOGGING_TAR		= (1 << 1),
+			PCD_LOGGING_NT		= (1 << 2),
+		};
 		static constexpr size_t
 			MS100_SEGMENTS_PER_FRAME = 12U,
 			MS100_POINTS_PER_SEGMENT_ECHO = 900U,	// points per segment * segments per frame = 10800 points per frame (with 1 echo)
@@ -198,7 +204,7 @@ namespace ldrp {
 			const uint64_t enabled_segments{ 0b111111111111 };	// 12 sections --> first 12 bits enabled (enable all section)
 			const uint32_t buffered_frames{ 1 };				// how many samples of each segment we require per aquisition
 			const uint32_t max_filter_threads{ (uint32_t)std::max((int)std::thread::hardware_concurrency() - 2, 1) };		// minimum of 1 thread, otherwise reserve the main thread and some extra margin for other processes
-			const bool enable_pcd_logging{ true };
+			const uint32_t pcd_logging_mode{ PCD_LOGGING_NT };
 			const char* pcd_log_fname{ "lidar_points.tar" };
 			const double pose_storage_window{ 0.1 };	// how many seconds
 			const bool skip_invalid_pose_ts{ false };	// skip points for which we don't have a pose directly from localization
@@ -238,6 +244,7 @@ namespace ldrp {
 				last_parsed_seg_idx,
 				aquisition_cycles;
 			nt::DoubleEntry aquisition_ftime;
+			nt::FloatArrayEntry raw_scan_points;
 		} _nt;
 
 		using SampleBuffer = std::vector< std::deque< sick_scansegment_xd::ScanSegmentParserOutput > >;
@@ -310,14 +317,16 @@ namespace ldrp {
 						const frc::Pose3d& pose = ts_pose.has_value() ? *ts_pose : default_pose;	// need to convert to transform matrix
 
 						for(const sick_scansegment_xd::ScanSegmentParserOutput::Scangroup& scan_group : segment.scandata) {		// "ms100 transmits 16 groups"
+#define USE_FIRST_ECHO_ONLY		// make a config option or grouping for this instead
 #ifndef USE_FIRST_ECHO_ONLY
 							for(const sick_scansegment_xd::ScanSegmentParserOutput::Scanline& scan_line: scan_group.scanlines) {	// "each group has up to 3 echos"
 #else
 							if(scan_group.scanlines.size() > 0) {
-								const sick_scansegment_xd::ScanSegmentParserOutput::ScanLine& scan_line = scan_group.scanlines[0];
+								const sick_scansegment_xd::ScanSegmentParserOutput::Scanline& scan_line = scan_group.scanlines[0];
 #endif
 								for(const sick_scansegment_xd::ScanSegmentParserOutput::LidarPoint& lidar_point : scan_line.points) {
 
+#define DISABLE_PRELIM_POINT_FILTERING	// option for this as well
 #ifndef DISABLE_PRELIM_POINT_FILTERING
 									const float azimuth_deg = lidar_point.azimuth * 180.f / std::numbers::pi_v<float>;
 									if(
@@ -337,13 +346,23 @@ namespace ldrp {
 					}
 				} // loop segments
 
-				point_cloud.width = point_cloud.points.size();
-				point_cloud.height = 1;
-				point_cloud.is_dense = true;
-				// point_cloud.header.stamp = {};	// somehow average all the segment timestamps?
+				if(this->_config.pcd_logging_mode) {
+					point_cloud.width = point_cloud.points.size();
+					point_cloud.height = 1;
+					point_cloud.is_dense = true;
+					// point_cloud.header.stamp = {};	// somehow average all the segment timestamps?
 
-				if(this->_config.enable_pcd_logging) {
-					this->pcd_writer.addCloud(point_cloud);
+					if(this->_config.pcd_logging_mode & PCD_LOGGING_TAR) {
+						this->pcd_writer.addCloud(point_cloud);
+					}
+					if(this->_config.pcd_logging_mode & PCD_LOGGING_NT) {
+						this->_nt.raw_scan_points.Set(
+							std::span<float>{
+								reinterpret_cast<float*>( point_cloud.points.data() ),
+								reinterpret_cast<float*>( point_cloud.points.data() + point_cloud.points.size() )
+							}
+						);
+					}
 				}
 
 				// 2. run filtering on points
@@ -406,7 +425,7 @@ namespace ldrp {
 				fifo_timestamp scan_timestamp{};
 				size_t scan_count{0};	// not used but we need for a param
 
-				if(this->_config.enable_pcd_logging) {
+				if(this->_config.pcd_logging_mode) {
 					this->pcd_writer.setFile(this->_config.pcd_log_fname);
 				}
 
@@ -491,7 +510,7 @@ namespace ldrp {
 				LDRP_LOG( LOG_STANDARD, "LDRP Worker [Init]: UdpReceiver thread failed to start. Exitting..." )
 			}
 
-			this->pcd_writer.closeIO();
+			this->pcd_writer.closeIO();		// doesn't do anything if we never initialized
 
 			// join and delete all filter instances
 			for(std::unique_ptr<FilterInstance>& f_inst : this->_filter_threads) {
