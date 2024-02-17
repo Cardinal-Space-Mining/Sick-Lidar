@@ -39,6 +39,7 @@
 #include <networktables/FloatArrayTopic.h>
 #include <networktables/DoubleArrayTopic.h>
 #include <DataLogManager.h>
+#include <wpi/DataLog.h>
 #endif
 #include <fmt/format.h>		// fmt is header only(?) so we should be able to pull in fmt as long as the wpilib submodule is present
 
@@ -58,6 +59,7 @@ namespace std {
 	}
 }
 namespace crno = std::chrono;
+using namespace std::chrono_literals;
 
 
 
@@ -257,9 +259,9 @@ namespace ldrp {
 			SampleBuffer samples{};
 
 			std::unique_ptr<std::thread> thread{ nullptr };
-			// std::mutex link_mutex;
+			std::mutex link_mutex;
 			std::condition_variable link_condition;
-			uint32_t link_state{ 0 };
+			std::atomic<uint32_t> link_state{ 0 };
 
 			struct {
 				nt::BooleanEntry is_active;
@@ -296,6 +298,8 @@ namespace ldrp {
 			const frc::Pose3d default_pose{};
 			pcl::PointCloud<pcl::PointXYZ> point_cloud;		// reuse the buffer
 			point_cloud.points.reserve( max_points );
+
+			LDRP_LOG( LOG_STANDARD, "LDRP Filter Instance {} [Init]: Resources initialized - running filter loop...", f_inst->index )
 
 			for(;this->_state.enable_threads.load();) {
 
@@ -336,7 +340,7 @@ namespace ldrp {
 #else
 									{
 #endif
-										// transform point
+										// TODO: transform point!
 										point_cloud.points.emplace_back(lidar_point.x, lidar_point.y, lidar_point.z);
 									}
 								}
@@ -344,7 +348,12 @@ namespace ldrp {
 						} // loop points per segment
 
 					}
+
+					f_inst->samples[i].clear();		// clear the queue so that when the buffer gets swapped back to main, the queues are fresh
+
 				} // loop segments
+
+				LDRP_LOG( LOG_DEBUG && LOG_VERBOSE, "LDRP Filter Instance {} [Filter Loop]: Collected {} points", f_inst->index, point_cloud.size() )
 
 				if(this->_config.pcd_logging_mode) {
 					point_cloud.width = point_cloud.points.size();
@@ -417,7 +426,7 @@ namespace ldrp {
 				static sick_scansegment_xd::ScanSegmentParserConfig default_parser_config{};
 
 				// a queue for each segment we are sampling from so we can have a rolling set of aquired samples (when configured)
-				SampleBuffer frame_segments{ ::countBits(this->_config.enabled_segments) };	// init size to the number of enabled segments
+				SampleBuffer frame_segments{ 0 };
 
 				sick_scansegment_xd::PayloadFifo* udp_fifo = udp_receiver->Fifo();
 				std::vector<uint8_t> udp_payload_bytes{};
@@ -425,13 +434,17 @@ namespace ldrp {
 				fifo_timestamp scan_timestamp{};
 				size_t scan_count{0};	// not used but we need for a param
 
-				if(this->_config.pcd_logging_mode) {
+				if(this->_config.pcd_logging_mode & PCD_LOGGING_TAR) {
 					this->pcd_writer.setFile(this->_config.pcd_log_fname);
 				}
 
 				// main loop!
+				LDRP_LOG( LOG_STANDARD, "LDRP Worker [Init]: Succesfully initialized all resources. Begining aquisition and filtering..." )
 				for(;this->_state.enable_threads.load();) {
 
+					wpi::DataLogManager::GetLog().Flush();
+
+					frame_segments.resize( ::countBits(this->_config.enabled_segments) );
 					const crno::hrc::time_point aquisition_start = crno::hrc::now();
 					size_t aquisition_loop_count = 0;
 					for(uint64_t filled_segments = 0; this->_state.enable_threads; aquisition_loop_count++) {	// loop until thread exit is called... (internal break allows for exit as well)
@@ -448,7 +461,7 @@ namespace ldrp {
 								this->_finished_queue_mutex.unlock();
 								FilterInstance& f_inst = *this->_filter_threads[filter_idx];
 								std::swap(f_inst.samples, frame_segments);		// figure out where we want to clear the buffer that is swapped in so we don't start with old data in the queues
-								f_inst.link_state = true;
+								f_inst.link_state.store(true);
 								f_inst.link_condition.notify_all();
 								break;
 
@@ -466,6 +479,8 @@ namespace ldrp {
 								}
 							}
 						}	// insufficient samples or no thread available... (keep updating the current framebuff)
+#define SIM_GENERATE_POINTS
+#ifndef SIM_GENERATE_POINTS
 						if(udp_fifo->Pop(udp_payload_bytes, scan_timestamp, scan_count)) {	// blocks until packet is received
 
 							if(this->_config.use_msgpack ?	// parse based on format
@@ -478,6 +493,42 @@ namespace ldrp {
 									udp_payload_bytes, scan_timestamp, no_transform, parsed_segment,
 									true, LOG_VERBOSE)
 							) {	// if successful parse
+#else
+						{
+							crno::hrc::time_point s = crno::hrc::now();
+							parsed_segment.scandata.resize(16);
+							for(size_t h = 0; h < 14; h++) {
+								auto& group = parsed_segment.scandata[h];
+								group.scanlines.resize(1);
+								auto& line = group.scanlines[0];
+								line.points.resize(30);
+								for(size_t v = 0; v < 30; v++) {
+									line.points[v] = sick_scansegment_xd::ScanSegmentParserOutput::LidarPoint{
+										(float)std::rand() / RAND_MAX * 100.f,
+										(float)std::rand() / RAND_MAX * 100.f,
+										(float)std::rand() / RAND_MAX * 100.f,
+										0.f, 0.f, 0.f, 0.f, 0U, 0U, 0U, 0U
+									};
+								}
+							}
+							for(size_t h = 14; h < 16; h++) {
+								auto& group = parsed_segment.scandata[h];
+								group.scanlines.resize(1);
+								auto& line = group.scanlines[0];
+								line.points.resize(240);
+								for(size_t v = 0; v < 240; v++) {
+									line.points[v] = sick_scansegment_xd::ScanSegmentParserOutput::LidarPoint{
+										(float)std::rand() / RAND_MAX * 100.f,
+										(float)std::rand() / RAND_MAX * 100.f,
+										(float)std::rand() / RAND_MAX * 100.f,
+										0.f, 0.f, 0.f, 0.f, 0U, 0U, 0U, 0U
+									};
+								}
+							}
+							parsed_segment.segmentIndex = aquisition_loop_count;
+							std::this_thread::sleep_until(s + (50ms / 12));
+							if constexpr(true) {
+#endif
 								LDRP_LOG( LOG_DEBUG && LOG_VERBOSE, "LDRP Worker [Aquisition Loop]: Successfully parsed scan segment idx {}!", parsed_segment.segmentIndex )
 
 								const uint64_t seg_bit = (1ULL << parsed_segment.segmentIndex);

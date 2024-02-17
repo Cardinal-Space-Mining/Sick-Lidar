@@ -45,6 +45,7 @@ int main(int argc, char** argv) {
 
 	status_t s{0};
 	s = ldrp::apiInit("", "lidar_log.wpilog");
+	s = ldrp::setLogLevel(1);
 	s = ldrp::lidarInit();
 
 // #ifdef WIN32
