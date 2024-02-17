@@ -38,6 +38,7 @@
 #include <networktables/DoubleTopic.h>
 #include <networktables/FloatArrayTopic.h>
 #include <networktables/DoubleArrayTopic.h>
+#include <networktables/RawTopic.h>
 #include <DataLogManager.h>
 #include <wpi/DataLog.h>
 #endif
@@ -173,7 +174,7 @@ namespace ldrp {
 			this->_nt.last_parsed_seg_idx = this->_nt.base->GetIntegerTopic("last segment").GetEntry(-1);
 			this->_nt.aquisition_cycles = this->_nt.base->GetIntegerTopic("aquisition loop count").GetEntry(0);
 			this->_nt.aquisition_ftime = this->_nt.base->GetDoubleTopic("aquisition frame time").GetEntry(0.0);
-			this->_nt.raw_scan_points = this->_nt.base->GetFloatArrayTopic("raw scan points").GetEntry( {} );
+			this->_nt.raw_scan_points = this->_nt.base->GetRawTopic("raw scan points").GetEntry( "PointXYZ_[]", {} );
 		}
 		void shutdownNT() {
 			this->_nt.instance.Flush();
@@ -246,7 +247,7 @@ namespace ldrp {
 				last_parsed_seg_idx,
 				aquisition_cycles;
 			nt::DoubleEntry aquisition_ftime;
-			nt::FloatArrayEntry raw_scan_points;
+			nt::RawEntry raw_scan_points;
 		} _nt;
 
 		using SampleBuffer = std::vector< std::deque< sick_scansegment_xd::ScanSegmentParserOutput > >;
@@ -366,9 +367,9 @@ namespace ldrp {
 					}
 					if(this->_config.pcd_logging_mode & PCD_LOGGING_NT) {
 						this->_nt.raw_scan_points.Set(
-							std::span<float>{
-								reinterpret_cast<float*>( point_cloud.points.data() ),
-								reinterpret_cast<float*>( point_cloud.points.data() + point_cloud.points.size() )
+							std::span<const uint8_t>{
+								reinterpret_cast<uint8_t*>( point_cloud.points.data() ),
+								reinterpret_cast<uint8_t*>( point_cloud.points.data() + point_cloud.points.size() )
 							}
 						);
 					}
@@ -442,7 +443,7 @@ namespace ldrp {
 				LDRP_LOG( LOG_STANDARD, "LDRP Worker [Init]: Succesfully initialized all resources. Begining aquisition and filtering..." )
 				for(;this->_state.enable_threads.load();) {
 
-					wpi::DataLogManager::GetLog().Flush();
+					// wpi::DataLogManager::GetLog().Flush();
 
 					frame_segments.resize( ::countBits(this->_config.enabled_segments) );
 					const crno::hrc::time_point aquisition_start = crno::hrc::now();
@@ -479,7 +480,7 @@ namespace ldrp {
 								}
 							}
 						}	// insufficient samples or no thread available... (keep updating the current framebuff)
-#define SIM_GENERATE_POINTS
+// #define SIM_GENERATE_POINTS
 #ifndef SIM_GENERATE_POINTS
 						if(udp_fifo->Pop(udp_payload_bytes, scan_timestamp, scan_count)) {	// blocks until packet is received
 
