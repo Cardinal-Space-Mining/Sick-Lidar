@@ -1,5 +1,6 @@
 #include "lidar_api.h"
 
+#include "filtering.h"
 #include "mem_utils.h"
 #include "pcd_streaming.h"
 
@@ -17,12 +18,20 @@
 #include <deque>
 #include <mutex>
 #include <vector>
+#include <limits>
 #include <span>
 
 #include <pcl/pcl_config.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <pcl/io/pcd_io.h>
+#include <pcl/filters/voxel_grid.h>
+#include <pcl/filters/crop_box.h>
+#include <pcl/filters/morphological_filter.h>
+#include <pcl/segmentation/progressive_morphological_filter.h>
+#include <pcl/segmentation/sac_segmentation.h>
+#include <pcl/sample_consensus/method_types.h>
+#include <pcl/sample_consensus/model_types.h>
 
 #ifndef USING_WPILIB
   #define USING_WPILIB false
@@ -217,10 +226,13 @@ namespace ldrp {
 					min_scan_theta_deg =	-90.f,			// max scan theta angle used for cutoff -- see ms100 operating manual for coordinate system
 					max_scan_theta_deg =	+90.f,			// min scan theta angle used for cutoff
 					min_scan_range_cm =		10.f,			// the minimum scan range
+					max_pmf_range_cm =		200.f,			// max range for points used in PMF
+					max_z_thresh_cm =		75.f,			// for the "mid cut" z-coord filter
+					min_z_thresh_cm =		25.f,
 					// filter by intensity? (test this)
 
 					voxel_size_cm =			3.f,			// voxel cell size used during voxelization filter
-					map_resolution_cm =		5.f,		// the resolution of each grid cell
+					map_resolution_cm =		5.f,			// the resolution of each grid cell
 					pmf_window_base_cm =	0.4f,
 					pmf_cell_size_cm =		5.f,
 					pmf_init_distance_cm =	5.f,
@@ -260,7 +272,7 @@ namespace ldrp {
 			SampleBuffer samples{};
 
 			std::unique_ptr<std::thread> thread{ nullptr };
-			std::mutex link_mutex;
+			// std::mutex link_mutex;
 			std::condition_variable link_condition;
 			std::atomic<uint32_t> link_state{ 0 };
 
@@ -298,7 +310,9 @@ namespace ldrp {
 			};
 			const frc::Pose3d default_pose{};
 			pcl::PointCloud<pcl::PointXYZ> point_cloud;		// reuse the buffer
+			std::vector<float> point_ranges;
 			point_cloud.points.reserve( max_points );
+			point_ranges.reserve( max_points );
 
 			LDRP_LOG( LOG_STANDARD, "LDRP Filter Instance {} [Init]: Resources initialized - running filter loop...", f_inst->index )
 
@@ -343,6 +357,7 @@ namespace ldrp {
 #endif
 										// TODO: transform point!
 										point_cloud.points.emplace_back(lidar_point.x, lidar_point.y, lidar_point.z);
+										point_ranges.push_back(lidar_point.range);
 									}
 								}
 							}
@@ -376,6 +391,99 @@ namespace ldrp {
 				}
 
 				// 2. run filtering on points
+				// {
+				// 	static const Eigen::Vector4f
+				// 		negative_infinity_4f{
+				// 			-std::numeric_limits<float>::infinity(),
+				// 			-std::numeric_limits<float>::infinity(),
+				// 			-std::numeric_limits<float>::infinity(),
+				// 			0.f
+				// 		};
+
+				// 	pcl::PointCloud<pcl::PointXYZ>::Ptr
+				// 		cloud_ptr = pcl::PointCloud<pcl::PointXYZ>::Ptr{ &point_cloud, [](auto p){} },
+				// 		voxelized_points{ new pcl::PointCloud<pcl::PointXYZ> };
+				// 	pcl::PointIndices::Ptr
+				// 		z_high_filtered{ new pcl::PointIndices },
+				// 		z_low_subset_filtered{ new pcl::PointIndices },
+				// 		z_mid_subset_filtered{ new pcl::PointIndices },
+				// 		range_filtered{ new pcl::PointIndices },
+				// 		pmf_filtered_ground{ new pcl::PointIndices },
+				// 		pmf_filtered_obstacles{ new pcl::PointIndices };
+
+				// 	pcl::VoxelGrid<pcl::PointXYZ> voxel_filter{};
+				// 	pcl::CropBox<pcl::PointXYZ> cartesian_filter{};
+
+				// 	// voxelize points
+				// 	voxel_filter.setInputCloud(cloud_ptr);
+				// 	voxel_filter.setLeafSize(
+				// 		this->_config.fpipeline.voxel_size_cm,
+				// 		this->_config.fpipeline.voxel_size_cm,
+				// 		this->_config.fpipeline.voxel_size_cm
+				// 	);
+				// 	voxel_filter.filter(*voxelized_points);
+
+				// 	cartesian_filter.setInputCloud(voxelized_points);
+				// 	cartesian_filter.setMin(negative_infinity_4f);
+
+				// 	// filter points under "high cut" thresh
+				// 	cartesian_filter.setMax( {
+				// 		std::numeric_limits<float>::infinity(),
+				// 		std::numeric_limits<float>::infinity(),
+				// 		this->_config.fpipeline.max_z_thresh_cm,
+				// 		0.f
+				// 	} );
+				// 	cartesian_filter.filter(z_high_filtered->indices);
+
+				// 	// filter points under "low cut" thresh
+				// 	cartesian_filter.setMax( {
+				// 		std::numeric_limits<float>::infinity(),
+				// 		std::numeric_limits<float>::infinity(),
+				// 		this->_config.fpipeline.min_z_thresh_cm,
+				// 		0.f
+				// 	} );
+				// 	cartesian_filter.setIndices(z_high_filtered);
+				// 	cartesian_filter.filter(z_low_subset_filtered->indices);
+
+				// 	// get the points inbetween high and low thresholds --> treated as wall obstacles
+				// 	pc_negate_selection(
+				// 		z_high_filtered->indices,
+				// 		z_low_subset_filtered->indices,
+				// 		z_mid_subset_filtered->indices
+				// 	);
+
+				// 	// filter close enough points for PMF
+				// 	pc_filter_ranges(
+				// 		point_ranges,
+				// 		z_low_subset_filtered->indices,
+				// 		range_filtered->indices,
+				// 		0.f, this->_config.fpipeline.max_pmf_range_cm
+				// 	);
+
+				// 	// apply pmf to selected points
+				// 	progressive_morph_filter(
+				// 		point_cloud,
+				// 		range_filtered->indices,
+				// 		pmf_filtered_ground->indices,
+				// 		this->_config.fpipeline.pmf_window_base_cm,
+				// 		this->_config.fpipeline.pmf_max_window_size,
+				// 		this->_config.fpipeline.pmf_cell_size_cm,
+				// 		this->_config.fpipeline.pmf_init_distance_cm,
+				// 		this->_config.fpipeline.pmf_max_distance_cm,
+				// 		this->_config.fpipeline.pmf_slope,
+				// 		false
+				// 	);
+				// 	// obstacles = base - ground
+				// 	pc_negate_selection(
+				// 		range_filtered->indices,
+				// 		pmf_filtered_ground->indices,
+				// 		pmf_filtered_obstacles->indices
+				// 	);
+
+				// 	// add "obstacle" and "wall" indices --> output! (to accumulator >>>)
+
+				// }
+
 				// 3. update accumulator
 				// 4. [when configured] update map
 
