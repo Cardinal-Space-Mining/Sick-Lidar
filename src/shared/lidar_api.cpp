@@ -111,15 +111,17 @@ static void swapSegmentsNoIMU(sick_scansegment_xd::ScanSegmentParserOutput& a, s
 #endif
 }
 
-static Eigen::Matrix4f getWorldTransform(const float* xyz, const float* qxyz, const float qw){
+/** Create a matrix for transforming points into world space given a pose relative to world space. */
+static Eigen::Matrix4f getWorldTransform(const float* xyz, const float* qxyz, const float qw) {
 	Eigen::Quaternionf q = Eigen::Quaternionf{qw, qxyz[1], qxyz[2], qxyz[3]};
 	Eigen::Matrix3f m3 = q.normalized().toRotationMatrix().inverse();
 
-
-	return Eigen::Matrix4f{{m3(0, 0), m3(0, 1), m3(0, 2), xyz[0]},
-						   {m3(1, 0), m3(1, 1), m3(1, 2), xyz[1]},
-						   {m3(2, 0), m3(2, 1), m3(2, 2), xyz[2]},
-						   {0, 	   0, 	     0,        1        }};
+	return Eigen::Matrix4f{
+		{m3(0, 0), m3(0, 1), m3(0, 2), xyz[0]},
+		{m3(1, 0), m3(1, 1), m3(1, 2), xyz[1]},
+		{m3(2, 0), m3(2, 1), m3(2, 2), xyz[2]},
+		{0,        0,        0,        1     }
+	};
 
 }
 
@@ -232,7 +234,7 @@ namespace ldrp {
 			const uint32_t pcd_logging_mode{ PCD_LOGGING_NT };
 			const char* pcd_log_fname{ "lidar_points.tar" };
 			const double pose_storage_window{ 0.1 };	// how many seconds
-			const bool skip_invalid_pose_ts{ false };	// skip points for which we don't have a pose directly from localization
+			const bool skip_invalid_transform_ts{ false };	// skip points for which we don't have a pose directly from localization
 
 			struct {
 				float
@@ -301,8 +303,8 @@ namespace ldrp {
 		std::mutex
 			_finished_queue_mutex{};
 		std::shared_mutex
-			_pose_mutex{};
-		frc::TimeInterpolatableBuffer<Eigen::Matrix4f> _pose_buffer{
+			_localization_mutex{};
+		frc::TimeInterpolatableBuffer<Eigen::Matrix4f> _transform_map{
 			units::time::second_t{ _config.pose_storage_window },
 			&lerpClosest<const Eigen::Matrix4f&>
 		};
@@ -340,12 +342,12 @@ namespace ldrp {
 					for(size_t j = 0; j < f_inst->samples[i].size(); j++) {
 						const sick_scansegment_xd::ScanSegmentParserOutput& segment = f_inst->samples[i][j];
 
-						_pose_mutex.lock_shared();	// other threads can read from the buffer as well
-						std::optional<Eigen::Matrix4f> ts_transform = this->_pose_buffer.Sample(
+						_localization_mutex.lock_shared();	// other threads can read from the buffer as well
+						std::optional<Eigen::Matrix4f> ts_transform = this->_transform_map.Sample(
 							units::time::second_t{ segment.timestamp_sec + (segment.timestamp_nsec * 1E-9) } );
-						_pose_mutex.unlock_shared();
+						_localization_mutex.unlock_shared();
 
-						if(this->_config.skip_invalid_pose_ts && !ts_transform.has_value()) continue;
+						if(this->_config.skip_invalid_transform_ts && !ts_transform.has_value()) continue;
 						const Eigen::Matrix4f& transform = ts_transform.has_value() ? *ts_transform : default_pose;	// need to convert to transform matrix
 
 						for(const sick_scansegment_xd::ScanSegmentParserOutput::Scangroup& scan_group : segment.scandata) {		// "ms100 transmits 16 groups"
@@ -370,8 +372,9 @@ namespace ldrp {
 #endif
 										Eigen::RowVector4f point {lidar_point.x, lidar_point.y, lidar_point.z, 1.f};
 										point *= transform;
+
 										point_cloud.points.emplace_back(*reinterpret_cast<pcl::PointXYZ*>(&point));
-                    point_ranges.push_back(lidar_point.range);
+										point_ranges.push_back(lidar_point.range);
 									}
 								}
 							}
@@ -779,12 +782,12 @@ namespace ldrp {
 					crno::duration<double>{ crno::hrc::now().time_since_epoch() }.count() :
 					(double)ts_ms / 1e6
 			};
-			LidarImpl::_global->_pose_mutex.lock();
-			LidarImpl::_global->_pose_buffer.AddSample(
+			LidarImpl::_global->_localization_mutex.lock();
+			LidarImpl::_global->_transform_map.AddSample(
 				timestamp,
-				getWorldTransform(xyz, qxyz, qw)
+				getWorldTransform(xyz, qxyz, qw)	// TODO: add static lidar offset pose!
 			);
-			LidarImpl::_global->_pose_mutex.unlock();
+			LidarImpl::_global->_localization_mutex.unlock();
 			return STATUS_SUCCESS;
 		}
 		return STATUS_PREREQ_UNINITIALIZED;
