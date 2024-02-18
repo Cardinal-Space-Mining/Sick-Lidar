@@ -1,5 +1,6 @@
 #include "lidar_api.h"
 
+#include "filtering.h"
 #include "mem_utils.h"
 #include "pcd_streaming.h"
 
@@ -17,12 +18,20 @@
 #include <deque>
 #include <mutex>
 #include <vector>
+#include <limits>
 #include <span>
 
 #include <pcl/pcl_config.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <pcl/io/pcd_io.h>
+#include <pcl/filters/voxel_grid.h>
+#include <pcl/filters/crop_box.h>
+#include <pcl/filters/morphological_filter.h>
+#include <pcl/segmentation/progressive_morphological_filter.h>
+#include <pcl/segmentation/sac_segmentation.h>
+#include <pcl/sample_consensus/method_types.h>
+#include <pcl/sample_consensus/model_types.h>
 
 #ifndef USING_WPILIB
   #define USING_WPILIB false
@@ -101,6 +110,21 @@ static void swapSegmentsNoIMU(sick_scansegment_xd::ScanSegmentParserOutput& a, s
 	std::swap(a.telegramCnt, b.telegramCnt);
 #endif
 }
+
+/** Create a matrix for transforming points into world space given a pose relative to world space. */
+static Eigen::Matrix4f getWorldTransform(const float* xyz, const float* qxyz, const float qw) {
+	Eigen::Quaternionf q = Eigen::Quaternionf{qw, qxyz[1], qxyz[2], qxyz[3]};
+	Eigen::Matrix3f m3 = q.normalized().toRotationMatrix().inverse();
+
+	return Eigen::Matrix4f{
+		{m3(0, 0), m3(0, 1), m3(0, 2), xyz[0]},
+		{m3(1, 0), m3(1, 1), m3(1, 2), xyz[1]},
+		{m3(2, 0), m3(2, 1), m3(2, 2), xyz[2]},
+		{0,        0,        0,        1     }
+	};
+
+}
+
 
 
 
@@ -210,17 +234,20 @@ namespace ldrp {
 			const uint32_t pcd_logging_mode{ PCD_LOGGING_NT };
 			const char* pcd_log_fname{ "lidar_points.tar" };
 			const double pose_storage_window{ 0.1 };	// how many seconds
-			const bool skip_invalid_pose_ts{ false };	// skip points for which we don't have a pose directly from localization
+			const bool skip_invalid_transform_ts{ false };	// skip points for which we don't have a pose directly from localization
 
 			struct {
 				float
 					min_scan_theta_deg =	-90.f,			// max scan theta angle used for cutoff -- see ms100 operating manual for coordinate system
 					max_scan_theta_deg =	+90.f,			// min scan theta angle used for cutoff
 					min_scan_range_cm =		10.f,			// the minimum scan range
+					max_pmf_range_cm =		200.f,			// max range for points used in PMF
+					max_z_thresh_cm =		75.f,			// for the "mid cut" z-coord filter
+					min_z_thresh_cm =		25.f,
 					// filter by intensity? (test this)
 
 					voxel_size_cm =			3.f,			// voxel cell size used during voxelization filter
-					map_resolution_cm =		5.f,		// the resolution of each grid cell
+					map_resolution_cm =		5.f,			// the resolution of each grid cell
 					pmf_window_base_cm =	0.4f,
 					pmf_cell_size_cm =		5.f,
 					pmf_init_distance_cm =	5.f,
@@ -260,7 +287,7 @@ namespace ldrp {
 			SampleBuffer samples{};
 
 			std::unique_ptr<std::thread> thread{ nullptr };
-			std::mutex link_mutex;
+			// std::mutex link_mutex;
 			std::condition_variable link_condition;
 			std::atomic<uint32_t> link_state{ 0 };
 
@@ -276,10 +303,10 @@ namespace ldrp {
 		std::mutex
 			_finished_queue_mutex{};
 		std::shared_mutex
-			_pose_mutex{};
-		frc::TimeInterpolatableBuffer<frc::Pose3d> _pose_buffer{
+			_localization_mutex{};
+		frc::TimeInterpolatableBuffer<Eigen::Matrix4f> _transform_map{
 			units::time::second_t{ _config.pose_storage_window },
-			&lerpClosest<const frc::Pose3d&>
+			&lerpClosest<const Eigen::Matrix4f&>
 		};
 		PCDTarWriter pcd_writer{};
 
@@ -296,9 +323,11 @@ namespace ldrp {
 					* ::countBits(this->_config.enabled_segments)
 					* this->_config.buffered_frames
 			};
-			const frc::Pose3d default_pose{};
+			const Eigen::Matrix4f default_pose = Eigen::Matrix4f::Identity();
 			pcl::PointCloud<pcl::PointXYZ> point_cloud;		// reuse the buffer
+			std::vector<float> point_ranges;
 			point_cloud.points.reserve( max_points );
+			point_ranges.reserve( max_points );
 
 			LDRP_LOG( LOG_STANDARD, "LDRP Filter Instance {} [Init]: Resources initialized - running filter loop...", f_inst->index )
 
@@ -313,13 +342,13 @@ namespace ldrp {
 					for(size_t j = 0; j < f_inst->samples[i].size(); j++) {
 						const sick_scansegment_xd::ScanSegmentParserOutput& segment = f_inst->samples[i][j];
 
-						_pose_mutex.lock_shared();	// other threads can read from the buffer as well
-						std::optional<frc::Pose3d> ts_pose = this->_pose_buffer.Sample(
+						_localization_mutex.lock_shared();	// other threads can read from the buffer as well
+						std::optional<Eigen::Matrix4f> ts_transform = this->_transform_map.Sample(
 							units::time::second_t{ segment.timestamp_sec + (segment.timestamp_nsec * 1E-9) } );
-						_pose_mutex.unlock_shared();
+						_localization_mutex.unlock_shared();
 
-						if(this->_config.skip_invalid_pose_ts && !ts_pose.has_value()) continue;
-						const frc::Pose3d& pose = ts_pose.has_value() ? *ts_pose : default_pose;	// need to convert to transform matrix
+						if(this->_config.skip_invalid_transform_ts && !ts_transform.has_value()) continue;
+						const Eigen::Matrix4f& transform = ts_transform.has_value() ? *ts_transform : default_pose;	// need to convert to transform matrix
 
 						for(const sick_scansegment_xd::ScanSegmentParserOutput::Scangroup& scan_group : segment.scandata) {		// "ms100 transmits 16 groups"
 #define USE_FIRST_ECHO_ONLY		// make a config option or grouping for this instead
@@ -341,8 +370,11 @@ namespace ldrp {
 #else
 									{
 #endif
-										// TODO: transform point!
-										point_cloud.points.emplace_back(lidar_point.x, lidar_point.y, lidar_point.z);
+										Eigen::RowVector4f point {lidar_point.x, lidar_point.y, lidar_point.z, 1.f};
+										point *= transform;
+
+										point_cloud.points.emplace_back(*reinterpret_cast<pcl::PointXYZ*>(&point));
+										point_ranges.push_back(lidar_point.range);
 									}
 								}
 							}
@@ -376,6 +408,99 @@ namespace ldrp {
 				}
 
 				// 2. run filtering on points
+				// {
+				// 	static const Eigen::Vector4f
+				// 		negative_infinity_4f{
+				// 			-std::numeric_limits<float>::infinity(),
+				// 			-std::numeric_limits<float>::infinity(),
+				// 			-std::numeric_limits<float>::infinity(),
+				// 			0.f
+				// 		};
+
+				// 	pcl::PointCloud<pcl::PointXYZ>::Ptr
+				// 		cloud_ptr = pcl::PointCloud<pcl::PointXYZ>::Ptr{ &point_cloud, [](auto p){} },
+				// 		voxelized_points{ new pcl::PointCloud<pcl::PointXYZ> };
+				// 	pcl::PointIndices::Ptr
+				// 		z_high_filtered{ new pcl::PointIndices },
+				// 		z_low_subset_filtered{ new pcl::PointIndices },
+				// 		z_mid_subset_filtered{ new pcl::PointIndices },
+				// 		range_filtered{ new pcl::PointIndices },
+				// 		pmf_filtered_ground{ new pcl::PointIndices },
+				// 		pmf_filtered_obstacles{ new pcl::PointIndices };
+
+				// 	pcl::VoxelGrid<pcl::PointXYZ> voxel_filter{};
+				// 	pcl::CropBox<pcl::PointXYZ> cartesian_filter{};
+
+				// 	// voxelize points
+				// 	voxel_filter.setInputCloud(cloud_ptr);
+				// 	voxel_filter.setLeafSize(
+				// 		this->_config.fpipeline.voxel_size_cm,
+				// 		this->_config.fpipeline.voxel_size_cm,
+				// 		this->_config.fpipeline.voxel_size_cm
+				// 	);
+				// 	voxel_filter.filter(*voxelized_points);
+
+				// 	cartesian_filter.setInputCloud(voxelized_points);
+				// 	cartesian_filter.setMin(negative_infinity_4f);
+
+				// 	// filter points under "high cut" thresh
+				// 	cartesian_filter.setMax( {
+				// 		std::numeric_limits<float>::infinity(),
+				// 		std::numeric_limits<float>::infinity(),
+				// 		this->_config.fpipeline.max_z_thresh_cm,
+				// 		0.f
+				// 	} );
+				// 	cartesian_filter.filter(z_high_filtered->indices);
+
+				// 	// filter points under "low cut" thresh
+				// 	cartesian_filter.setMax( {
+				// 		std::numeric_limits<float>::infinity(),
+				// 		std::numeric_limits<float>::infinity(),
+				// 		this->_config.fpipeline.min_z_thresh_cm,
+				// 		0.f
+				// 	} );
+				// 	cartesian_filter.setIndices(z_high_filtered);
+				// 	cartesian_filter.filter(z_low_subset_filtered->indices);
+
+				// 	// get the points inbetween high and low thresholds --> treated as wall obstacles
+				// 	pc_negate_selection(
+				// 		z_high_filtered->indices,
+				// 		z_low_subset_filtered->indices,
+				// 		z_mid_subset_filtered->indices
+				// 	);
+
+				// 	// filter close enough points for PMF
+				// 	pc_filter_ranges(
+				// 		point_ranges,
+				// 		z_low_subset_filtered->indices,
+				// 		range_filtered->indices,
+				// 		0.f, this->_config.fpipeline.max_pmf_range_cm
+				// 	);
+
+				// 	// apply pmf to selected points
+				// 	progressive_morph_filter(
+				// 		point_cloud,
+				// 		range_filtered->indices,
+				// 		pmf_filtered_ground->indices,
+				// 		this->_config.fpipeline.pmf_window_base_cm,
+				// 		this->_config.fpipeline.pmf_max_window_size,
+				// 		this->_config.fpipeline.pmf_cell_size_cm,
+				// 		this->_config.fpipeline.pmf_init_distance_cm,
+				// 		this->_config.fpipeline.pmf_max_distance_cm,
+				// 		this->_config.fpipeline.pmf_slope,
+				// 		false
+				// 	);
+				// 	// obstacles = base - ground
+				// 	pc_negate_selection(
+				// 		range_filtered->indices,
+				// 		pmf_filtered_ground->indices,
+				// 		pmf_filtered_obstacles->indices
+				// 	);
+
+				// 	// add "obstacle" and "wall" indices --> output! (to accumulator >>>)
+
+				// }
+
 				// 3. update accumulator
 				// 4. [when configured] update map
 
@@ -595,6 +720,7 @@ namespace ldrp {
 		return USING_WPILIB;
 	}
 
+
 	const status_t apiInit(const char* dlm_dir, const char* dlm_fname, double dlm_period, const int32_t log_lvl) {
 		if(!LidarImpl::_global) {
 			LidarImpl::_global = std::make_unique<LidarImpl>(dlm_dir, dlm_fname, dlm_period);
@@ -656,24 +782,12 @@ namespace ldrp {
 					crno::duration<double>{ crno::hrc::now().time_since_epoch() }.count() :
 					(double)ts_ms / 1e6
 			};
-			LidarImpl::_global->_pose_mutex.lock();
-			LidarImpl::_global->_pose_buffer.AddSample(
+			LidarImpl::_global->_localization_mutex.lock();
+			LidarImpl::_global->_transform_map.AddSample(
 				timestamp,
-				frc::Pose3d{
-					units::meter_t{ xyz[0] },
-					units::meter_t{ xyz[1] },
-					units::meter_t{ xyz[2] },
-					frc::Rotation3d{
-						frc::Quaternion{
-							qw,
-							qxyz[1],
-							qxyz[2],
-							qxyz[3]
-						}
-					}
-				}
+				getWorldTransform(xyz, qxyz, qw)	// TODO: add static lidar offset pose!
 			);
-			LidarImpl::_global->_pose_mutex.unlock();
+			LidarImpl::_global->_localization_mutex.unlock();
 			return STATUS_SUCCESS;
 		}
 		return STATUS_PREREQ_UNINITIALIZED;
