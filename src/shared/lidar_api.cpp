@@ -111,6 +111,19 @@ static void swapSegmentsNoIMU(sick_scansegment_xd::ScanSegmentParserOutput& a, s
 #endif
 }
 
+static Eigen::Matrix4f getWorldTransform(const float* xyz, const float* qxyz, const float qw){
+	Eigen::Quaternionf q = Eigen::Quaternionf{qw, qxyz[1], qxyz[2], qxyz[3]};
+	Eigen::Matrix3f m3 = q.normalized().toRotationMatrix().inverse();
+
+
+	return Eigen::Matrix4f{{m3(0, 0), m3(0, 1), m3(0, 2), xyz[0]},
+						   {m3(1, 0), m3(1, 1), m3(1, 2), xyz[1]},
+						   {m3(2, 0), m3(2, 1), m3(2, 2), xyz[2]},
+						   {0, 	   0, 	     0,        1        }};
+
+}
+
+
 
 
 
@@ -289,9 +302,9 @@ namespace ldrp {
 			_finished_queue_mutex{};
 		std::shared_mutex
 			_pose_mutex{};
-		frc::TimeInterpolatableBuffer<frc::Pose3d> _pose_buffer{
+		frc::TimeInterpolatableBuffer<Eigen::Matrix4f> _pose_buffer{
 			units::time::second_t{ _config.pose_storage_window },
-			&lerpClosest<const frc::Pose3d&>
+			&lerpClosest<const Eigen::Matrix4f&>
 		};
 		PCDTarWriter pcd_writer{};
 
@@ -308,7 +321,7 @@ namespace ldrp {
 					* ::countBits(this->_config.enabled_segments)
 					* this->_config.buffered_frames
 			};
-			const frc::Pose3d default_pose{};
+			const Eigen::Matrix4f default_pose = Eigen::Matrix4f::Identity();
 			pcl::PointCloud<pcl::PointXYZ> point_cloud;		// reuse the buffer
 			std::vector<float> point_ranges;
 			point_cloud.points.reserve( max_points );
@@ -328,12 +341,12 @@ namespace ldrp {
 						const sick_scansegment_xd::ScanSegmentParserOutput& segment = f_inst->samples[i][j];
 
 						_pose_mutex.lock_shared();	// other threads can read from the buffer as well
-						std::optional<frc::Pose3d> ts_pose = this->_pose_buffer.Sample(
+						std::optional<Eigen::Matrix4f> ts_transform = this->_pose_buffer.Sample(
 							units::time::second_t{ segment.timestamp_sec + (segment.timestamp_nsec * 1E-9) } );
 						_pose_mutex.unlock_shared();
 
-						if(this->_config.skip_invalid_pose_ts && !ts_pose.has_value()) continue;
-						const frc::Pose3d& pose = ts_pose.has_value() ? *ts_pose : default_pose;	// need to convert to transform matrix
+						if(this->_config.skip_invalid_pose_ts && !ts_transform.has_value()) continue;
+						const Eigen::Matrix4f& transform = ts_transform.has_value() ? *ts_transform : default_pose;	// need to convert to transform matrix
 
 						for(const sick_scansegment_xd::ScanSegmentParserOutput::Scangroup& scan_group : segment.scandata) {		// "ms100 transmits 16 groups"
 #define USE_FIRST_ECHO_ONLY		// make a config option or grouping for this instead
@@ -355,9 +368,10 @@ namespace ldrp {
 #else
 									{
 #endif
-										// TODO: transform point!
-										point_cloud.points.emplace_back(lidar_point.x, lidar_point.y, lidar_point.z);
-										point_ranges.push_back(lidar_point.range);
+										Eigen::RowVector4f point {lidar_point.x, lidar_point.y, lidar_point.z, 1.f};
+										point *= transform;
+										point_cloud.points.emplace_back(*reinterpret_cast<pcl::PointXYZ*>(&point));
+                    point_ranges.push_back(lidar_point.range);
 									}
 								}
 							}
@@ -703,6 +717,7 @@ namespace ldrp {
 		return USING_WPILIB;
 	}
 
+
 	const status_t apiInit(const char* dlm_dir, const char* dlm_fname, double dlm_period, const int32_t log_lvl) {
 		if(!LidarImpl::_global) {
 			LidarImpl::_global = std::make_unique<LidarImpl>(dlm_dir, dlm_fname, dlm_period);
@@ -767,19 +782,7 @@ namespace ldrp {
 			LidarImpl::_global->_pose_mutex.lock();
 			LidarImpl::_global->_pose_buffer.AddSample(
 				timestamp,
-				frc::Pose3d{
-					units::meter_t{ xyz[0] },
-					units::meter_t{ xyz[1] },
-					units::meter_t{ xyz[2] },
-					frc::Rotation3d{
-						frc::Quaternion{
-							qw,
-							qxyz[1],
-							qxyz[2],
-							qxyz[3]
-						}
-					}
-				}
+				getWorldTransform(xyz, qxyz, qw)
 			);
 			LidarImpl::_global->_pose_mutex.unlock();
 			return STATUS_SUCCESS;
