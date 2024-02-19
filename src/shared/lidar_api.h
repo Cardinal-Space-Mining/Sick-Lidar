@@ -68,7 +68,7 @@ namespace ldrp {
 	 * @param dlm_period - the time between file writes for the internal [wpi::DataLogManager]
 	 * @param log_lvl - the maximum log level that will be output: 0 = none, 1 = standard, 2 = verbose, 3 = VERBOOOSE! */
 	__API const status_t apiInit(
-		const char* dlm_dir = "", const char* dlm_fname = "", double dlm_period = 0.25,
+		const char* dlm_dir = "", const char* dlm_fname = "", double dlm_period = 0.05,
 		const int32_t log_lvl = 1);
 
 	/** Deletes the global api instance. Does not need to be called unless a hard reset is necessary. */

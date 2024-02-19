@@ -168,7 +168,7 @@ namespace ldrp {
 	/** Interfacing and Filtering Implementation (singleton usage) */
 	struct LidarImpl {
 	public:
-		LidarImpl(const char* dlm_dir = "", const char* dlm_fname = "", double dlm_period = 0.25) {
+		LidarImpl(const char* dlm_dir = "", const char* dlm_fname = "", double dlm_period = 0.05) {
 			wpi::DataLogManager::Start(dlm_dir, dlm_fname, dlm_period);
 			this->initNT();
 
@@ -364,7 +364,7 @@ namespace ldrp {
 #ifndef DISABLE_PRELIM_POINT_FILTERING
 									const float azimuth_deg = lidar_point.azimuth * 180.f / std::numbers::pi_v<float>;
 									if(
-										(azimuth_deg <= this->_config.fpipeline.max_scan_theta_deg && azimuth_deg >= this->_config.fpipeline.max_scan_theta_deg)
+										(azimuth_deg <= this->_config.fpipeline.max_scan_theta_deg && azimuth_deg >= this->_config.fpipeline.min_scan_theta_deg)
 											&& (lidar_point.range * 1e2f > this->_config.fpipeline.min_scan_range_cm)
 									) {
 #else
@@ -519,6 +519,8 @@ namespace ldrp {
 		}
 		void lidarWorker() {
 
+			wpi::DataLogManager::SignalNewDSDataOccur();
+
 			// (the next 30 lines or so are converted from scansegment_threads.cpp: sick_scansegment_xd::MsgPackThreads::runThreadCb())
 			// init udp receiver
 			sick_scansegment_xd::UdpReceiver* udp_receiver = nullptr;
@@ -605,7 +607,7 @@ namespace ldrp {
 								}
 							}
 						}	// insufficient samples or no thread available... (keep updating the current framebuff)
-// #define SIM_GENERATE_POINTS
+#define SIM_GENERATE_POINTS
 #ifndef SIM_GENERATE_POINTS
 						if(udp_fifo->Pop(udp_payload_bytes, scan_timestamp, scan_count)) {	// blocks until packet is received
 
@@ -621,6 +623,13 @@ namespace ldrp {
 							) {	// if successful parse
 #else
 						{
+							static constexpr float const
+								phi_angles_deg[] = { -22.2, -17.2, -12.3, -7.3, -2.5, 2.2, 7.0, 12.9, 17.2, 21.8, 26.6, 31.5, 36.7, 42.2 },
+								dense_phi_angles_deg[] = { 0, 34.2 },
+								deg_to_rad = std::numbers::pi_v<float> / 180.f;
+
+							const float base_theta = aquisition_loop_count * 30;
+
 							crno::hrc::time_point s = crno::hrc::now();
 							parsed_segment.scandata.resize(16);
 							for(size_t h = 0; h < 14; h++) {
@@ -628,12 +637,23 @@ namespace ldrp {
 								group.scanlines.resize(1);
 								auto& line = group.scanlines[0];
 								line.points.resize(30);
+								const float
+									phi = phi_angles_deg[h] * deg_to_rad,
+									sin_phi = sin(phi),
+									cos_phi = cos(phi);
 								for(size_t v = 0; v < 30; v++) {
+									const float
+										theta = (base_theta + v - 180.f) * deg_to_rad,
+										sin_theta = sin(theta),
+										cos_theta = cos(theta),
+
+										range = (float)std::rand() / RAND_MAX * 100.f;
+
 									line.points[v] = sick_scansegment_xd::ScanSegmentParserOutput::LidarPoint{
-										(float)std::rand() / RAND_MAX * 100.f,
-										(float)std::rand() / RAND_MAX * 100.f,
-										(float)std::rand() / RAND_MAX * 100.f,
-										0.f, 0.f, 0.f, 0.f, 0U, 0U, 0U, 0U
+										range * cos_phi * cos_theta,
+										range * cos_phi * sin_theta,
+										range * sin_phi,
+										1.f, range, theta, phi, (int)h, 0U, (int)v, 0U
 									};
 								}
 							}
@@ -642,17 +662,28 @@ namespace ldrp {
 								group.scanlines.resize(1);
 								auto& line = group.scanlines[0];
 								line.points.resize(240);
+								const float
+									phi = dense_phi_angles_deg[h - 14] * deg_to_rad,
+									sin_phi = sin(phi),
+									cos_phi = cos(phi);
 								for(size_t v = 0; v < 240; v++) {
+									const float
+										theta = (base_theta + (v / 8.f) - 180.f) * deg_to_rad,
+										sin_theta = sin(theta),
+										cos_theta = cos(theta),
+
+										range = (float)std::rand() / RAND_MAX * 100.f;
+
 									line.points[v] = sick_scansegment_xd::ScanSegmentParserOutput::LidarPoint{
-										(float)std::rand() / RAND_MAX * 100.f,
-										(float)std::rand() / RAND_MAX * 100.f,
-										(float)std::rand() / RAND_MAX * 100.f,
-										0.f, 0.f, 0.f, 0.f, 0U, 0U, 0U, 0U
+										range * cos_phi * cos_theta,
+										range * cos_phi * sin_theta,
+										range * sin_phi,
+										1.f, range, theta, phi, (int)h, 0U, (int)v, 0U
 									};
 								}
 							}
 							parsed_segment.segmentIndex = aquisition_loop_count;
-							std::this_thread::sleep_until(s + (50ms / 12));
+							std::this_thread::sleep_until(s + 4ms);
 							if constexpr(true) {
 #endif
 								LDRP_LOG( LOG_DEBUG && LOG_VERBOSE, "LDRP Worker [Aquisition Loop]: Successfully parsed scan segment idx {}!", parsed_segment.segmentIndex )
@@ -680,6 +711,8 @@ namespace ldrp {
 
 					this->_nt.aquisition_ftime.Set( crno::duration<double>{crno::hrc::now() - aquisition_start}.count() );
 					this->_nt.aquisition_cycles.Set( aquisition_loop_count );
+
+					wpi::DataLogManager::SignalNewDSDataOccur();
 
 				}
 
