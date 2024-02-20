@@ -7,3 +7,6 @@
 [submodule "submodule-deps/sick_scan_xd"]
 	path = submodule-deps/sick_scan_xd
 	url = https://github.com/Cardinal-Space-Mining/sick_scan_xd
+[submodule "submodule-deps/eigen"]
+	path = submodule-deps/eigen
+	url = https://gitlab.com/libeigen/eigen.git

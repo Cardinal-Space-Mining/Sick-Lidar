@@ -71,6 +71,10 @@ if(${USE_WPILIB})
 		set(_PROTOC_EXECUTABLE "protoc")
 	endif()
 
+	add_subdirectory(submodule-deps/eigen)
+	# list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/submodule-deps/eigen")
+	set(USE_SYSTEM_EIGEN ON)
+
 	set(__BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
 	set(BUILD_SHARED_LIBS OFF)
 	if(NOT BUILD_SHARED_LIBS AND NOT WIN32)
