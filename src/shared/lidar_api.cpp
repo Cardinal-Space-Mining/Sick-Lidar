@@ -25,7 +25,6 @@
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <pcl/io/pcd_io.h>
-#include <pcl/filters/voxel_grid.h>
 #include <pcl/filters/crop_box.h>
 #include <pcl/filters/morphological_filter.h>
 #include <pcl/segmentation/progressive_morphological_filter.h>
@@ -112,16 +111,18 @@ static void swapSegmentsNoIMU(sick_scansegment_xd::ScanSegmentParserOutput& a, s
 }
 
 /** Create a matrix for transforming points into world space given a pose relative to world space. */
-static Eigen::Matrix4f getWorldTransform(const float* xyz, const float* qxyz, const float qw) {
-	Eigen::Quaternionf q = Eigen::Quaternionf{qw, qxyz[1], qxyz[2], qxyz[3]};
-	Eigen::Matrix3f m3 = q.normalized().toRotationMatrix().inverse();
+static inline Eigen::Isometry3f getWorldTransform(const float* xyz, const float* qxyz, const float qw) {
+	// Eigen::Quaternionf q = Eigen::Quaternionf{qw, qxyz[1], qxyz[2], qxyz[3]};
+	// Eigen::Matrix3f m3 = q.normalized().conjugate().toRotationMatrix();
 
-	return Eigen::Matrix4f{
-		{m3(0, 0), m3(0, 1), m3(0, 2), xyz[0]},
-		{m3(1, 0), m3(1, 1), m3(1, 2), xyz[1]},
-		{m3(2, 0), m3(2, 1), m3(2, 2), xyz[2]},
-		{0,        0,        0,        1     }
-	};
+	// return Eigen::Matrix4f{
+	// 	{m3(0, 0), m3(0, 1), m3(0, 2), xyz[0]},
+	// 	{m3(1, 0), m3(1, 1), m3(1, 2), xyz[1]},
+	// 	{m3(2, 0), m3(2, 1), m3(2, 2), xyz[2]},
+	// 	{0,        0,        0,        1     }
+	// };
+
+	return Eigen::Quaternionf{qw, qxyz[1], qxyz[2], qxyz[3]}.inverse() * (*reinterpret_cast<const Eigen::Translation3f*>(xyz));
 
 }
 
@@ -199,6 +200,7 @@ namespace ldrp {
 			this->_nt.aquisition_cycles = this->_nt.base->GetIntegerTopic("aquisition loop count").GetEntry(0);
 			this->_nt.aquisition_ftime = this->_nt.base->GetDoubleTopic("aquisition frame time").GetEntry(0.0);
 			this->_nt.raw_scan_points = this->_nt.base->GetRawTopic("raw scan points").GetEntry( "PointXYZ_[]", {} );
+			this->_nt.test_filtered_points = this->_nt.base->GetRawTopic("filtered points").GetEntry( "PointXYZ_[]", {} );
 		}
 		void shutdownNT() {
 			this->_nt.instance.Flush();
@@ -274,7 +276,9 @@ namespace ldrp {
 				last_parsed_seg_idx,
 				aquisition_cycles;
 			nt::DoubleEntry aquisition_ftime;
-			nt::RawEntry raw_scan_points;
+			nt::RawEntry
+				raw_scan_points,
+				test_filtered_points;
 		} _nt;
 
 		using SampleBuffer = std::vector< std::deque< sick_scansegment_xd::ScanSegmentParserOutput > >;
@@ -304,9 +308,9 @@ namespace ldrp {
 			_finished_queue_mutex{};
 		std::shared_mutex
 			_localization_mutex{};
-		frc::TimeInterpolatableBuffer<Eigen::Matrix4f> _transform_map{
+		frc::TimeInterpolatableBuffer<Eigen::Isometry3f> _transform_map{
 			units::time::second_t{ _config.pose_storage_window },
-			&lerpClosest<const Eigen::Matrix4f&>
+			&lerpClosest<const Eigen::Isometry3f&>
 		};
 		PCDTarWriter pcd_writer{};
 
@@ -323,9 +327,15 @@ namespace ldrp {
 					* ::countBits(this->_config.enabled_segments)
 					* this->_config.buffered_frames
 			};
-			const Eigen::Matrix4f default_pose = Eigen::Matrix4f::Identity();
-			pcl::PointCloud<pcl::PointXYZ> point_cloud;		// reuse the buffer
+			static const Eigen::Isometry3f default_pose = Eigen::Isometry3f::Identity();
+			static const pcl::Indices default_no_selection = pcl::Indices{};
+
+			// buffers are reused between loops
+			pcl::PointCloud<pcl::PointXYZ>
+				point_cloud,
+				voxelized_points;
 			std::vector<float> point_ranges;
+
 			point_cloud.points.reserve( max_points );
 			point_ranges.reserve( max_points );
 
@@ -343,12 +353,12 @@ namespace ldrp {
 						const sick_scansegment_xd::ScanSegmentParserOutput& segment = f_inst->samples[i][j];
 
 						_localization_mutex.lock_shared();	// other threads can read from the buffer as well
-						std::optional<Eigen::Matrix4f> ts_transform = this->_transform_map.Sample(
+						std::optional<Eigen::Isometry3f> ts_transform = this->_transform_map.Sample(
 							units::time::second_t{ segment.timestamp_sec + (segment.timestamp_nsec * 1E-9) } );
 						_localization_mutex.unlock_shared();
 
 						if(this->_config.skip_invalid_transform_ts && !ts_transform.has_value()) continue;
-						const Eigen::Matrix4f& transform = ts_transform.has_value() ? *ts_transform : default_pose;	// need to convert to transform matrix
+						const Eigen::Isometry3f& transform = ts_transform.has_value() ? *ts_transform : default_pose;	// need to convert to transform matrix
 
 						for(const sick_scansegment_xd::ScanSegmentParserOutput::Scangroup& scan_group : segment.scandata) {		// "ms100 transmits 16 groups"
 #define USE_FIRST_ECHO_ONLY		// make a config option or grouping for this instead
@@ -360,7 +370,7 @@ namespace ldrp {
 #endif
 								for(const sick_scansegment_xd::ScanSegmentParserOutput::LidarPoint& lidar_point : scan_line.points) {
 
-#define DISABLE_PRELIM_POINT_FILTERING	// option for this as well
+// #define DISABLE_PRELIM_POINT_FILTERING	// option for this as well
 #ifndef DISABLE_PRELIM_POINT_FILTERING
 									const float azimuth_deg = lidar_point.azimuth * 180.f / std::numbers::pi_v<float>;
 									if(
@@ -370,10 +380,8 @@ namespace ldrp {
 #else
 									{
 #endif
-										Eigen::RowVector4f point {lidar_point.x, lidar_point.y, lidar_point.z, 1.f};
-										point *= transform;
-
-										point_cloud.points.emplace_back(*reinterpret_cast<pcl::PointXYZ*>(&point));
+										point_cloud.points.emplace_back();
+										reinterpret_cast<Eigen::Vector4f&>(point_cloud.points.back()) = transform * Eigen::Vector4f{lidar_point.x, lidar_point.y, lidar_point.z, 1.f};
 										point_ranges.push_back(lidar_point.range);
 									}
 								}
@@ -388,57 +396,61 @@ namespace ldrp {
 
 				LDRP_LOG( LOG_DEBUG && LOG_VERBOSE, "LDRP Filter Instance {} [Filter Loop]: Collected {} points", f_inst->index, point_cloud.size() )
 
-				if(this->_config.pcd_logging_mode) {
-					point_cloud.width = point_cloud.points.size();
-					point_cloud.height = 1;
-					point_cloud.is_dense = true;
-					// point_cloud.header.stamp = {};	// somehow average all the segment timestamps?
+				point_cloud.width = point_cloud.points.size();
+				point_cloud.height = 1;
+				point_cloud.is_dense = true;
 
-					if(this->_config.pcd_logging_mode & PCD_LOGGING_TAR) {
-						this->pcd_writer.addCloud(point_cloud);
-					}
-					if(this->_config.pcd_logging_mode & PCD_LOGGING_NT) {
-						this->_nt.raw_scan_points.Set(
-							std::span<const uint8_t>{
-								reinterpret_cast<uint8_t*>( point_cloud.points.data() ),
-								reinterpret_cast<uint8_t*>( point_cloud.points.data() + point_cloud.points.size() )
-							}
-						);
-					}
+				if(this->_config.pcd_logging_mode & PCD_LOGGING_TAR) {
+					this->pcd_writer.addCloud(point_cloud);
+				}
+				if(this->_config.pcd_logging_mode & PCD_LOGGING_NT) {
+					this->_nt.raw_scan_points.Set(
+						std::span<const uint8_t>{
+							reinterpret_cast<uint8_t*>( point_cloud.points.data() ),
+							reinterpret_cast<uint8_t*>( point_cloud.points.data() + point_cloud.points.size() )
+						}
+					);
 				}
 
 				// 2. run filtering on points
-				// {
-				// 	static const Eigen::Vector4f
-				// 		negative_infinity_4f{
-				// 			-std::numeric_limits<float>::infinity(),
-				// 			-std::numeric_limits<float>::infinity(),
-				// 			-std::numeric_limits<float>::infinity(),
-				// 			0.f
-				// 		};
+				{
+					static const Eigen::Vector4f
+						negative_infinity_4f{
+							-std::numeric_limits<float>::infinity(),
+							-std::numeric_limits<float>::infinity(),
+							-std::numeric_limits<float>::infinity(),
+							0.f
+						};
 
-				// 	pcl::PointCloud<pcl::PointXYZ>::Ptr
-				// 		cloud_ptr = pcl::PointCloud<pcl::PointXYZ>::Ptr{ &point_cloud, [](auto p){} },
-				// 		voxelized_points{ new pcl::PointCloud<pcl::PointXYZ> };
-				// 	pcl::PointIndices::Ptr
-				// 		z_high_filtered{ new pcl::PointIndices },
-				// 		z_low_subset_filtered{ new pcl::PointIndices },
-				// 		z_mid_subset_filtered{ new pcl::PointIndices },
-				// 		range_filtered{ new pcl::PointIndices },
-				// 		pmf_filtered_ground{ new pcl::PointIndices },
-				// 		pmf_filtered_obstacles{ new pcl::PointIndices };
+					pcl::PointIndices::Ptr
+						z_high_filtered{ new pcl::PointIndices },
+						z_low_subset_filtered{ new pcl::PointIndices },
+						z_mid_subset_filtered{ new pcl::PointIndices },
+						range_filtered{ new pcl::PointIndices },
+						pmf_filtered_ground{ new pcl::PointIndices },
+						pmf_filtered_obstacles{ new pcl::PointIndices };
 
-				// 	pcl::VoxelGrid<pcl::PointXYZ> voxel_filter{};
-				// 	pcl::CropBox<pcl::PointXYZ> cartesian_filter{};
+					pcl::CropBox<pcl::PointXYZ> cartesian_filter{};
 
-				// 	// voxelize points
-				// 	voxel_filter.setInputCloud(cloud_ptr);
-				// 	voxel_filter.setLeafSize(
-				// 		this->_config.fpipeline.voxel_size_cm,
-				// 		this->_config.fpipeline.voxel_size_cm,
-				// 		this->_config.fpipeline.voxel_size_cm
-				// 	);
-				// 	voxel_filter.filter(*voxelized_points);
+					voxelized_points.clear();
+
+					// voxelize points
+					voxel_filter(
+						point_cloud, default_no_selection, voxelized_points,
+						this->_config.fpipeline.voxel_size_cm,
+						this->_config.fpipeline.voxel_size_cm,
+						this->_config.fpipeline.voxel_size_cm
+					);
+
+					// TEST
+					if(this->_config.pcd_logging_mode & PCD_LOGGING_NT) {
+						this->_nt.test_filtered_points.Set(
+							std::span<const uint8_t>{
+								reinterpret_cast<uint8_t*>( voxelized_points.points.data() ),
+								reinterpret_cast<uint8_t*>( voxelized_points.points.data() + voxelized_points.points.size() )
+							}
+						);
+					}
 
 				// 	cartesian_filter.setInputCloud(voxelized_points);
 				// 	cartesian_filter.setMin(negative_infinity_4f);
@@ -499,7 +511,7 @@ namespace ldrp {
 
 				// 	// add "obstacle" and "wall" indices --> output! (to accumulator >>>)
 
-				// }
+				}
 
 				// 3. update accumulator
 				// 4. [when configured] update map
@@ -647,7 +659,7 @@ namespace ldrp {
 										sin_theta = sin(theta),
 										cos_theta = cos(theta),
 
-										range = (float)std::rand() / RAND_MAX * 100.f;
+										range = (float)std::rand() / RAND_MAX * 1.f;
 
 									line.points[v] = sick_scansegment_xd::ScanSegmentParserOutput::LidarPoint{
 										range * cos_phi * cos_theta,
@@ -672,7 +684,7 @@ namespace ldrp {
 										sin_theta = sin(theta),
 										cos_theta = cos(theta),
 
-										range = (float)std::rand() / RAND_MAX * 100.f;
+										range = (float)std::rand() / RAND_MAX * 1.f;
 
 									line.points[v] = sick_scansegment_xd::ScanSegmentParserOutput::LidarPoint{
 										range * cos_phi * cos_theta,
