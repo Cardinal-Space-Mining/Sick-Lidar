@@ -1,7 +1,4 @@
-find_package(PCL REQUIRED COMPONENTS common io filters features kdtree octree segmentation sample_consensus)
-
 # NOTE: add logic + defines for disabling wpilib, disabling debug prints, etc.
-
 
 if(WIN32)
 	add_compile_options(/Zc:__cplusplus)
@@ -10,6 +7,11 @@ endif()
 #sick scan files
 set(SICK_SCAN_DIR "${PROJECT_SOURCE_DIR}/submodule-deps/sick_scan_xd")
 set(WPILIB_DIR "${PROJECT_SOURCE_DIR}/submodule-deps/allwpilib")
+
+if(${USE_WPILIB})	# submodule manually checkout out to the same commit ref as is included with wpilib
+	set(EIGEN_INCLUDE_DIR "${PROJECT_SOURCE_DIR}/submodule-deps/eigen" CACHE STRING "" FORCE)
+endif()
+find_package(PCL REQUIRED COMPONENTS common io filters features kdtree octree segmentation sample_consensus)
 
 # SSXD CMakeLists.txt line 53
 # if(NOT WIN32)
