@@ -25,7 +25,6 @@
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <pcl/io/pcd_io.h>
-#include <pcl/filters/voxel_grid.h>
 #include <pcl/filters/crop_box.h>
 #include <pcl/filters/morphological_filter.h>
 #include <pcl/segmentation/progressive_morphological_filter.h>
@@ -328,10 +327,16 @@ namespace ldrp {
 					* ::countBits(this->_config.enabled_segments)
 					* this->_config.buffered_frames
 			};
-			const Eigen::Isometry3f default_pose = Eigen::Isometry3f::Identity();
-			pcl::PointCloud<pcl::PointXYZ>::Ptr point_cloud{ new pcl::PointCloud<pcl::PointXYZ> };		// reuse the buffer
+			static const Eigen::Isometry3f default_pose = Eigen::Isometry3f::Identity();
+			static const pcl::Indices default_no_selection = pcl::Indices{};
+
+			// buffers are reused between loops
+			pcl::PointCloud<pcl::PointXYZ>
+				point_cloud,
+				voxelized_points;
 			std::vector<float> point_ranges;
-			point_cloud->points.reserve( max_points );
+
+			point_cloud.points.reserve( max_points );
 			point_ranges.reserve( max_points );
 
 			LDRP_LOG( LOG_STANDARD, "LDRP Filter Instance {} [Init]: Resources initialized - running filter loop...", f_inst->index )
@@ -341,7 +346,7 @@ namespace ldrp {
 				f_inst->nt.is_active.Set(true);
 
 				// 1. transform points based on timestamp
-				point_cloud->clear();	// clear the vector and set w,h to 0
+				point_cloud.clear();	// clear the vector and set w,h to 0
 
 				for(size_t i = 0; i < f_inst->samples.size(); i++) {			// we could theoretically multithread this part -- just use a mutex for inserting points into the master collection
 					for(size_t j = 0; j < f_inst->samples[i].size(); j++) {
@@ -375,8 +380,8 @@ namespace ldrp {
 #else
 									{
 #endif
-										point_cloud->points.emplace_back();
-										reinterpret_cast<Eigen::Vector4f&>(point_cloud->points.back()) = transform * Eigen::Vector4f{lidar_point.x, lidar_point.y, lidar_point.z, 1.f};
+										point_cloud.points.emplace_back();
+										reinterpret_cast<Eigen::Vector4f&>(point_cloud.points.back()) = transform * Eigen::Vector4f{lidar_point.x, lidar_point.y, lidar_point.z, 1.f};
 										point_ranges.push_back(lidar_point.range);
 									}
 								}
@@ -389,20 +394,20 @@ namespace ldrp {
 
 				} // loop segments
 
-				LDRP_LOG( LOG_DEBUG && LOG_VERBOSE, "LDRP Filter Instance {} [Filter Loop]: Collected {} points", f_inst->index, point_cloud->size() )
+				LDRP_LOG( LOG_DEBUG && LOG_VERBOSE, "LDRP Filter Instance {} [Filter Loop]: Collected {} points", f_inst->index, point_cloud.size() )
 
-				point_cloud->width = point_cloud->points.size();
-				point_cloud->height = 1;
-				point_cloud->is_dense = true;
+				point_cloud.width = point_cloud.points.size();
+				point_cloud.height = 1;
+				point_cloud.is_dense = true;
 
 				if(this->_config.pcd_logging_mode & PCD_LOGGING_TAR) {
-					this->pcd_writer.addCloud(*point_cloud);
+					this->pcd_writer.addCloud(point_cloud);
 				}
 				if(this->_config.pcd_logging_mode & PCD_LOGGING_NT) {
 					this->_nt.raw_scan_points.Set(
 						std::span<const uint8_t>{
-							reinterpret_cast<uint8_t*>( point_cloud->points.data() ),
-							reinterpret_cast<uint8_t*>( point_cloud->points.data() + point_cloud->points.size() )
+							reinterpret_cast<uint8_t*>( point_cloud.points.data() ),
+							reinterpret_cast<uint8_t*>( point_cloud.points.data() + point_cloud.points.size() )
 						}
 					);
 				}
@@ -417,8 +422,6 @@ namespace ldrp {
 							0.f
 						};
 
-					pcl::PointCloud<pcl::PointXYZ>::Ptr
-						voxelized_points{ new pcl::PointCloud<pcl::PointXYZ> };
 					pcl::PointIndices::Ptr
 						z_high_filtered{ new pcl::PointIndices },
 						z_low_subset_filtered{ new pcl::PointIndices },
@@ -427,26 +430,24 @@ namespace ldrp {
 						pmf_filtered_ground{ new pcl::PointIndices },
 						pmf_filtered_obstacles{ new pcl::PointIndices };
 
-					pcl::VoxelGrid<pcl::PointXYZ> voxel_filter{};
 					pcl::CropBox<pcl::PointXYZ> cartesian_filter{};
 
-					LDRP_LOG( LOG_DEBUG, "Exhibit A" )
+					voxelized_points.clear();
 
 					// voxelize points
-					voxel_filter.setInputCloud(point_cloud);
-					voxel_filter.setLeafSize(
+					voxel_filter(
+						point_cloud, default_no_selection, voxelized_points,
 						this->_config.fpipeline.voxel_size_cm,
 						this->_config.fpipeline.voxel_size_cm,
 						this->_config.fpipeline.voxel_size_cm
 					);
-					voxel_filter.filter(*voxelized_points);
 
 					// TEST
 					if(this->_config.pcd_logging_mode & PCD_LOGGING_NT) {
 						this->_nt.test_filtered_points.Set(
 							std::span<const uint8_t>{
-								reinterpret_cast<uint8_t*>( voxelized_points->points.data() ),
-								reinterpret_cast<uint8_t*>( voxelized_points->points.data() + voxelized_points->points.size() )
+								reinterpret_cast<uint8_t*>( voxelized_points.points.data() ),
+								reinterpret_cast<uint8_t*>( voxelized_points.points.data() + voxelized_points.points.size() )
 							}
 						);
 					}
