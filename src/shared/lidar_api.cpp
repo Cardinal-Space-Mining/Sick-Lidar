@@ -356,6 +356,7 @@ namespace ldrp {
 
 				// 1. transform points based on timestamp
 				point_cloud.clear();	// clear the vector and set w,h to 0
+				point_ranges.clear();	// << MEMORY LEAK!!! (it was)
 
 				for(size_t i = 0; i < f_inst->samples.size(); i++) {			// we could theoretically multithread this part -- just use a mutex for inserting points into the master collection
 					for(size_t j = 0; j < f_inst->samples[i].size(); j++) {
