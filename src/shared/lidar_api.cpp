@@ -1,6 +1,6 @@
 #include "lidar_api.h"
 
-#include "filtering.h"
+#include "filtering.hpp"
 #include "mem_utils.h"
 #include "pcd_streaming.h"
 
@@ -10,15 +10,15 @@
 #include <algorithm>
 #include <iostream>
 #include <numbers>
+#include <utility>
 #include <cstdio>
 #include <memory>
 #include <chrono>
 #include <thread>
-#include <utility>
-#include <deque>
-#include <mutex>
 #include <vector>
 #include <limits>
+#include <deque>
+#include <mutex>
 #include <span>
 
 #include <pcl/pcl_config.h>
@@ -327,14 +327,23 @@ namespace ldrp {
 					* ::countBits(this->_config.enabled_segments)
 					* this->_config.buffered_frames
 			};
-			static const Eigen::Isometry3f default_pose = Eigen::Isometry3f::Identity();
-			static const pcl::Indices default_no_selection = pcl::Indices{};
+			static const Eigen::Isometry3f DEFAULT_NO_POSE = Eigen::Isometry3f::Identity();
+			static const pcl::Indices DEFAULT_NO_SELECTION = pcl::Indices{};
 
 			// buffers are reused between loops
 			pcl::PointCloud<pcl::PointXYZ>
 				point_cloud,
 				voxelized_points;
-			std::vector<float> point_ranges;
+			std::vector<float>
+				point_ranges,
+				voxelized_ranges;
+			pcl::Indices
+				z_high_filtered{},
+				z_low_subset_filtered{},
+				z_mid_subset_filtered{},
+				pre_pmf_range_filtered{},
+				pmf_filtered_ground{},
+				pmf_filtered_obstacles{};
 
 			point_cloud.points.reserve( max_points );
 			point_ranges.reserve( max_points );
@@ -358,7 +367,7 @@ namespace ldrp {
 						_localization_mutex.unlock_shared();
 
 						if(this->_config.skip_invalid_transform_ts && !ts_transform.has_value()) continue;
-						const Eigen::Isometry3f& transform = ts_transform.has_value() ? *ts_transform : default_pose;	// need to convert to transform matrix
+						const Eigen::Isometry3f& transform = ts_transform.has_value() ? *ts_transform : DEFAULT_NO_POSE;	// need to convert to transform matrix
 
 						for(const sick_scansegment_xd::ScanSegmentParserOutput::Scangroup& scan_group : segment.scandata) {		// "ms100 transmits 16 groups"
 #define USE_FIRST_ECHO_ONLY		// make a config option or grouping for this instead
@@ -376,6 +385,7 @@ namespace ldrp {
 									if(
 										(azimuth_deg <= this->_config.fpipeline.max_scan_theta_deg && azimuth_deg >= this->_config.fpipeline.min_scan_theta_deg)
 											&& (lidar_point.range * 1e2f > this->_config.fpipeline.min_scan_range_cm)
+										// ...apply any other filters that benefit from points in lidar scan coord space as well
 									) {
 #else
 									{
@@ -414,35 +424,73 @@ namespace ldrp {
 
 				// 2. run filtering on points
 				{
-					static const Eigen::Vector4f
-						negative_infinity_4f{
-							-std::numeric_limits<float>::infinity(),
-							-std::numeric_limits<float>::infinity(),
-							-std::numeric_limits<float>::infinity(),
-							0.f
-						};
-
-					pcl::PointIndices::Ptr
-						z_high_filtered{ new pcl::PointIndices },
-						z_low_subset_filtered{ new pcl::PointIndices },
-						z_mid_subset_filtered{ new pcl::PointIndices },
-						range_filtered{ new pcl::PointIndices },
-						pmf_filtered_ground{ new pcl::PointIndices },
-						pmf_filtered_obstacles{ new pcl::PointIndices };
-
-					pcl::CropBox<pcl::PointXYZ> cartesian_filter{};
 
 					voxelized_points.clear();
+					voxelized_ranges.clear();
+
+					z_high_filtered.clear();
+					z_low_subset_filtered.clear();
+					z_mid_subset_filtered.clear();
+					pre_pmf_range_filtered.clear();
+					pmf_filtered_ground.clear();
+					pmf_filtered_obstacles.clear();
 
 					// voxelize points
 					voxel_filter(
-						point_cloud, default_no_selection, voxelized_points,
-						this->_config.fpipeline.voxel_size_cm,
-						this->_config.fpipeline.voxel_size_cm,
-						this->_config.fpipeline.voxel_size_cm
+						point_cloud, DEFAULT_NO_SELECTION, voxelized_points,
+						this->_config.fpipeline.voxel_size_cm * 1e-2f,
+						this->_config.fpipeline.voxel_size_cm * 1e-2f,
+						this->_config.fpipeline.voxel_size_cm * 1e-2f
 					);
 
+					// filter points under "high cut" thresh
+					carteZ_filter(
+						voxelized_points, DEFAULT_NO_SELECTION, z_high_filtered,
+						-std::numeric_limits<float>::infinity(),
+						this->_config.fpipeline.max_z_thresh_cm * 1e-2f
+					);
+					// further filter points below "low cut" thresh
+					carteZ_filter(
+						voxelized_points, z_high_filtered, z_low_subset_filtered,
+						-std::numeric_limits<float>::infinity(),
+						this->_config.fpipeline.min_z_thresh_cm * 1e-2f
+					);
+					// get the points inbetween high and low thresholds --> treated as wall obstacles
+					pc_negate_selection(
+						z_high_filtered,
+						z_low_subset_filtered,
+						z_mid_subset_filtered
+					);
+
+					// filter close enough points for PMF
+					pc_filter_distance(
+						voxelized_points.points,
+						z_low_subset_filtered,
+						pre_pmf_range_filtered,
+						0.f, this->_config.fpipeline.max_pmf_range_cm * 1e-2f
+						// need to make this relative to the lidar's global position (possibly @ multiple timestamps!?) -- or just inherit measured ranges :|
+					);
+
+					// // apply pmf to selected points
+					// progressive_morph_filter(		// !!!: Crashing somewhere in here :(
+					// 	voxelized_points, pre_pmf_range_filtered, pmf_filtered_ground,
+					// 	this->_config.fpipeline.pmf_window_base_cm,
+					// 	this->_config.fpipeline.pmf_max_window_size,
+					// 	this->_config.fpipeline.pmf_cell_size_cm,
+					// 	this->_config.fpipeline.pmf_init_distance_cm,
+					// 	this->_config.fpipeline.pmf_max_distance_cm,
+					// 	this->_config.fpipeline.pmf_slope,
+					// 	false
+					// );
+					// // obstacles = (base - ground)
+					// pc_negate_selection(
+					// 	pre_pmf_range_filtered,
+					// 	pmf_filtered_ground,
+					// 	pmf_filtered_obstacles
+					// );
+
 					// TEST
+					pc_normalize_selection(voxelized_points.points, pre_pmf_range_filtered);
 					if(this->_config.pcd_logging_mode & PCD_LOGGING_NT) {
 						this->_nt.test_filtered_points.Set(
 							std::span<const uint8_t>{
@@ -452,64 +500,7 @@ namespace ldrp {
 						);
 					}
 
-				// 	cartesian_filter.setInputCloud(voxelized_points);
-				// 	cartesian_filter.setMin(negative_infinity_4f);
-
-				// 	// filter points under "high cut" thresh
-				// 	cartesian_filter.setMax( {
-				// 		std::numeric_limits<float>::infinity(),
-				// 		std::numeric_limits<float>::infinity(),
-				// 		this->_config.fpipeline.max_z_thresh_cm,
-				// 		0.f
-				// 	} );
-				// 	cartesian_filter.filter(z_high_filtered->indices);
-
-				// 	// filter points under "low cut" thresh
-				// 	cartesian_filter.setMax( {
-				// 		std::numeric_limits<float>::infinity(),
-				// 		std::numeric_limits<float>::infinity(),
-				// 		this->_config.fpipeline.min_z_thresh_cm,
-				// 		0.f
-				// 	} );
-				// 	cartesian_filter.setIndices(z_high_filtered);
-				// 	cartesian_filter.filter(z_low_subset_filtered->indices);
-
-				// 	// get the points inbetween high and low thresholds --> treated as wall obstacles
-				// 	pc_negate_selection(
-				// 		z_high_filtered->indices,
-				// 		z_low_subset_filtered->indices,
-				// 		z_mid_subset_filtered->indices
-				// 	);
-
-				// 	// filter close enough points for PMF
-				// 	pc_filter_ranges(
-				// 		point_ranges,
-				// 		z_low_subset_filtered->indices,
-				// 		range_filtered->indices,
-				// 		0.f, this->_config.fpipeline.max_pmf_range_cm
-				// 	);
-
-				// 	// apply pmf to selected points
-				// 	progressive_morph_filter(
-				// 		point_cloud,
-				// 		range_filtered->indices,
-				// 		pmf_filtered_ground->indices,
-				// 		this->_config.fpipeline.pmf_window_base_cm,
-				// 		this->_config.fpipeline.pmf_max_window_size,
-				// 		this->_config.fpipeline.pmf_cell_size_cm,
-				// 		this->_config.fpipeline.pmf_init_distance_cm,
-				// 		this->_config.fpipeline.pmf_max_distance_cm,
-				// 		this->_config.fpipeline.pmf_slope,
-				// 		false
-				// 	);
-				// 	// obstacles = base - ground
-				// 	pc_negate_selection(
-				// 		range_filtered->indices,
-				// 		pmf_filtered_ground->indices,
-				// 		pmf_filtered_obstacles->indices
-				// 	);
-
-				// 	// add "obstacle" and "wall" indices --> output! (to accumulator >>>)
+					// add "obstacle" and "wall" indices --> output! (to accumulator >>>)
 
 				}
 
@@ -638,7 +629,8 @@ namespace ldrp {
 							static constexpr float const
 								phi_angles_deg[] = { -22.2, -17.2, -12.3, -7.3, -2.5, 2.2, 7.0, 12.9, 17.2, 21.8, 26.6, 31.5, 36.7, 42.2 },
 								dense_phi_angles_deg[] = { 0, 34.2 },
-								deg_to_rad = std::numbers::pi_v<float> / 180.f;
+								deg_to_rad = std::numbers::pi_v<float> / 180.f,
+								GENERATED_POINTS_MAX_RANGE_METERS = 10.f;
 
 							const float base_theta = aquisition_loop_count * 30;
 
@@ -659,7 +651,7 @@ namespace ldrp {
 										sin_theta = sin(theta),
 										cos_theta = cos(theta),
 
-										range = (float)std::rand() / RAND_MAX * 1.f;
+										range = (float)std::rand() / RAND_MAX * GENERATED_POINTS_MAX_RANGE_METERS;
 
 									line.points[v] = sick_scansegment_xd::ScanSegmentParserOutput::LidarPoint{
 										range * cos_phi * cos_theta,
@@ -684,7 +676,7 @@ namespace ldrp {
 										sin_theta = sin(theta),
 										cos_theta = cos(theta),
 
-										range = (float)std::rand() / RAND_MAX * 1.f;
+										range = (float)std::rand() / RAND_MAX * GENERATED_POINTS_MAX_RANGE_METERS;
 
 									line.points[v] = sick_scansegment_xd::ScanSegmentParserOutput::LidarPoint{
 										range * cos_phi * cos_theta,

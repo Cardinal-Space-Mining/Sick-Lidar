@@ -3,6 +3,8 @@
 #include <vector>
 #include <limits>
 
+#include <Eigen/Core>
+
 #include <pcl/types.h>
 #include <pcl/common/io.h>
 #include <pcl/point_types.h>
@@ -11,7 +13,8 @@
 #include <pcl/filters/morphological_filter.h>
 
 
-/** Copied from VoxelGrid<>::applyFilter() and removed unnecessary additions */
+
+/** Voxelization static reimpl -- copied from VoxelGrid<>::applyFilter() and simplified */
 template<
 	typename PointT = pcl::PointXYZ,
 	typename IntT = pcl::index_t,
@@ -163,7 +166,115 @@ void voxel_filter(
 
 }
 
-/** PMF Filter Reimpl -- See <pcl/filters/progressive_morphological_filter.h> */
+
+
+
+
+/** Cartesian "crop box" filter reimpl -- copied from pcl::CropBox<>::applyFilter() and simplified */
+template<
+	typename PointT = pcl::PointXYZ,
+	typename IntT = pcl::index_t,
+	bool negative_ = false>
+void cropbox_filter(
+	const pcl::PointCloud<PointT>& cloud,
+	const std::vector<IntT>& selection,
+	std::vector<IntT>& filtered,
+	const Eigen::Vector3f min_pt_ = Eigen::Vector3f{ -1.f, -1.f, -1.f },
+	const Eigen::Vector3f max_pt_ = Eigen::Vector3f{ 1.f, 1.f, 1.f }
+	// full CropBox<> also allows additional transformation of box and cloud
+) {
+	const bool use_selection = !selection.empty();
+
+	filtered.clear();
+	filtered.reserve(use_selection ? selection.size() : cloud.size());	// reserve maximum size
+
+	if(use_selection) {
+		for (const IntT index : selection) {
+			const PointT& pt = cloud[index];
+			if( !cloud.is_dense && !isFinite(pt) ) continue;
+
+			if( (pt.x < min_pt_[0] || pt.y < min_pt_[1] || pt.z < min_pt_[2]) ||
+				(pt.x > max_pt_[0] || pt.y > max_pt_[1] || pt.z > max_pt_[2]) )
+			{
+				if constexpr(negative_) {
+					filtered.push_back(index);	// outside the cropbox --> push on negative
+				}
+			} else if constexpr(!negative_) {
+				filtered.push_back(index);		// inside the cropbox and not negative
+			}
+		}
+	} else {
+		for (size_t index = 0; index < cloud.points.size(); index++) {
+			const PointT& pt = cloud[index];
+			if( !cloud.is_dense && !isFinite(pt) ) continue;
+
+			if( (pt.x < min_pt_[0] || pt.y < min_pt_[1] || pt.z < min_pt_[2]) ||
+				(pt.x > max_pt_[0] || pt.y > max_pt_[1] || pt.z > max_pt_[2]) )
+			{
+				if constexpr(negative_) {
+					filtered.push_back(index);	// outside the cropbox --> push on negative
+				}
+			} else if constexpr(!negative_) {
+				filtered.push_back(index);		// inside the cropbox and not negative
+			}
+		}
+	}
+
+}
+
+
+
+/** cropbox_filter<>() specialization for sorting exclusively using the z-coordinate */
+template<
+	typename PointT = pcl::PointXYZ,
+	typename IntT = pcl::index_t,
+	typename FloatT = float,
+	bool negative_ = false>
+void carteZ_filter(
+	const pcl::PointCloud<PointT>& cloud,
+	const std::vector<IntT>& selection,
+	std::vector<IntT>& filtered,
+	const FloatT min_z = -1.f,
+	const FloatT max_z = 1.f
+) {
+	const bool use_selection = !selection.empty();
+
+	filtered.clear();
+	filtered.reserve(use_selection ? selection.size() : cloud.size());	// reserve maximum size
+
+	if(use_selection) {
+		for (const IntT index : selection) {
+			const PointT& pt = cloud[index];
+			if( !cloud.is_dense && !isFinite(pt) ) continue;
+			if( pt.z < min_z || pt.z > max_z ) {
+				if constexpr(negative_) {
+					filtered.push_back(index);	// outside the cropbox --> push on negative
+				}
+			} else if constexpr(!negative_) {
+				filtered.push_back(index);		// inside the cropbox and not negative
+			}
+		}
+	} else {
+		for (size_t index = 0; index < cloud.points.size(); index++) {
+			const PointT& pt = cloud[index];
+			if( !cloud.is_dense && !isFinite(pt) ) continue;
+			if( pt.z < min_z || pt.z > max_z ) {
+				if constexpr(negative_) {
+					filtered.push_back(index);	// outside the cropbox --> push on negative
+				}
+			} else if constexpr(!negative_) {
+				filtered.push_back(index);		// inside the cropbox and not negative
+			}
+		}
+	}
+
+}
+
+
+
+
+
+/** PMF filter reimpl -- See <pcl/filters/progressive_morphological_filter.h> */
 template<
 	typename PointT = pcl::PointXYZ,
 	typename IntT = pcl::index_t>
@@ -253,6 +364,10 @@ void progressive_morph_filter(
 
 }
 
+
+
+
+
 /** Generate a set of ranges for each point in the provided cloud */
 template<
 	typename PointT = pcl::PointXYZ,
@@ -263,7 +378,7 @@ void pc_generate_ranges(
 	const std::vector<PointT, AllocT>& points,
 	const std::vector<IntT>& selection,
 	std::vector<FloatT>& out_ranges,
-	const Eigen::Vector3<FloatT>& origin
+	const Eigen::Vector3<FloatT> origin = Eigen::Vector3<FloatT>::Zero()
 ) {
 	if (!selection.empty()) {
 		out_ranges.resize(selection.size());
@@ -278,7 +393,8 @@ void pc_generate_ranges(
 		}
 	}
 }
-/** Remove the points at the each index in the provided set */
+
+/** Remove the points at the each index in the provided set. Prereq: selection indices must be sorted in non-descending order! */
 template<
 	typename PointT = pcl::PointXYZ,
 	typename AllocT = typename pcl::PointCloud<PointT>::VectorType::allocator_type,
@@ -295,6 +411,20 @@ void pc_remove_selection(
 	}
 	points.resize(last + 1);
 }
+/** Normalize the set of points to only include the selected indices. Prereq: selection indices must be sorted in non-descending order! */
+template<
+	typename PointT = pcl::PointXYZ,
+	typename AllocT = typename pcl::PointCloud<PointT>::VectorType::allocator_type,
+	typename IntT = pcl::index_t>
+inline void pc_normalize_selection(
+	std::vector<PointT, AllocT>& points,
+	const std::vector<IntT>& selection
+) {
+	for(size_t i = 0; i < selection.size(); i++) {
+		memcpy(&points[i], &points[selection[i]], sizeof(PointT));
+	}
+	points.resize(selection.size());
+}
 
 /** Filter a set of ranges to an inclusive set of indices */
 template<
@@ -309,19 +439,51 @@ void pc_filter_ranges(
 	filtered.clear();
 	if(!selection.empty()) {
 		filtered.reserve(selection.size());
-		for (size_t i = 0; i < selection.size(); i++) {
+		for(size_t i = 0; i < selection.size(); i++) {
 			const IntT idx = selection[i];
 			const FloatT r = ranges[idx];
-			if (r <= max && r >= min) {
+			if(r <= max && r >= min) {
 				filtered.push_back(idx);
 			}
-
 		}
 	} else {
 		filtered.reserve(ranges.size());
-		for (size_t i = 0; i < ranges.size(); i++) {
+		for(size_t i = 0; i < ranges.size(); i++) {
 			const FloatT r = ranges[i];
-			if (r <= max && r >= min) {
+			if(r <= max && r >= min) {
+				filtered.push_back(i);
+			}
+		}
+	}
+}
+/** Filter a set of points by their distance from a specified origin point (<0, 0, 0> by default) */
+template<
+	typename PointT = pcl::PointXYZ,
+	typename AllocT = typename pcl::PointCloud<PointT>::VectorType::allocator_type,
+	typename IntT = pcl::index_t,
+	typename FloatT = float>
+void pc_filter_distance(
+	const std::vector<PointT, AllocT>& points,
+	const std::vector<IntT>& selection,
+	std::vector<IntT>& filtered,
+	const FloatT min, const FloatT max,
+	const Eigen::Vector3<FloatT> origin = Eigen::Vector3<FloatT>::Zero()
+) {
+	filtered.clear();
+	if(!selection.empty()) {
+		filtered.reserve(selection.size());
+		for(size_t i = 0; i < selection.size(); i++) {
+			const IntT idx = selection[i];
+			const FloatT r = (origin - *reinterpret_cast<const Eigen::Vector3<FloatT>*>(&points[idx])).norm();
+			if(r <= max && r >= min) {
+				filtered.push_back(idx);
+			}
+		}
+	} else {
+		filtered.reserve(points.size());
+		for(size_t i = 0; i < points.size(); i++) {
+			const FloatT r = (origin - *reinterpret_cast<const Eigen::Vector3<FloatT>*>(&points[i])).norm();
+			if(r <= max && r >= min) {
 				filtered.push_back(i);
 			}
 		}
