@@ -472,26 +472,26 @@ namespace ldrp {
 						// need to make this relative to the lidar's global position (possibly @ multiple timestamps!?) -- or just inherit measured ranges :|
 					);
 
-					// // apply pmf to selected points
-					// progressive_morph_filter(		// !!!: Crashing somewhere in here :(
-					// 	voxelized_points, pre_pmf_range_filtered, pmf_filtered_ground,
-					// 	this->_config.fpipeline.pmf_window_base_cm,
-					// 	this->_config.fpipeline.pmf_max_window_size,
-					// 	this->_config.fpipeline.pmf_cell_size_cm,
-					// 	this->_config.fpipeline.pmf_init_distance_cm,
-					// 	this->_config.fpipeline.pmf_max_distance_cm,
-					// 	this->_config.fpipeline.pmf_slope,
-					// 	false
-					// );
-					// // obstacles = (base - ground)
-					// pc_negate_selection(
-					// 	pre_pmf_range_filtered,
-					// 	pmf_filtered_ground,
-					// 	pmf_filtered_obstacles
-					// );
+					// apply pmf to selected points
+					progressive_morph_filter(		// !!!: Crashing somewhere in here :(
+						voxelized_points, pre_pmf_range_filtered, pmf_filtered_ground,
+						this->_config.fpipeline.pmf_window_base_cm,
+						this->_config.fpipeline.pmf_max_window_size,
+						this->_config.fpipeline.pmf_cell_size_cm,
+						this->_config.fpipeline.pmf_init_distance_cm,
+						this->_config.fpipeline.pmf_max_distance_cm,
+						this->_config.fpipeline.pmf_slope,
+						false
+					);
+					// obstacles = (base - ground)
+					pc_negate_selection(
+						pre_pmf_range_filtered,
+						pmf_filtered_ground,
+						pmf_filtered_obstacles
+					);
 
 					// TEST
-					pc_normalize_selection(voxelized_points.points, pre_pmf_range_filtered);
+					pc_normalize_selection(voxelized_points.points, pmf_filtered_ground);
 					if(this->_config.pcd_logging_mode & PCD_LOGGING_NT) {
 						this->_nt.test_filtered_points.Set(
 							std::span<const uint8_t>{

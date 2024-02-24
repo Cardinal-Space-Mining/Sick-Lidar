@@ -453,7 +453,7 @@ void progressive_morph_filter(
 		}
 	}
 
-	pcl::octree::OctreePointCloudSearch<PointT> tree{};
+	pcl::octree::OctreePointCloudSearch<PointT> tree{ 1.f };
 	const std::shared_ptr< const pcl::PointCloud<PointT> >
 		cloud_shared_ref{ &cloud_, [](const pcl::PointCloud<PointT>*){} };
 	const std::shared_ptr< const pcl::Indices >
@@ -508,10 +508,10 @@ void progressive_morph_filter(
 
 		// only need to store z-coord for each morph operation (not full points) -- init to size of current selection
 		std::vector<float>
-			morph_max_z_temp{ ground.size() },
-			morph_max_z_final{ ground.size() },		// used for +z obstructions like rocks
-			morph_min_z_temp{ ground.size() },
-			morph_min_z_final{ ground.size() };		// used for -z obstructions like craters
+			morph_max_z_temp{ (float)ground.size() },
+			morph_max_z_final{ (float)ground.size() },		// used for +z obstructions like rocks
+			morph_min_z_temp{ (float)ground.size() },
+			morph_min_z_final{ (float)ground.size() };		// used for -z obstructions like craters
 		// morph_max_z_temp.resize(ground.size());
 		// morph_max_z_final.resize(ground.size());
 
@@ -556,7 +556,7 @@ void progressive_morph_filter(
 
 			const float
 				diff_max = cloud_[ground[sel_idx]].z - morph_max_z_final[sel_idx],
-				diff_min = morph_min_z_final[sel_idx] - cloud_[ground[sel_idx]];
+				diff_min = morph_min_z_final[sel_idx] - cloud_[ground[sel_idx]].z;
 			if (diff_max < height_thresholds[i] && diff_min < height_thresholds[i])
 				pt_indices.push_back(ground[sel_idx]);	// change this to directly edit the ground selection
 
