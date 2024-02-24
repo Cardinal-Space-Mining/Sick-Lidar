@@ -480,7 +480,7 @@ namespace ldrp {
 						this->_config.fpipeline.pmf_init_distance_cm * 1e-2f,
 						this->_config.fpipeline.pmf_max_distance_cm * 1e-2f,
 						this->_config.fpipeline.pmf_slope,
-						true
+						false
 					);
 					// obstacles = (base - ground)
 					pc_negate_selection(
@@ -490,7 +490,7 @@ namespace ldrp {
 					);
 
 					// TEST
-					pc_normalize_selection(voxelized_points.points, pmf_filtered_obstacles);
+					pc_normalize_selection(voxelized_points.points, pmf_filtered_ground);
 					if(this->_config.pcd_logging_mode & PCD_LOGGING_NT) {
 						this->_nt.test_filtered_points.Set(
 							std::span<const uint8_t>{
@@ -581,7 +581,7 @@ namespace ldrp {
 					for(uint64_t filled_segments = 0; this->_state.enable_threads; aquisition_loop_count++) {	// loop until thread exit is called... (internal break allows for exit as well)
 
 						if(filled_segments >= this->_config.enabled_segments) {	// if we have aquired sufficient samples...
-							LDRP_LOG( LOG_DEBUG, "LDRP Worker [Aquisition Loop]: Aquisition quota satisfied after {} loops - exporting buffer to thread...", aquisition_loop_count )
+							LDRP_LOG( LOG_DEBUG && LOG_VERBOSE, "LDRP Worker [Aquisition Loop]: Aquisition quota satisfied after {} loops - exporting buffer to thread...", aquisition_loop_count )
 
 							// attempt to find or create a thread for processing the frame
 							this->_finished_queue_mutex.lock();	// aquire mutex for queue
@@ -594,6 +594,8 @@ namespace ldrp {
 								std::swap(f_inst.samples, frame_segments);		// figure out where we want to clear the buffer that is swapped in so we don't start with old data in the queues
 								f_inst.link_state.store(true);
 								f_inst.link_condition.notify_all();
+
+								LDRP_LOG( LOG_DEBUG, "LDRP Worker: Exported complete scan to processing instance {} after aquiring {} segments", filter_idx, aquisition_loop_count )
 								break;
 
 							} else {
@@ -605,6 +607,8 @@ namespace ldrp {
 									FilterInstance& f_inst = *this->_filter_threads.back();
 									std::swap(f_inst.samples, frame_segments);
 									f_inst.thread.reset( new std::thread{&LidarImpl::filterWorker, this, &f_inst} );
+
+									LDRP_LOG( LOG_DEBUG, "LDRP Worker: Created new processing instance {} after aquiring {} segments", f_inst.index, aquisition_loop_count )
 									break;
 
 								}

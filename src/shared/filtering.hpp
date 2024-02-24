@@ -275,127 +275,9 @@ void carteZ_filter(
 
 
 
-/**  */
-// template<
-// 	typename PointT = pcl::PointXYZ>
-// void morph_operator(
-// 	const pcl::PointCloud<PointT>& cloud,
-// 	pcl::PointCloud<PointT>& out,
-// 	float resolution, const int morph_op
-// ) {
-// 	pcl::octree::OctreePointCloudSearch<PointT> tree{ resolution };
-// 	tree.setInputCloud(
-// 		std::make_shared< const pcl::PointCloud<PointT> >( &cloud, [](auto){} )
-// 	);
-// 	tree.addPointsFromInputCloud();
-
-// 	const float half_res = resolution / 2.f;
-
-// 	switch(morph_op) {
-
-// 		case pcl::MORPH_DILATE:
-// 		case pcl::MORPH_ERODE:
-// 		{
-
-// 			break;
-// 		}
-// 		case pcl::MORPH_OPEN:
-// 		case pcl::MORPH_CLOSE:
-// 		{
-// 			pcl::PointCloud<PointT> cloud_temp;
-// 			pcl::copyPointCloud(cloud, cloud_temp);
-
-// 			static constexpr float
-// 				inf_min_z = -std::numeric_limits<float>::max(),
-// 				inf_max_z = std::numeric_limits<float>::max();
-
-// 			for (std::size_t p_idx = 0; p_idx < cloud_temp.size(); p_idx++) {
-// 				pcl::Indices pt_indices;
-// 				tree.boxSearch(
-// 					Eigen::Vector3f{
-// 						cloud_temp[p_idx].x - half_res,
-// 						cloud_temp[p_idx].y - half_res,
-// 						inf_min_z
-// 					},
-// 					Eigen::Vector3f{
-// 						cloud_temp[p_idx].x + half_res,
-// 						cloud_temp[p_idx].y + half_res,
-// 						inf_max_z
-// 					},
-// 					pt_indices
-// 				);
-
-// 				if( !pt_indices.empty() ) {
-
-// 					Eigen::Vector4f min_pt, max_pt;
-// 					pcl::getMinMax3D<PointT>(cloud_temp, pt_indices, min_pt, max_pt);
-
-// 					switch (morph_op) {
-// 						case pcl::MORPH_OPEN: {
-// 							cloud_out[p_idx].z = min_pt.z ();
-// 							break;
-// 						}
-// 						case pcl::MORPH_CLOSE: {
-// 							cloud_out[p_idx].z = max_pt.z ();
-// 							break;
-// 						}
-// 					}
-
-// 				}
-// 			}
-
-// 			cloud_temp.swap (cloud_out);
-
-// 			for (std::size_t p_idx = 0; p_idx < cloud_temp.size (); ++p_idx)
-// 			{
-// 				Eigen::Vector3f bbox_min, bbox_max;
-// 				pcl::Indices pt_indices;
-// 				float minx = cloud_temp[p_idx].x - half_res;
-// 				float miny = cloud_temp[p_idx].y - half_res;
-// 				float minz = -std::numeric_limits<float>::max ();
-// 				float maxx = cloud_temp[p_idx].x + half_res;
-// 				float maxy = cloud_temp[p_idx].y + half_res;
-// 				float maxz = std::numeric_limits<float>::max ();
-// 				bbox_min = Eigen::Vector3f (minx, miny, minz);
-// 				bbox_max = Eigen::Vector3f (maxx, maxy, maxz);
-// 				tree.boxSearch (bbox_min, bbox_max, pt_indices);
-
-// 				if (!pt_indices.empty ())
-// 				{
-// 					Eigen::Vector4f min_pt, max_pt;
-// 					pcl::getMinMax3D<PointT> (cloud_temp, pt_indices, min_pt, max_pt);
-
-// 					switch (morph_op)
-// 					{
-// 						case pcl::MORPH_OPEN:
-// 						default:
-// 						{
-// 						cloud_out[p_idx].z = max_pt.z ();
-// 						break;
-// 						}
-// 						case pcl::MORPH_CLOSE:
-// 						{
-// 						cloud_out[p_idx].z = min_pt.z ();
-// 						break;
-// 						}
-// 					}
-// 				}
-
-// 			}
-// 			break;
-// 		}
-// 		default:
-
-// 	}
-// 	return;
-
-// }
-
-
-
 /** PMF filter reimpl -- See <pcl/filters/progressive_morphological_filter.h> */
 template<
-	bool mirror_z = false,
+	// bool mirror_z = false,
 	typename PointT = pcl::PointXYZ,
 	typename IntT = pcl::index_t>
 void progressive_morph_filter(
@@ -417,8 +299,8 @@ void progressive_morph_filter(
 	float window_size = 0.0f;
 	float height_threshold = 0.0f;
 
-	while (window_size < max_window_size_) {
-
+	while (window_size < max_window_size_)
+	{
 		// Determine the initial window size.
 		if (exponential_)
 			window_size = cell_size_ * (2.0f * std::pow(base_, iteration) + 1.0f);
@@ -439,17 +321,15 @@ void progressive_morph_filter(
 		height_thresholds.push_back(height_threshold);
 
 		iteration++;
-
 	}
 
 	// Ground indices are initially limited to those points in the input cloud we
 	// wish to process
 	if (selection.size() > 0 && selection.size() <= cloud_.size()) {
 		ground = selection;
-	}
-	else {
+	} else {
 		ground.resize(cloud_.size());
-		for (size_t i = 0; i < cloud_.size(); i++) {
+		for (std::size_t i = 0; i < cloud_.size(); i++) {
 			ground[i] = i;
 		}
 	}
@@ -460,47 +340,27 @@ void progressive_morph_filter(
 	const std::shared_ptr< const pcl::Indices >
 		ground_shared_ref{ &ground, [](const pcl::Indices*) {} };
 
-	// only need to store z-coord for each morph operation (not full points) -- init to size of current selection
 	std::vector<float>
-		morph_max_z_temp{},
-		morph_max_z_final{},		// used for +z obstructions like rocks
-		morph_min_z_temp{},
-		morph_min_z_final{};		// used for -z obstructions like craters
-	morph_max_z_temp.resize(cloud_.size());
-	morph_max_z_final.resize(cloud_.size());
-	morph_min_z_temp.resize(cloud_.size());	// we have to make these the same size as the source cloud since the octree exports indices in the full range anc mapping backwards would be a pain
-	morph_min_z_final.resize(cloud_.size());
+		zp_temp{}, zp_final{}, zn_temp{}, zn_final{};
+	zp_temp.resize(cloud_.size());
+	zp_final.resize(cloud_.size());
+	zn_temp.resize(cloud_.size());
+	zn_final.resize(cloud_.size());
 
 	// Progressively filter ground returns using morphological open
-	for (size_t i = 0; i < window_sizes.size(); i++) {
+	for (std::size_t i = 0; i < window_sizes.size(); ++i)
+	{
 
-		// // Limit filtering to those points currently considered ground returns
-		// typename pcl::PointCloud<PointT>::Ptr
-		// 	cloud{ new pcl::PointCloud<PointT> };
-		// pcl::copyPointCloud<PointT>(cloud_, ground, *cloud);
-
-		// // Create new cloud to hold the filtered results. Apply the morphological
-		// // opening operation at the current window size.
-		// typename pcl::PointCloud<PointT>::Ptr
-		// 	cloud_O{ new pcl::PointCloud<PointT> },
-		// 	cloud_C{ new pcl::PointCloud<PointT> };
-		// pcl::applyMorphologicalOperator<PointT>(cloud, window_sizes[i], pcl::MorphologicalOperators::MORPH_OPEN, *cloud_O);
-		// pcl::applyMorphologicalOperator<PointT>(cloud, window_sizes[i], pcl::MorphologicalOperators::MORPH_CLOSE, *cloud_C);
-
-		// reset the tree with new window resolution and newly filtered ground selection
 		tree.deleteTree();
 		tree.setResolution(window_sizes[i]);
-		tree.setInputCloud(cloud_shared_ref, ground_shared_ref);
+		tree.setInputCloud(cloud_shared_ref, ground_shared_ref);	// points in the tree will be in the domain of the full cloud
 		tree.addPointsFromInputCloud();
 
-		// cache for the indices of the points in each window -- init to size of current selection
-		std::vector<pcl::Indices>
-			pt_window_indices{};
+		float half_res = window_sizes[i] / 2.0f;
+
+		std::vector<pcl::Indices> pt_window_indices{};
 		pt_window_indices.resize(ground.size());
 
-		const float half_res = window_sizes[i] / 2.f;
-
-		// populate each window with contained points (indices)
 		for (size_t _idx = 0; _idx < ground.size(); _idx++) {
 			const PointT& _pt = cloud_[ground[_idx]];	// retrieve source (x, y) for each pt in selection
 			tree.boxSearch(
@@ -518,44 +378,42 @@ void progressive_morph_filter(
 			);
 		}
 
-		// morph open stage 1 (morph erode)
-		for (size_t src_pt_idx = 0; src_pt_idx < ground.size(); src_pt_idx++) {	// loop through windows for each point
+		for (std::size_t p_idx = 0; p_idx < ground.size(); ++p_idx)
+		{
+			const pcl::Indices& pt_indices = pt_window_indices[p_idx];
+			float& _zp_temp = zp_temp[ground[p_idx]];
+			float& _zn_temp = zn_temp[ground[p_idx]];
+			_zp_temp = _zn_temp = cloud_[ground[p_idx]].z;
 
-			const pcl::Indices& window_indices = pt_window_indices[src_pt_idx];
-			float& _max_z_temp = morph_max_z_temp[ground[src_pt_idx]];
-			float& _min_z_temp = morph_min_z_temp[ground[src_pt_idx]];
-
-			_max_z_temp = _min_z_temp = cloud_[ground[src_pt_idx]].z;		// initialize to be the same as original cloud
-
-			for (const auto window_pt_idx : window_indices) {		// min and max z for each window
-				const float
-					_z = cloud_[window_pt_idx].z;
-				if (_z < _max_z_temp)
-					_max_z_temp = _z;
-				if (_z > _min_z_temp)
-					_min_z_temp = _z;
+			for (const pcl::index_t window_idx : pt_indices) {
+				const float _z = cloud_[window_idx].z;
+				if (_z < _zp_temp) {
+					_zp_temp = _z;
+				}
+				if (_z > _zn_temp) {
+					_zn_temp = _z;
+				}
 			}
 
-			const float _t = _max_z_temp;
-
 		}
-		// morph open stage 2 (morph dilate)
-		for (size_t src_pt_idx = 0; src_pt_idx < ground.size(); src_pt_idx++) {
 
-			const pcl::Indices& window_indices = pt_window_indices[src_pt_idx];
-			float& _max_z_final = morph_max_z_final[ground[src_pt_idx]];
-			float& _min_z_final = morph_min_z_final[ground[src_pt_idx]];
+		for (std::size_t p_idx = 0; p_idx < ground.size(); ++p_idx)
+		{
+			const pcl::Indices& pt_indices = pt_window_indices[p_idx];
+			float& _zp_final = zp_final[ground[p_idx]];
+			float& _zn_final = zn_final[ground[p_idx]];
+			_zp_final = _zn_final = zp_temp[ground[p_idx]];
 
-			_max_z_final = _min_z_final = cloud_[ground[src_pt_idx]].z;		// initialize to be the same as original cloud
-
-			for (const auto window_pt_idx : window_indices) {		// min and max z for each window
+			for (const pcl::index_t window_idx : pt_indices) {
 				const float
-					_z_max = morph_max_z_temp[window_pt_idx],	// use results from stage 1
-					_z_min = morph_min_z_temp[window_pt_idx];	// ISSUE: window_pt_idx is in the domain of the entire cloud's indices
-				if (_z_max > _max_z_final)
-					_max_z_final = _z_max;
-				if (_z_min < _min_z_final)
-					_min_z_final = _z_min;
+					_zp = zp_temp[window_idx],
+					_zn = zn_temp[window_idx];
+				if (_zp > _zp_final) {
+					_zp_final = _zp;
+				}
+				if (_zn < _zn_final) {
+					_zn_final = _zn;
+				}
 			}
 
 		}
@@ -563,19 +421,16 @@ void progressive_morph_filter(
 		// Find indices of the points whose difference between the source and
 		// filtered point clouds is less than the current height threshold.
 		pcl::Indices pt_indices;
-		for (size_t sel_idx = 0; sel_idx < ground.size(); sel_idx++) {
-
-			const float
-				diff_max = cloud_[ground[sel_idx]].z - morph_max_z_final[ground[sel_idx]];		// DEBUGGING: diff_max was always 0.0...
-			// diff_min = morph_min_z_final[ground[sel_idx]] - cloud_[ground[sel_idx]].z;
-			if (diff_max < height_thresholds[i] /* && diff_min < height_thresholds[i] */)
-				pt_indices.push_back(ground[sel_idx]);	// change this to directly edit the ground selection
-
+		for (std::size_t p_idx = 0; p_idx < ground.size(); ++p_idx)
+		{
+			float diff_O = cloud_[ground[p_idx]].z - zp_final[ground[p_idx]];
+			float diff_C = zn_final[ground[p_idx]] - cloud_[ground[p_idx]].z;
+			if (diff_O < height_thresholds[i] && diff_C < height_thresholds[i])
+				pt_indices.push_back(ground[p_idx]);
 		}
 
 		// Ground is now limited to pt_indices
 		ground.swap(pt_indices);
-
 	}
 
 }
