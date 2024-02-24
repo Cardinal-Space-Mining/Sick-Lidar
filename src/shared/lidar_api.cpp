@@ -240,28 +240,27 @@ namespace ldrp {
 
 			struct {
 				float
-					min_scan_theta_deg =	-90.f,			// max scan theta angle used for cutoff -- see ms100 operating manual for coordinate system
-					max_scan_theta_deg =	+90.f,			// min scan theta angle used for cutoff
-					min_scan_range_cm =		10.f,			// the minimum scan range
-					max_pmf_range_cm =		200.f,			// max range for points used in PMF
-					max_z_thresh_cm =		75.f,			// for the "mid cut" z-coord filter
-					min_z_thresh_cm =		25.f,
+					min_scan_theta_deg =		-90.f,			// max scan theta angle used for cutoff -- see ms100 operating manual for coordinate system
+					max_scan_theta_deg =		+90.f,			// min scan theta angle used for cutoff
+					min_scan_range_cm =			10.f,			// the minimum scan range
+					max_pmf_range_cm =			200.f,			// max range for points used in PMF
+					max_z_thresh_cm =			75.f,			// for the "mid cut" z-coord filter
+					min_z_thresh_cm =			25.f,
 					// filter by intensity? (test this)
 
-					voxel_size_cm =			3.f,			// voxel cell size used during voxelization filter
-					map_resolution_cm =		5.f,			// the resolution of each grid cell
-					pmf_window_base_cm =	0.4f,
-					pmf_cell_size_cm =		5.f,
-					pmf_init_distance_cm =	5.f,
-					pmf_max_distance_cm =	12.f,
-					pmf_slope =				0.2f;
-				int32_t
-					pmf_max_window_size =	40;
+					voxel_size_cm =				3.f,			// voxel cell size used during voxelization filter
+					map_resolution_cm =			5.f,			// the resolution of each grid cell
+					pmf_window_base =			1.f,
+					pmf_max_window_size_cm =	40.f,
+					pmf_cell_size_cm =			5.f,
+					pmf_init_distance_cm =		5.f,
+					pmf_max_distance_cm =		12.f,
+					pmf_slope =					0.2f;
 
 			} fpipeline;
 		} _config;
 
-		struct {	// states to be connunicated across threads
+		struct {	// states to be communicated across threads
 			int32_t log_level{ 1 };
 
 			std::atomic<bool> enable_threads{false};
@@ -475,13 +474,13 @@ namespace ldrp {
 					// apply pmf to selected points
 					progressive_morph_filter(		// !!!: Crashing somewhere in here :(
 						voxelized_points, pre_pmf_range_filtered, pmf_filtered_ground,
-						this->_config.fpipeline.pmf_window_base_cm,
-						this->_config.fpipeline.pmf_max_window_size,
-						this->_config.fpipeline.pmf_cell_size_cm,
-						this->_config.fpipeline.pmf_init_distance_cm,
-						this->_config.fpipeline.pmf_max_distance_cm,
+						this->_config.fpipeline.pmf_window_base,
+						this->_config.fpipeline.pmf_max_window_size_cm * 1e-2f,
+						this->_config.fpipeline.pmf_cell_size_cm * 1e-2f,
+						this->_config.fpipeline.pmf_init_distance_cm * 1e-2f,
+						this->_config.fpipeline.pmf_max_distance_cm * 1e-2f,
 						this->_config.fpipeline.pmf_slope,
-						false
+						true
 					);
 					// obstacles = (base - ground)
 					pc_negate_selection(
@@ -491,7 +490,7 @@ namespace ldrp {
 					);
 
 					// TEST
-					pc_normalize_selection(voxelized_points.points, pmf_filtered_ground);
+					pc_normalize_selection(voxelized_points.points, pmf_filtered_obstacles);
 					if(this->_config.pcd_logging_mode & PCD_LOGGING_NT) {
 						this->_nt.test_filtered_points.Set(
 							std::span<const uint8_t>{
