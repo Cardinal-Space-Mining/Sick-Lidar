@@ -180,6 +180,7 @@ endif()
 
 
 
+option(BUILD_SHARED_LIB "Build the library to be shared" ON)
 option(LDRP_ENABLE_DEBUG_LOGGING "Enable debug logging for the shared library" ON)
 option(LDRP_ENABLE_SAFETY_CHECKS "Enable additional safety checks for the shared library" ON)
 if(${LDRP_ENABLE_DEBUG_LOGGING})
@@ -202,31 +203,29 @@ if(${USE_WPILIB})	# compile DataLogManager directly into our library
 else()
 	list(APPEND _include_dirs "${WPILIB_DIR}/wpiutil/src/main/native/thirdparty/fmtlib/include")
 endif()
-# set(SHARED_TARGET   "${PROJECT_NAME}_Shared")
-add_library(${PROJECT_NAME}_shared
-	SHARED ${_shared_sources}
-)
-target_include_directories(${PROJECT_NAME}_shared
+# set(SHARED_TARGET   "${PROJECT_NAME}_lib")
+if(${BUILD_SHARED_LIB})
+	message(STATUS "[SICK PERCEPTION]: Project configured to build SHARED library")
+	add_library(${PROJECT_NAME}_lib
+		SHARED ${_shared_sources}
+	)
+else()
+	message(STATUS "[SICK PERCEPTION]: Project configured to build STATIC library")
+	add_library(${PROJECT_NAME}_lib
+		STATIC ${_shared_sources}
+	)
+endif()
+target_include_directories(${PROJECT_NAME}_lib
 	PUBLIC "${CMAKE_CURRENT_LIST_DIR}"
-	PUBLIC ${_include_dirs}
+	PRIVATE ${_include_dirs}
 	# PRIVATE "${PROJECT_SOURCE_DIR}/submodule-deps/sick_scan_xd/include"
 	PRIVATE ${PCL_INCLUDE_DIRS}
 )
-target_link_directories(${PROJECT_NAME}_shared
+target_link_directories(${PROJECT_NAME}_lib
 	PRIVATE ${PCL_LIBRARY_DIRS}
 )
-set(PCL_SELECTED_LIBRARIES	# did not work :(
-	PCL_COMMON_LIBRARIES
-	PCL_IO_LIBRARIES
-	PCL_FILTERS_LIBRARIES
-	PCL_FEATURES_LIBRARIES
-	PCL_KDTREE_LIBRARIES
-	PCL_OCTREE_LIBRARIES
-	PCL_SEGMENTATION_LIBRARIES
-	PCL_SAMPLE_CONSENSUS_LIBRARIES
-)
 # message(STATUS "PCL Libraries: ${PCL_LIBRARIES}")
-target_link_libraries(${PROJECT_NAME}_shared
+target_link_libraries(${PROJECT_NAME}_lib
 	# PRIVATE debug ${PCL_LIBRARIES}
 	PRIVATE pcl_common pcl_io pcl_octree #PCL_FILTERS
 	PRIVATE general SickScanInternal_lib
@@ -235,7 +234,7 @@ target_link_libraries(${PROJECT_NAME}_shared
 )
 if(${USE_WPILIB})
 	list(APPEND _PROJECT_DEFINES -DUSING_WPILIB=true)
-	target_link_libraries(${PROJECT_NAME}_shared
+	target_link_libraries(${PROJECT_NAME}_lib
 		PRIVATE wpiutil
 		PRIVATE wpinet
 		PRIVATE wpimath
@@ -244,14 +243,14 @@ if(${USE_WPILIB})
 else()
 	list(APPEND _PROJECT_DEFINES -DUSING_WPILIB=false)
 endif()
-target_compile_definitions(${PROJECT_NAME}_shared PRIVATE
+target_compile_definitions(${PROJECT_NAME}_lib PRIVATE
 	-D_LIB_SOURCE
 	${_PROJECT_DEFINES}
 	${PCL_DEFINITIONS}
 )
 
-set_target_properties(${PROJECT_NAME}_shared PROPERTIES PUBLIC_HEADER "lidar_api.h")
-install(TARGETS ${PROJECT_NAME}_shared
+set_target_properties(${PROJECT_NAME}_lib PROPERTIES PUBLIC_HEADER "lidar_api.h")
+install(TARGETS ${PROJECT_NAME}_lib
 	EXPORT ${PROJECT_NAME}_Export
 	LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
 	PUBLIC_HEADER DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/SickPerception"
