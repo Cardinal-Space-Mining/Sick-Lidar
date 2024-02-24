@@ -490,7 +490,7 @@ namespace ldrp {
 					);
 
 					// TEST
-					pc_normalize_selection(voxelized_points.points, pmf_filtered_ground);
+					pc_normalize_selection(voxelized_points.points, pmf_filtered_obstacles);
 					if(this->_config.pcd_logging_mode & PCD_LOGGING_NT) {
 						this->_nt.test_filtered_points.Set(
 							std::span<const uint8_t>{
@@ -614,7 +614,7 @@ namespace ldrp {
 								}
 							}
 						}	// insufficient samples or no thread available... (keep updating the current framebuff)
-#define SIM_GENERATE_POINTS
+// #define SIM_GENERATE_POINTS
 #ifndef SIM_GENERATE_POINTS
 						if(udp_fifo->Pop(udp_payload_bytes, scan_timestamp, scan_count)) {	// blocks until packet is received
 
