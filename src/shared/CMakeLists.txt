@@ -225,9 +225,10 @@ set(PCL_SELECTED_LIBRARIES	# did not work :(
 	PCL_SEGMENTATION_LIBRARIES
 	PCL_SAMPLE_CONSENSUS_LIBRARIES
 )
+# message(STATUS "PCL Libraries: ${PCL_LIBRARIES}")
 target_link_libraries(${PROJECT_NAME}_shared
 	# PRIVATE debug ${PCL_LIBRARIES}
-	PRIVATE PCL_COMMON PCL_IO PCL_OCTREE #PCL_FILTERS
+	PRIVATE pcl_common pcl_io pcl_octree #PCL_FILTERS
 	PRIVATE general SickScanInternal_lib
 	# PRIVATE sick_scan_xd_shared_lib
 	# PRIVATE "${PROJECT_SOURCE_DIR}/lib/${SICK_SCAN_LIB_REL}"

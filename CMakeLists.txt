@@ -17,7 +17,15 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}" CACHE STRING "" FORCE
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}" CACHE STRING "" FORCE)
 set(CMAKE_INSTALL_PREFIX "${PROJECT_SOURCE_DIR}/install" CACHE STRING "" FORCE)
 
+if(NOT MSVC)
+	if(NOT CMAKE_BUILD_TYPE)
+		set(CMAKE_BUILD_TYPE Release)
+		message(STATUS "Release build type applied for non-MSVC build system")
+	endif()
+endif()
+
 # options
+option(BUILD_TEST "Build the included test program" ON)
 option(USE_WPILIB "Enable the compiling and internal usage of Wpilib (results in a multistage build process)" ON)
 # cmake_dependent_option(MULTISTAGE_STEP
 # 	"Which step (0 or 1) of the multistage build should be configured. Default of -1 for autodetect (unused when wpilib is not included)"
@@ -110,19 +118,21 @@ endif()
 	add_subdirectory(src/shared)
 
 #main program
-	set(CMAKE_CXX_STANDARD ${PROJECT_CXX_STANDARD})
-	add_executable(${PROJECT_NAME}_test "src/main.cpp")
-	target_link_libraries(${PROJECT_NAME}_test
-		PRIVATE ${PROJECT_NAME}_shared
-	)
+	if(${BUILD_TEST})
+		set(CMAKE_CXX_STANDARD ${PROJECT_CXX_STANDARD})
+		add_executable(${PROJECT_NAME}_test "src/main.cpp")
+		target_link_libraries(${PROJECT_NAME}_test
+			PRIVATE ${PROJECT_NAME}_shared
+		)
 
-	# file(GLOB _lidar_configs "${CMAKE_CURRENT_LIST_DIR}/src/*.launch")
-	install(TARGETS ${PROJECT_NAME}_test
-		DESTINATION ${CMAKE_INSTALL_BINDIR}
-	)
-	# install(FILES ${_lidar_configs}
-	# 	DESTINATION ${CMAKE_INSTALL_BINDIR}
-	# )
+		# file(GLOB _lidar_configs "${CMAKE_CURRENT_LIST_DIR}/src/*.launch")
+		install(TARGETS ${PROJECT_NAME}_test
+			DESTINATION ${CMAKE_INSTALL_BINDIR}
+		)
+		# install(FILES ${_lidar_configs}
+		# 	DESTINATION ${CMAKE_INSTALL_BINDIR}
+		# )
+	endif()
 
 
 else()
