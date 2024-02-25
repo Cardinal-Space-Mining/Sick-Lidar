@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cmath>
 #include <cstdint>
 #include <type_traits>
 
@@ -94,7 +95,7 @@ public:
 		Cell_IsDense = Cell_T::IsDense;
 	inline static constexpr size_t
 		Cell_Size = sizeof(Cell_T),
-		Max_Alloc = (1Ui64 << 30) / Cell_Size;		// 1 << 30 ~ 1bn --> limit to ~1 gigabyte
+		Max_Alloc = (1ULL << 30) / Cell_Size;		// 1 << 30 ~ 1bn --> limit to ~1 gigabyte
 
 	template<int64_t val>
 	inline static constexpr Weight_T Weight() { return static_cast<Weight_T>(val); }
