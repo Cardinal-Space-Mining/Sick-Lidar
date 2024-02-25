@@ -17,7 +17,15 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}" CACHE STRING "" FORCE
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}" CACHE STRING "" FORCE)
 set(CMAKE_INSTALL_PREFIX "${PROJECT_SOURCE_DIR}/install" CACHE STRING "" FORCE)
 
+if(NOT MSVC)
+	if(NOT CMAKE_BUILD_TYPE)
+		set(CMAKE_BUILD_TYPE Release)
+		message(STATUS "[SICK PERCEPTION]: Release build type applied by default for non-MSVC build system")
+	endif()
+endif()
+
 # options
+option(BUILD_TEST "Build the included test program" ON)
 option(USE_WPILIB "Enable the compiling and internal usage of Wpilib (results in a multistage build process)" ON)
 # cmake_dependent_option(MULTISTAGE_STEP
 # 	"Which step (0 or 1) of the multistage build should be configured. Default of -1 for autodetect (unused when wpilib is not included)"
@@ -37,19 +45,19 @@ endif()
 
 # automatically deduce build stage
 if(${MULTISTAGE_STEP} LESS 0)
-	message(STATUS "Attempting build stage automatic deduction...")
+	message(STATUS "[SICK PERCEPTION]: Attempting build stage automatic deduction...")
 	if(EXISTS "${CMAKE_INSTALL_PREFIX}/cmake/protobuf-config.cmake" OR EXISTS "${CMAKE_INSTALL_PREFIX}/lib/cmake/protobuf/protobuf-config.cmake") # possibly set variables like for wpilib and use find_package() ???
 		set(MULTISTAGE_STEP 1)
-		message(STATUS "Protobuf install detected: automatically deduced build stage 1 (project).")
+		message(STATUS "[SICK PERCEPTION]: Protobuf install detected: automatically deduced build stage 1 (project).")
 	else()
 		set(MULTISTAGE_STEP 0)
-		message(STATUS "Protobuf install not detected: automatically deduced build stage 0 (prereq).")
+		message(STATUS "[SICK PERCEPTION]: Protobuf install not detected: automatically deduced build stage 0 (prereq).")
 	endif()
 endif()
 
 # run a build stage based on variables
 if(${MULTISTAGE_STEP} EQUAL 0)
-	message(STATUS "Build stage 0 (prereq) running!...")
+	message(STATUS "[SICK PERCEPTION]: Build stage 0 (prereq) running!...")
 
 # protobuf
 	set(CMAKE_CXX_STANDARD 20)
@@ -61,7 +69,7 @@ if(${MULTISTAGE_STEP} EQUAL 0)
 
 
 elseif(${MULTISTAGE_STEP} GREATER 0)
-	message(STATUS "Build stage 1 (project) running!...")
+	message(STATUS "[SICK PERCEPTION]: Build stage 1 (project) running!...")
 
 #wpilib
 if(${USE_WPILIB})
@@ -102,29 +110,31 @@ endif()
 	# 	set(CMAKE_CXX_STANDARD 14)	# sick_scan_xd fails to build with > C++14
 	# endif()
 	# add_subdirectory(submodule-deps/sick_scan_xd)
-	# message(STATUS "Building sick_scan_xd with ROS version ${ROS_VERSION}")
+	# message(STATUS "[SICK PERCEPTION]: Building sick_scan_xd with ROS version ${ROS_VERSION}")
 	# set(CMAKE_CXX_STANDARD ${__CMAKE_CXX_STANDARD})
 
 #ldrp shared library
 	# set(CMAKE_CXX_STANDARD ${PROJECT_CXX_STANDARD})
-	add_subdirectory(src/shared)
+	add_subdirectory(src/core)
 
 #main program
-	set(CMAKE_CXX_STANDARD ${PROJECT_CXX_STANDARD})
-	add_executable(${PROJECT_NAME}_test "src/main.cpp")
-	target_link_libraries(${PROJECT_NAME}_test
-		PRIVATE ${PROJECT_NAME}_shared
-	)
+	if(${BUILD_TEST})
+		set(CMAKE_CXX_STANDARD ${PROJECT_CXX_STANDARD})
+		add_executable(${PROJECT_NAME}_test "src/main.cpp")
+		target_link_libraries(${PROJECT_NAME}_test
+			PRIVATE ${PROJECT_NAME}_lib
+		)
 
-	# file(GLOB _lidar_configs "${CMAKE_CURRENT_LIST_DIR}/src/*.launch")
-	install(TARGETS ${PROJECT_NAME}_test
-		DESTINATION ${CMAKE_INSTALL_BINDIR}
-	)
-	# install(FILES ${_lidar_configs}
-	# 	DESTINATION ${CMAKE_INSTALL_BINDIR}
-	# )
+		# file(GLOB _lidar_configs "${CMAKE_CURRENT_LIST_DIR}/src/*.launch")
+		install(TARGETS ${PROJECT_NAME}_test
+			DESTINATION ${CMAKE_INSTALL_BINDIR}
+		)
+		# install(FILES ${_lidar_configs}
+		# 	DESTINATION ${CMAKE_INSTALL_BINDIR}
+		# )
+	endif()
 
 
 else()
-	message(FATAL_ERROR "Internal branch logic error. Please manually set variable MULTISTAGE_STEP to define a build stage.")
+	message(FATAL_ERROR "[SICK PERCEPTION]: Internal branch logic error. Please manually set variable MULTISTAGE_STEP to define a build stage.")
 endif()

@@ -1,7 +1,8 @@
 #include "lidar_api.h"
 
 #include "filtering.hpp"
-#include "mem_utils.h"
+#include "weight_map.hpp"
+#include "mem_utils.hpp"
 #include "pcd_streaming.h"
 
 #include <condition_variable>
@@ -353,10 +354,13 @@ namespace ldrp {
 
 				f_inst->nt.is_active.Set(true);
 
-				// 1. transform points based on timestamp
 				point_cloud.clear();	// clear the vector and set w,h to 0
 				point_ranges.clear();	// << MEMORY LEAK!!! (it was)
 
+				Eigen::Vector3f avg_origin{};
+				size_t origin_samples = 0;
+
+				// 1. transform points based on timestamp
 				for(size_t i = 0; i < f_inst->samples.size(); i++) {			// we could theoretically multithread this part -- just use a mutex for inserting points into the master collection
 					for(size_t j = 0; j < f_inst->samples[i].size(); j++) {
 						const sick_scansegment_xd::ScanSegmentParserOutput& segment = f_inst->samples[i][j];
@@ -368,6 +372,9 @@ namespace ldrp {
 
 						if(this->_config.skip_invalid_transform_ts && !ts_transform.has_value()) continue;
 						const Eigen::Isometry3f& transform = ts_transform.has_value() ? *ts_transform : DEFAULT_NO_POSE;	// need to convert to transform matrix
+
+						avg_origin += transform.translation();
+						origin_samples++;
 
 						for(const sick_scansegment_xd::ScanSegmentParserOutput::Scangroup& scan_group : segment.scandata) {		// "ms100 transmits 16 groups"
 #define USE_FIRST_ECHO_ONLY		// make a config option or grouping for this instead
@@ -435,6 +442,8 @@ namespace ldrp {
 					pmf_filtered_ground.clear();
 					pmf_filtered_obstacles.clear();
 
+					avg_origin /= origin_samples;
+
 					// voxelize points
 					voxel_filter(
 						point_cloud, DEFAULT_NO_SELECTION, voxelized_points,
@@ -467,8 +476,8 @@ namespace ldrp {
 						voxelized_points.points,
 						z_low_subset_filtered,
 						pre_pmf_range_filtered,
-						0.f, this->_config.fpipeline.max_pmf_range_cm * 1e-2f
-						// need to make this relative to the lidar's global position (possibly @ multiple timestamps!?) -- or just inherit measured ranges :|
+						0.f, this->_config.fpipeline.max_pmf_range_cm * 1e-2f,
+						avg_origin
 					);
 
 					// apply pmf to selected points
@@ -480,7 +489,7 @@ namespace ldrp {
 						this->_config.fpipeline.pmf_init_distance_cm * 1e-2f,
 						this->_config.fpipeline.pmf_max_distance_cm * 1e-2f,
 						this->_config.fpipeline.pmf_slope,
-						true
+						false
 					);
 					// obstacles = (base - ground)
 					pc_negate_selection(
@@ -581,7 +590,7 @@ namespace ldrp {
 					for(uint64_t filled_segments = 0; this->_state.enable_threads; aquisition_loop_count++) {	// loop until thread exit is called... (internal break allows for exit as well)
 
 						if(filled_segments >= this->_config.enabled_segments) {	// if we have aquired sufficient samples...
-							LDRP_LOG( LOG_DEBUG, "LDRP Worker [Aquisition Loop]: Aquisition quota satisfied after {} loops - exporting buffer to thread...", aquisition_loop_count )
+							LDRP_LOG( LOG_DEBUG && LOG_VERBOSE, "LDRP Worker [Aquisition Loop]: Aquisition quota satisfied after {} loops - exporting buffer to thread...", aquisition_loop_count )
 
 							// attempt to find or create a thread for processing the frame
 							this->_finished_queue_mutex.lock();	// aquire mutex for queue
@@ -594,6 +603,8 @@ namespace ldrp {
 								std::swap(f_inst.samples, frame_segments);		// figure out where we want to clear the buffer that is swapped in so we don't start with old data in the queues
 								f_inst.link_state.store(true);
 								f_inst.link_condition.notify_all();
+
+								LDRP_LOG( LOG_DEBUG, "LDRP Worker: Exported complete scan to processing instance {} after aquiring {} segments", filter_idx, aquisition_loop_count )
 								break;
 
 							} else {
@@ -605,12 +616,14 @@ namespace ldrp {
 									FilterInstance& f_inst = *this->_filter_threads.back();
 									std::swap(f_inst.samples, frame_segments);
 									f_inst.thread.reset( new std::thread{&LidarImpl::filterWorker, this, &f_inst} );
+
+									LDRP_LOG( LOG_DEBUG, "LDRP Worker: Created new processing instance {} after aquiring {} segments", f_inst.index, aquisition_loop_count )
 									break;
 
 								}
 							}
 						}	// insufficient samples or no thread available... (keep updating the current framebuff)
-#define SIM_GENERATE_POINTS
+// #define SIM_GENERATE_POINTS
 #ifndef SIM_GENERATE_POINTS
 						if(udp_fifo->Pop(udp_payload_bytes, scan_timestamp, scan_count)) {	// blocks until packet is received
 

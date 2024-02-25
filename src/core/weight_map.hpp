@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cmath>
 #include <cstdint>
 #include <type_traits>
 
@@ -54,8 +55,8 @@ public:
 	/** Align a point to a box grid of the given resolution and offset origin. Result may be negative if lower than current offset. */
 	static Eigen::Vector2i gridAlign(float x, float y, const Eigen::Vector2f& off, float res) {
 		return Eigen::Vector2i{
-			std::floorf((x - off.x()) / res),	// always floor since grid cells are indexed by their "bottom left" corner's raw position
-			std::floorf((y - off.y()) / res)
+			(int)std::floor((x - off.x()) / res),	// always floor since grid cells are indexed by their "bottom left" corner's raw position
+			(int)std::floor((y - off.y()) / res)
 		};
 	}
 	static Eigen::Vector2i gridAlign(const Eigen::Vector4f& pt, const Eigen::Vector2f& off, float res) {
@@ -94,7 +95,7 @@ public:
 		Cell_IsDense = Cell_T::IsDense;
 	inline static constexpr size_t
 		Cell_Size = sizeof(Cell_T),
-		Max_Alloc = (1Ui64 << 30) / Cell_Size;		// 1 << 30 ~ 1bn --> limit to ~1 gigabyte
+		Max_Alloc = (1ULL << 30) / Cell_Size;		// 1 << 30 ~ 1bn --> limit to ~1 gigabyte
 
 	template<int64_t val>
 	inline static constexpr Weight_T Weight() { return static_cast<Weight_T>(val); }
