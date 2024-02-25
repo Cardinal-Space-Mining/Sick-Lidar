@@ -5,7 +5,7 @@
 #include <atomic>
 
 #include "lidar_api.h"
-#include "./shared/mem_utils.h"
+#include "./core/mem_utils.hpp"
 
 
 static std::atomic<bool> _program_running = true;
