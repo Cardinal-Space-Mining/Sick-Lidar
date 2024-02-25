@@ -218,8 +218,8 @@ endif()
 target_include_directories(${PROJECT_NAME}_lib
 	PUBLIC "${CMAKE_CURRENT_LIST_DIR}"
 	PRIVATE ${_include_dirs}
-	# PRIVATE "${PROJECT_SOURCE_DIR}/submodule-deps/sick_scan_xd/include"
 	PRIVATE ${PCL_INCLUDE_DIRS}
+	# PRIVATE "${PROJECT_SOURCE_DIR}/submodule-deps/sick_scan_xd/include"
 )
 target_link_directories(${PROJECT_NAME}_lib
 	PRIVATE ${PCL_LIBRARY_DIRS}
@@ -261,6 +261,5 @@ install(TARGETS ${PROJECT_NAME}_lib
 # )
 # install(EXPORT ${PROJECT_NAME}_Export
 # 	FILE ${PROJECT_NAME}-config.cmake
-# 	NAMESPACE ${PROJECT_NAME}::
 # 	DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}
 # )

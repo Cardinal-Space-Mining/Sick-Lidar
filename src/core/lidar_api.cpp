@@ -1,7 +1,8 @@
 #include "lidar_api.h"
 
 #include "filtering.hpp"
-#include "mem_utils.h"
+#include "weight_map.hpp"
+#include "mem_utils.hpp"
 #include "pcd_streaming.h"
 
 #include <condition_variable>
@@ -353,10 +354,13 @@ namespace ldrp {
 
 				f_inst->nt.is_active.Set(true);
 
-				// 1. transform points based on timestamp
 				point_cloud.clear();	// clear the vector and set w,h to 0
 				point_ranges.clear();	// << MEMORY LEAK!!! (it was)
 
+				Eigen::Vector3f avg_origin{};
+				size_t origin_samples = 0;
+
+				// 1. transform points based on timestamp
 				for(size_t i = 0; i < f_inst->samples.size(); i++) {			// we could theoretically multithread this part -- just use a mutex for inserting points into the master collection
 					for(size_t j = 0; j < f_inst->samples[i].size(); j++) {
 						const sick_scansegment_xd::ScanSegmentParserOutput& segment = f_inst->samples[i][j];
@@ -368,6 +372,9 @@ namespace ldrp {
 
 						if(this->_config.skip_invalid_transform_ts && !ts_transform.has_value()) continue;
 						const Eigen::Isometry3f& transform = ts_transform.has_value() ? *ts_transform : DEFAULT_NO_POSE;	// need to convert to transform matrix
+
+						avg_origin += transform.translation();
+						origin_samples++;
 
 						for(const sick_scansegment_xd::ScanSegmentParserOutput::Scangroup& scan_group : segment.scandata) {		// "ms100 transmits 16 groups"
 #define USE_FIRST_ECHO_ONLY		// make a config option or grouping for this instead
@@ -435,6 +442,8 @@ namespace ldrp {
 					pmf_filtered_ground.clear();
 					pmf_filtered_obstacles.clear();
 
+					avg_origin /= origin_samples;
+
 					// voxelize points
 					voxel_filter(
 						point_cloud, DEFAULT_NO_SELECTION, voxelized_points,
@@ -467,8 +476,8 @@ namespace ldrp {
 						voxelized_points.points,
 						z_low_subset_filtered,
 						pre_pmf_range_filtered,
-						0.f, this->_config.fpipeline.max_pmf_range_cm * 1e-2f
-						// need to make this relative to the lidar's global position (possibly @ multiple timestamps!?) -- or just inherit measured ranges :|
+						0.f, this->_config.fpipeline.max_pmf_range_cm * 1e-2f,
+						avg_origin
 					);
 
 					// apply pmf to selected points
