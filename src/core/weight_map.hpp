@@ -55,8 +55,8 @@ public:
 	/** Align a point to a box grid of the given resolution and offset origin. Result may be negative if lower than current offset. */
 	static Eigen::Vector2i gridAlign(float x, float y, const Eigen::Vector2f& off, float res) {
 		return Eigen::Vector2i{
-			std::floorf((x - off.x()) / res),	// always floor since grid cells are indexed by their "bottom left" corner's raw position
-			std::floorf((y - off.y()) / res)
+			(int)std::floor((x - off.x()) / res),	// always floor since grid cells are indexed by their "bottom left" corner's raw position
+			(int)std::floor((y - off.y()) / res)
 		};
 	}
 	static Eigen::Vector2i gridAlign(const Eigen::Vector4f& pt, const Eigen::Vector2f& off, float res) {
