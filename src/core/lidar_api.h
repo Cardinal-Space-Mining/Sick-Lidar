@@ -4,10 +4,12 @@
 #include <memory>
 
 #ifdef WIN32
-	#ifdef _LIB_SOURCE
+	#ifdef _LDRP_SOURCE
 		#define __API __declspec(dllexport)
-	#else
+	#elif _LDRP_DYNAMIC_INTERFACE		// defined by the client if linking dynamically and +0.00001% speed increase is desired
 		#define __API __declspec(dllimport)
+	#else
+		#define __API
 	#endif
 	#define __API_LOCAL
 #else
@@ -17,7 +19,7 @@
 	#else
 		#define __API
 		#define __API_LOCAL
-#endif
+	#endif
 #endif
 
 

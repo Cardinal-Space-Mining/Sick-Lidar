@@ -8,7 +8,7 @@ endif()
 set(SICK_SCAN_DIR "${PROJECT_SOURCE_DIR}/submodule-deps/sick_scan_xd")
 set(WPILIB_DIR "${PROJECT_SOURCE_DIR}/submodule-deps/allwpilib")
 
-if(${USE_WPILIB})	# submodule manually checkout out to the same commit ref as is included with wpilib
+if(${sickperception_USE_WPILIB})	# submodule manually checkout out to the same commit ref as is included with wpilib
 	set(EIGEN_INCLUDE_DIR "${PROJECT_SOURCE_DIR}/submodule-deps/eigen" CACHE STRING "" FORCE)
 endif()
 find_package(PCL REQUIRED COMPONENTS common io filters features kdtree octree segmentation sample_consensus)
@@ -23,7 +23,7 @@ endif ()
 if (POLICY CMP0048)
 	cmake_policy(SET CMP0048 NEW)
 endif()
-set(CMAKE_CXX_STANDARD ${PROJECT_CXX_STANDARD})
+set(CMAKE_CXX_STANDARD ${sickperception_CXX_STANDARD})
 # if(NOT ${CMAKE_CXX_STANDARD} OR ${CMAKE_CXX_STANDARD} GREATER 17)
 # 	set(CMAKE_CXX_STANDARD 17)	# sick_scan_xd fails to build with > C++14
 # endif()
@@ -180,9 +180,8 @@ endif()
 
 
 
-option(BUILD_SHARED_LIB "Build the library to be shared" ON)
-option(LDRP_ENABLE_DEBUG_LOGGING "Enable debug logging for the shared library" ON)
-option(LDRP_ENABLE_SAFETY_CHECKS "Enable additional safety checks for the shared library" ON)
+option(LDRP_ENABLE_DEBUG_LOGGING "Enable debug logging for the core library" ON)
+option(LDRP_ENABLE_SAFETY_CHECKS "Enable additional safety checks for the core library" ON)
 if(${LDRP_ENABLE_DEBUG_LOGGING})
 	list(APPEND _PROJECT_DEFINES -DLOG_DEBUG=true)
 else()
@@ -193,18 +192,18 @@ if(${LDRP_ENABLE_SAFETY_CHECKS})
 endif()
 
 set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS OFF)
-set(CMAKE_CXX_STANDARD ${PROJECT_CXX_STANDARD})
+set(CMAKE_CXX_STANDARD ${sickperception_CXX_STANDARD})
 
 file(GLOB _shared_sources "${CMAKE_CURRENT_LIST_DIR}/*.cpp")
 file(GLOB _target_headers "${CMAKE_CURRENT_LIST_DIR}/*.h")
-if(${USE_WPILIB})	# compile DataLogManager directly into our library
+if(${sickperception_USE_WPILIB})	# compile DataLogManager directly into our library
 	list(APPEND _shared_sources "${WPILIB_DIR}/ntcoreffi/src/main/native/cpp/DataLogManager.cpp")
 	list(APPEND _include_dirs "${WPILIB_DIR}/ntcoreffi/src/main/native/include")
 else()
 	list(APPEND _include_dirs "${WPILIB_DIR}/wpiutil/src/main/native/thirdparty/fmtlib/include")
 endif()
 # set(SHARED_TARGET   "${PROJECT_NAME}_lib")
-if(${BUILD_SHARED_LIB})
+if(${BUILD_SHARED_LIBS})
 	message(STATUS "[SICK PERCEPTION]: Project configured to build SHARED library")
 	add_library(${PROJECT_NAME}_lib
 		SHARED ${_shared_sources}
@@ -232,7 +231,7 @@ target_link_libraries(${PROJECT_NAME}_lib
 	# PRIVATE sick_scan_xd_shared_lib
 	# PRIVATE "${PROJECT_SOURCE_DIR}/lib/${SICK_SCAN_LIB_REL}"
 )
-if(${USE_WPILIB})
+if(${sickperception_USE_WPILIB})
 	list(APPEND _PROJECT_DEFINES -DUSING_WPILIB=true)
 	target_link_libraries(${PROJECT_NAME}_lib
 		PRIVATE wpiutil
@@ -244,7 +243,7 @@ else()
 	list(APPEND _PROJECT_DEFINES -DUSING_WPILIB=false)
 endif()
 target_compile_definitions(${PROJECT_NAME}_lib PRIVATE
-	-D_LIB_SOURCE
+	-D_LDRP_SOURCE
 	${_PROJECT_DEFINES}
 	${PCL_DEFINITIONS}
 )

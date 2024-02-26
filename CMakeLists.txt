@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.15)
 project(SickPerception)
 
-include(CMakeDependentOption)
+# include(CMakeDependentOption)
 include(GNUInstallDirs)
 
 if(POLICY CMP0144)
@@ -15,7 +15,10 @@ endif()
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}" CACHE STRING "" FORCE)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}" CACHE STRING "" FORCE)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}" CACHE STRING "" FORCE)
-set(CMAKE_INSTALL_PREFIX "${PROJECT_SOURCE_DIR}/install" CACHE STRING "" FORCE)
+if(${CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT})	# if an install prefix is defined by not the default, that overrides our default >>
+	set(CMAKE_INSTALL_PREFIX "${PROJECT_SOURCE_DIR}/install" CACHE PATH "" FORCE)
+	message(STATUS "[SICK PERCEPTION]: Install prefix overridden: ${CMAKE_INSTALL_PREFIX}")
+endif()
 
 if(NOT MSVC)
 	if(NOT CMAKE_BUILD_TYPE)
@@ -25,54 +28,50 @@ if(NOT MSVC)
 endif()
 
 # options
-option(BUILD_TEST "Build the included test program" ON)
-option(USE_WPILIB "Enable the compiling and internal usage of Wpilib (results in a multistage build process)" ON)
-# cmake_dependent_option(MULTISTAGE_STEP
-# 	"Which step (0 or 1) of the multistage build should be configured. Default of -1 for autodetect (unused when wpilib is not included)"
-# 	-1 USE_WPILIB 1
-# )
-if(${USE_WPILIB})		# alternative solution?
-	# option(MULTISTAGE_STEP "Which step (0 or 1) of the multistage build should be configured. Default of -1 for autodetect (unused when wpilib is not included)" -1)
-	if(NOT MULTISTAGE_STEP)
-		set(MULTISTAGE_STEP -1)
+option(sickperception_BUILD_TEST "Build the included test program" ON)
+option(sickperception_USE_WPILIB "Enable the compiling and internal usage of Wpilib (results in a multistage build process)" ON)
+
+if(${sickperception_USE_WPILIB})		# alternative solution?
+	if(NOT DEFINED sickperception_MULTISTAGE_STEP)
+		set(sickperception_MULTISTAGE_STEP -1)
 	endif()
 else()
-	set(MULTISTAGE_STEP 1 CACHE INTERNAL "" FORCE)
+	set(sickperception_MULTISTAGE_STEP 1 CACHE INTERNAL "" FORCE)
 endif()
-if(NOT PROJECT_CXX_STANDARD)
-	set(PROJECT_CXX_STANDARD 20)
+if(NOT sickperception_CXX_STANDARD)
+	set(sickperception_CXX_STANDARD 20)
 endif()
 
 # automatically deduce build stage
-if(${MULTISTAGE_STEP} LESS 0)
+if(${sickperception_MULTISTAGE_STEP} LESS 0)
 	message(STATUS "[SICK PERCEPTION]: Attempting build stage automatic deduction...")
 	if(EXISTS "${CMAKE_INSTALL_PREFIX}/cmake/protobuf-config.cmake" OR EXISTS "${CMAKE_INSTALL_PREFIX}/lib/cmake/protobuf/protobuf-config.cmake") # possibly set variables like for wpilib and use find_package() ???
-		set(MULTISTAGE_STEP 1)
+		set(sickperception_MULTISTAGE_STEP 1)
 		message(STATUS "[SICK PERCEPTION]: Protobuf install detected: automatically deduced build stage 1 (project).")
 	else()
-		set(MULTISTAGE_STEP 0)
+		set(sickperception_MULTISTAGE_STEP 0)
 		message(STATUS "[SICK PERCEPTION]: Protobuf install not detected: automatically deduced build stage 0 (prereq).")
 	endif()
 endif()
 
 # run a build stage based on variables
-if(${MULTISTAGE_STEP} EQUAL 0)
+if(${sickperception_MULTISTAGE_STEP} EQUAL 0)
 	message(STATUS "[SICK PERCEPTION]: Build stage 0 (prereq) running!...")
 
 # protobuf
 	set(CMAKE_CXX_STANDARD 20)
-	set(protobuf_BUILD_EXAMPLES OFF CACHE BOOl "" FORCE)
+	set(protobuf_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 	set(protobuf_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 	set(protobuf_BUILD_SHARED_LIBS ON CACHE BOOL "" FORCE)
 	set(protobuf_BUILD_WITH_ZLIB OFF CACHE BOOL "" FORCE)
 	add_subdirectory(submodule-deps/protobuf)
 
 
-elseif(${MULTISTAGE_STEP} GREATER 0)
+elseif(${sickperception_MULTISTAGE_STEP} GREATER 0)
 	message(STATUS "[SICK PERCEPTION]: Build stage 1 (project) running!...")
 
 #wpilib
-if(${USE_WPILIB})
+if(${sickperception_USE_WPILIB})
 	if(WIN32)
 		set(_PROTOC_EXECUTABLE "protoc.exe")
 	else()
@@ -114,16 +113,21 @@ endif()
 	# set(CMAKE_CXX_STANDARD ${__CMAKE_CXX_STANDARD})
 
 #ldrp shared library
-	# set(CMAKE_CXX_STANDARD ${PROJECT_CXX_STANDARD})
+	# set(CMAKE_CXX_STANDARD ${sickperception_CXX_STANDARD})
 	add_subdirectory(src/core)
 
 #main program
-	if(${BUILD_TEST})
-		set(CMAKE_CXX_STANDARD ${PROJECT_CXX_STANDARD})
+	if(${sickperception_BUILD_TEST})
+		set(CMAKE_CXX_STANDARD ${sickperception_CXX_STANDARD})
 		add_executable(${PROJECT_NAME}_test "src/main.cpp")
 		target_link_libraries(${PROJECT_NAME}_test
 			PRIVATE ${PROJECT_NAME}_lib
 		)
+		if(${BUILD_SHARED_LIBS})
+			target_compile_definitions(${PROJECT_NAME}_test
+				-D_LDRP_DYNAMIC_INTERFACE
+			)
+		endif()
 
 		# file(GLOB _lidar_configs "${CMAKE_CURRENT_LIST_DIR}/src/*.launch")
 		install(TARGETS ${PROJECT_NAME}_test
@@ -136,5 +140,5 @@ endif()
 
 
 else()
-	message(FATAL_ERROR "[SICK PERCEPTION]: Internal branch logic error. Please manually set variable MULTISTAGE_STEP to define a build stage.")
+	message(FATAL_ERROR "[SICK PERCEPTION]: Internal branch logic error. Please manually set variable sickperception_MULTISTAGE_STEP to define a build stage.")
 endif()

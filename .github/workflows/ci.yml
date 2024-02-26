@@ -29,15 +29,13 @@ jobs:
 
       - name: "Build/Install Stage 1"
         run: |
-          cmake . -B ./cmake-build -DUSE_WPILIB=ON -DMULTISTAGE_STEP=0
-          cmake --build ./cmake-build --config Release --parallel $(nproc)
-          cmake --install ./cmake-build
+          cmake . -B ./cmake-build -Dsickperception_MULTISTAGE_STEP=0
+          cmake --build ./cmake-build --target install --config Release --parallel $(nproc)
       
       - name: "Build/Install Stage 2"
         run: |
-          cmake . -B ./cmake-build -DUSE_WPILIB=ON -DMULTISTAGE_STEP=1
-          cmake --build ./cmake-build --config Release --parallel $(nproc)
-          cmake --install ./cmake-build
+          cmake . -B ./cmake-build -Dsickperception_MULTISTAGE_STEP=1
+          cmake --build ./cmake-build --target install --config Release --parallel $(nproc)
       
       - name: "Inspect Install"
         run: |
