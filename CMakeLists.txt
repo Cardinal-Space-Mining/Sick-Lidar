@@ -18,6 +18,8 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}" CACHE STRING "" FORCE
 if(${CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT})	# if an install prefix is defined by not the default, that overrides our default >>
 	set(CMAKE_INSTALL_PREFIX "${PROJECT_SOURCE_DIR}/install" CACHE PATH "" FORCE)
 	message(STATUS "[SICK PERCEPTION]: Install prefix overridden: ${CMAKE_INSTALL_PREFIX}")
+else()
+	message(STATUS "[SICK PERCEPTION]: Using predefined install prefix: ${CMAKE_INSTALL_PREFIX}")
 endif()
 
 if(NOT MSVC)
