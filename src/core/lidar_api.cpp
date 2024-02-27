@@ -178,7 +178,8 @@ namespace ldrp {
 		}
 		~LidarImpl() {
 			this->_state.enable_threads.store(false);
-			if(this->_lidar_thread->joinable()) {
+			if(this->_lidar_thread && this->_lidar_thread->joinable()) {	// this should really be consolidated to an internal function since the exact same code is located in the api exit method :|
+				if(LidarImpl::_global->udp_fifo) LidarImpl::_global->udp_fifo->Shutdown();
 				this->_lidar_thread->join();
 			}
 			this->shutdownNT();
@@ -302,6 +303,7 @@ namespace ldrp {
 
 	public:	// main instance members
 		std::unique_ptr<std::thread> _lidar_thread{ nullptr };
+		sick_scansegment_xd::PayloadFifo* udp_fifo{ nullptr };
 		std::vector<std::unique_ptr<FilterInstance> > _filter_threads{};	// need pointers since filter instance doesn't like to be copied (vector impl)
 		std::deque<uint32_t> _finished_queue{};
 		std::mutex
@@ -568,7 +570,7 @@ namespace ldrp {
 				// a queue for each segment we are sampling from so we can have a rolling set of aquired samples (when configured)
 				SampleBuffer frame_segments{ 0 };
 
-				sick_scansegment_xd::PayloadFifo* udp_fifo = udp_receiver->Fifo();
+				this->udp_fifo = udp_receiver->Fifo();		// store to global so that we aren't ever stuck waiting for scan data if exit is called
 				std::vector<uint8_t> udp_payload_bytes{};
 				sick_scansegment_xd::ScanSegmentParserOutput parsed_segment{};
 				fifo_timestamp scan_timestamp{};
@@ -625,7 +627,7 @@ namespace ldrp {
 						}	// insufficient samples or no thread available... (keep updating the current framebuff)
 // #define SIM_GENERATE_POINTS
 #ifndef SIM_GENERATE_POINTS
-						if(udp_fifo->Pop(udp_payload_bytes, scan_timestamp, scan_count)) {	// blocks until packet is received
+						if(this->udp_fifo->Pop(udp_payload_bytes, scan_timestamp, scan_count)) {	// blocks until packet is received
 
 							if(this->_config.use_msgpack ?	// parse based on format
 								sick_scansegment_xd::MsgPackParser::Parse(
@@ -733,6 +735,8 @@ namespace ldrp {
 
 				}
 
+				LDRP_LOG( LOG_DEBUG, "LDRP Worker [Exit]: Aquisition loop ended. Collecting resources..." )
+
 			} else {	// udp receiver launch thread
 				LDRP_LOG( LOG_STANDARD, "LDRP Worker [Init]: UdpReceiver thread failed to start. Exitting..." )
 			}
@@ -741,14 +745,18 @@ namespace ldrp {
 
 			// join and delete all filter instances
 			for(std::unique_ptr<FilterInstance>& f_inst : this->_filter_threads) {
+				const uint32_t idx = f_inst->index;
 				if(f_inst->thread && f_inst->thread->joinable()) {
+					LDRP_LOG( LOG_DEBUG, "LDRP Worker [Exit]: Waiting for filter instance {} to join...", idx )
+					f_inst->link_condition.notify_all();
 					f_inst->thread->join();
 				}
 				delete f_inst->thread.release();
+				LDRP_LOG( LOG_DEBUG, "LDRP Worker [Exit]: Closed filter instance {}.", idx )
 			}
 
 			// close and deallocate udp receiver
-			udp_receiver->Fifo()->Shutdown();
+			this->udp_fifo->Shutdown();
 			udp_receiver->Close();
 			delete udp_receiver;
 
@@ -780,7 +788,7 @@ namespace ldrp {
 	}
 	const status_t apiDestroy() {
 		if(LidarImpl::_global) {
-			LidarImpl::_global.reset( nullptr );
+			LidarImpl::_global.reset(nullptr);
 			return STATUS_SUCCESS;
 		}
 		return STATUS_PREREQ_UNINITIALIZED | STATUS_ALREADY_SATISFIED;
@@ -804,6 +812,7 @@ namespace ldrp {
 			status_t s = STATUS_ALREADY_SATISFIED;
 			LidarImpl::_global->_state.enable_threads.store(false);
 			if(LidarImpl::_global->_lidar_thread && LidarImpl::_global->_lidar_thread->joinable()) {
+				if(LidarImpl::_global->udp_fifo) LidarImpl::_global->udp_fifo->Shutdown();		// break out of a possible infinite block when the scanner isn't connected
 				LidarImpl::_global->_lidar_thread->join();
 				s = STATUS_SUCCESS;
 			}

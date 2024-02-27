@@ -6,8 +6,8 @@
 			"displayName": "vscode",
 			"cacheVariables": {
 				"PROJECT_CXX_STANDARD": "20",
-				"USE_WPILIB": "ON",
-				"MULTISTAGE_STEP": "1"
+				"sickperception_USE_WPILIB": "ON",
+				"sickperception_MULTISTAGE_STEP": "1"
 			}
 		}
 	]

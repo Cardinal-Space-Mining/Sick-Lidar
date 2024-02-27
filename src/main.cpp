@@ -12,8 +12,8 @@ static std::atomic<bool> _program_running = true;
 static void _action(int sig) {
 	std::cout << "Caught signal. Stopping program..." << std::endl;
 	_program_running = false;
-	ldrp::lidarShutdown();
-	ldrp::apiDestroy();
+	// ldrp::lidarShutdown();
+	// ldrp::apiDestroy();
 }
 
 int main(int argc, char** argv) {
@@ -76,8 +76,9 @@ int main(int argc, char** argv) {
 	 * - manually skipping the deinit lets the main thread and program terminate gracefully (except that the sick api is not destroyed gracefully)
 	 * - what to do???? ha thats hillarious :|
 	*/
-	// s = ldrp::lidarShutdown();
-	// s = ldrp::apiDestroy();
+	std::cout << "shutting down lidar processing...?" << std::endl;
+	s = ldrp::lidarShutdown();
+	s = ldrp::apiDestroy();
 	std::cout << "main thread exitting!?" << std::endl;
 	// exit(0);
 

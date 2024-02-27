@@ -6,3 +6,4 @@ out/*
 logs/*
 Makefile
 CMakeSettings.json
+networktables.json
