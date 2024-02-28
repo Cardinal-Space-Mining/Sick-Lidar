@@ -126,6 +126,9 @@ static inline Eigen::Isometry3f getWorldTransform(const float* xyz, const float*
 	return Eigen::Quaternionf{qw, qxyz[1], qxyz[2], qxyz[3]}.inverse() * (*reinterpret_cast<const Eigen::Translation3f*>(xyz));		// TODO: verify this actually works
 
 }
+static inline Eigen::Isometry3f getWorldTransform(const Eigen::Translation3f& t, const Eigen::Quaternionf& r) {
+	return r.inverse() * t;
+}
 
 
 
@@ -212,6 +215,33 @@ namespace ldrp {
 			return s;
 		}
 
+		const status_t addWorldRef(const float* xyz, const float* qxyz, const float qw, const uint64_t ts_us) {
+			const units::time::second_t timestamp{
+				ts_us == 0 ?
+					crno::duration<double>{ crno::hrc::now().time_since_epoch() }.count() :
+					(double)ts_us / 1e6
+			};
+
+			const Eigen::Quaternionf
+				w2r_quat = Eigen::Quaternion{ qw, qxyz[0], qxyz[1], qxyz[2] },
+				r2w_quat = w2r_quat.inverse(),	// robot to world rotation
+				l2w_quat = (w2r_quat * this->_config.lidar_offset_quat).inverse();			// lidar to world rotation
+			const Eigen::Isometry3f
+				r2w_transform = r2w_quat * (*reinterpret_cast<const Eigen::Translation3f*>(xyz));	// robot to world transform
+			const Eigen::Vector4f	// lidar relative position is getting applied backwards
+				l_w_pos = r2w_transform * this->_config.lidar_offset_xyz;							// lidar world position via robot to world transform
+			const Eigen::Isometry3f
+				l2w_transform = l2w_quat * (*reinterpret_cast<const Eigen::Translation3f*>(&l_w_pos));	// lidar to world transform from lidar to world rotation and lidar world position
+
+			this->_localization_mutex.lock();
+			this->_transform_map.AddSample(
+				timestamp,
+				l2w_transform
+			);
+			this->_localization_mutex.unlock();
+			return STATUS_SUCCESS;
+		}
+
 
 	protected:
 		void initNT() {
@@ -261,6 +291,9 @@ namespace ldrp {
 			const char* pcd_log_fname{ "lidar_points.tar" };
 			const double pose_storage_window{ 0.1 };	// how many seconds
 			const bool skip_invalid_transform_ts{ false };	// skip points for which we don't have a pose directly from localization
+
+			const Eigen::Vector4f lidar_offset_xyz{ 0.f, 0.f, 0.f, 1.f };	// TODO: actual lidar offset!
+			const Eigen::Quaternionf lidar_offset_quat = Eigen::Quaternionf::Identity();	// identity quat for now
 
 			struct {
 				float
@@ -323,12 +356,7 @@ namespace ldrp {
 			} nt;
 		};
 
-		/** The main lidar I/O worker */
-		void lidarWorker();
-		/** The filter instance worker */
-		void filterWorker(FilterInstance* f_inst);
-
-	public:	// main instance members
+	protected:	// main instance members
 		std::unique_ptr<std::thread> _lidar_thread{ nullptr };
 		sick_scansegment_xd::PayloadFifo* udp_fifo{ nullptr };
 		std::vector<std::unique_ptr<FilterInstance> > _filter_threads{};	// need pointers since filter instance doesn't like to be copied (vector impl)
@@ -342,6 +370,11 @@ namespace ldrp {
 			&lerpClosest<const Eigen::Isometry3f&>
 		};
 		PCDTarWriter pcd_writer{};
+
+		/** The main lidar I/O worker */
+		void lidarWorker();
+		/** The filter instance worker */
+		void filterWorker(FilterInstance* f_inst);
 
 
 	};	// LidarImpl
@@ -400,20 +433,9 @@ namespace ldrp {
 		return STATUS_PREREQ_UNINITIALIZED;
 	}
 
-	const status_t updateWorldPose(const float* xyz, const float* qxyz, const float qw, const uint64_t ts_ms) {
+	const status_t updateWorldPose(const float* xyz, const float* qxyz, const float qw, const uint64_t ts_us) {
 		if(LidarImpl::_global) {
-			const units::time::second_t timestamp{
-				ts_ms == 0 ?
-					crno::duration<double>{ crno::hrc::now().time_since_epoch() }.count() :
-					(double)ts_ms / 1e6
-			};
-			LidarImpl::_global->_localization_mutex.lock();
-			LidarImpl::_global->_transform_map.AddSample(
-				timestamp,
-				getWorldTransform(xyz, qxyz, qw)	// TODO: add static lidar offset pose!
-			);
-			LidarImpl::_global->_localization_mutex.unlock();
-			return STATUS_SUCCESS;
+			return LidarImpl::_global->addWorldRef(xyz, qxyz, qw, ts_us);
 		}
 		return STATUS_PREREQ_UNINITIALIZED;
 	}
@@ -524,7 +546,7 @@ void LidarImpl::lidarWorker() {
 						}
 					}
 				}	// insufficient samples or no thread available... (keep updating the current framebuff)
-// #define SIM_GENERATE_POINTS
+#define SIM_GENERATE_POINTS
 #ifndef SIM_GENERATE_POINTS
 				if(this->udp_fifo->Pop(udp_payload_bytes, scan_timestamp, scan_count)) {	// blocks until packet is received
 
@@ -702,7 +724,7 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 		point_cloud.clear();	// clear the vector and set w,h to 0
 		point_ranges.clear();	// << MEMORY LEAK!!! (it was)
 
-		Eigen::Vector3f avg_origin{};
+		Eigen::Vector3f avg_origin{ 0.f, 0.f, 0.f };
 		size_t origin_samples = 0;
 
 		// 1. transform points based on timestamp
@@ -787,7 +809,7 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 			pmf_filtered_ground.clear();
 			pmf_filtered_obstacles.clear();
 
-			avg_origin /= origin_samples;
+			if(origin_samples > 1) avg_origin /= origin_samples;
 
 			// voxelize points
 			voxel_filter(

@@ -48,6 +48,10 @@ int main(int argc, char** argv) {
 	s = ldrp::setLogLevel(1);
 	s = ldrp::lidarInit();
 
+	const float					// x    y    z    w
+		pose[] = { 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 1.f };
+	s = ldrp::updateWorldPose(pose);
+
 // #ifdef WIN32
 	signal(SIGINT, _action);
 	signal(SIGILL, _action);
