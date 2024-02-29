@@ -76,17 +76,19 @@ bool PCDTarWriter::addCloud(const pcl::PCLPointCloud2& cloud, const Eigen::Vecto
 			std::chrono::system_clock::now().time_since_epoch()
 		).count();
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-truncation"	// deal with msvc?
 		if (pcd_fname) {
-			snprintf(this->head_buff->file_name, 100, pcd_fname);
+			snprintf(this->head_buff->file_name, 100, "%s", pcd_fname);
 		}
 		else {
-			snprintf(this->head_buff->file_name, 100, "pc_%llx.pcd", mseconds);
+			snprintf(this->head_buff->file_name, 100, "pc_%lx.pcd", mseconds);
 		}
 		snprintf(this->head_buff->file_mode, 8, "0100777");
 		snprintf(this->head_buff->uid, 8, "0000000");
 		snprintf(this->head_buff->gid, 8, "0000000");
-		snprintf(this->head_buff->file_size, 12, "%011llo", (uint64_t)flen);
-		snprintf(this->head_buff->mtime, 12, "%011llo", mseconds / 1000);
+		snprintf(this->head_buff->file_size, 12, "%011lo", (uint64_t)flen);
+		snprintf(this->head_buff->mtime, 12, "%011lo", mseconds / 1000);
 		snprintf(this->head_buff->ustar, 6, "ustar");
 		snprintf(this->head_buff->ustar_version, 2, "00");
 		this->head_buff->file_type[0] = '0';
@@ -101,8 +103,9 @@ bool PCDTarWriter::addCloud(const pcl::PCLPointCloud2& cloud, const Eigen::Vecto
 		{
 			xsum += *p & 0xff;
 		}
-		snprintf(this->head_buff->chksum, 7, "%06llo", xsum);
+		snprintf(this->head_buff->chksum, 7, "%06lo", xsum);
 		this->head_buff->chksum[7] = ' ';
+#pragma GCC diagnostic pop
 
 		this->fio.seekp(start);
 		this->fio.write(reinterpret_cast<char*>(this->head_buff),

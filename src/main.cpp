@@ -44,12 +44,15 @@ int main(int argc, char** argv) {
 	using ldrp::status_t;
 
 	status_t s{0};
-	s = ldrp::apiInit();
+	ldrp::LidarConfig _config{};
+	// _config.lidar_offset_xyz[2] = 1.f;
+	// _config.lidar_offset_quat[0] = 1.f;
+	// _config.lidar_offset_quat[3] = 0.f;
+	// _config.datalog_fname = "test_configs_import.wpilog";
+
+	s = ldrp::apiInit(_config);
 	s = ldrp::lidarInit();
 
-	const float					// x    y    z    w
-		pose[] = { 1.f, 0.f, 1.f, 0.f, 0.f, 0.947f, 0.320f };
-	s = ldrp::updateWorldPose(pose);
 
 // #ifdef WIN32
 	signal(SIGINT, _action);
@@ -69,9 +72,13 @@ int main(int argc, char** argv) {
 
 	using namespace std::chrono_literals;
 	// std::this_thread::sleep_for(3s);
+	float					// x    y    z    w
+		pose[] = { 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 1.f };
 	for(;_program_running.load();) {
+		pose[0] += 0.1;
+		s = ldrp::updateWorldPose(pose);
 		// std::cout << "main thread is still running!?" << std::endl;
-		std::this_thread::sleep_for(1s);
+		std::this_thread::sleep_for(100ms);
 	}
 
 	/* Notes on weird exit behavior (windows testing)

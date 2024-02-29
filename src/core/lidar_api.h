@@ -65,7 +65,7 @@ namespace ldrp {
 
 		uint64_t enabled_segments_bits{ 0b111111111111 };
 		uint32_t buffered_scan_frames{ 1 };
-		int32_t max_filter_threads{ -2 };		// 0 = use all available, <0 = however many less than std::thread::hardware_concurrency()
+		int32_t max_filter_threads{ -1 };		// 0 = use all available, <0 = however many less than std::thread::hardware_concurrency()
 		uint64_t points_logging_mode{ POINT_LOGGING_NT | POINT_LOGGING_INCLUDE_ALL };
 		const char* points_tar_fname{ "lidar_points.tar" };
 		double pose_history_period_s{ 0.25 };
@@ -89,7 +89,7 @@ namespace ldrp {
 
 		float
 			lidar_offset_xyz[3]		= { 0.f, 0.f, 0.f },
-			lidar_offset_quat[4]	= { 1.f, 0.f, 0.f, 0.f };	// w, x, y, z
+			lidar_offset_quat[4]	= { 0.f, 0.f, 0.f, 1.f };	// x, y, z, w
 
 
 		static const LidarConfig

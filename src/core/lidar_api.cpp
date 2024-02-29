@@ -61,8 +61,7 @@
 #include "sick_scan/sick_cloud_transform.h"
 
 
-/** Util Definitions */
-
+/** Make std:: namespaces more usable */
 namespace std {
 	namespace chrono {
 		using hrc = high_resolution_clock;
@@ -88,7 +87,8 @@ static frc::Pose3d lerpPose3d(const frc::Pose3d& a, const frc::Pose3d& b, double
 #endif
 
 
-/** Other helpers */
+/** Other utilities "LiDaR Utilities" */
+namespace ldru {
 
 /** Does not swap the 'CompactImuData' struct since it is fairly large and we do not use it. */
 static void swapSegmentsNoIMU(sick_scansegment_xd::ScanSegmentParserOutput& a, sick_scansegment_xd::ScanSegmentParserOutput& b) {
@@ -110,6 +110,16 @@ static void swapSegmentsNoIMU(sick_scansegment_xd::ScanSegmentParserOutput& a, s
 	std::swap(a.telegramCnt, b.telegramCnt);
 #endif
 }
+
+static inline const uint32_t convertNumThreads(const int32_t input_num, const int32_t reserved = 0) {
+	const int32_t _max = (int32_t)std::thread::hardware_concurrency() - reserved;
+	return input_num < 1 ?
+		(uint32_t)std::max(_max - input_num, 1) :
+		(uint32_t)std::max(_max, input_num)
+	;
+}
+
+};
 
 
 
@@ -156,7 +166,40 @@ namespace ldrp {
 	struct LidarImpl {
 	public:
 		LidarImpl(const LidarConfig& config = LidarConfig::STATIC_DEFAULT) :
-			_state{ .log_level = config.log_level }
+			_state{ .log_level				= config.log_level },
+			_config{
+
+				.lidar_hostname				= config.lidar_hostname,
+				.lidar_udp_port				= config.lidar_udp_port,
+				.use_msgpack				= config.use_msgpack,
+				.enabled_segments			= config.enabled_segments_bits,
+				.buffered_frames			= config.buffered_scan_frames,
+				.max_filter_threads			= ldru::convertNumThreads(config.max_filter_threads, 1),
+				.points_logging_mode		= config.points_logging_mode,
+				.points_log_fname			= config.points_tar_fname,
+				.pose_history_range			= config.pose_history_period_s,
+				.skip_invalid_transform_ts	= config.skip_invalid_transform_ts,
+
+				.lidar_offset_xyz			= *reinterpret_cast<const Eigen::Vector3f*>(config.lidar_offset_xyz),
+				.lidar_offset_quat			= *reinterpret_cast<const Eigen::Quaternionf*>(config.lidar_offset_quat),	// note that this only works because we define XYZW order in the header default
+
+				.fpipeline{
+					.min_scan_theta_deg		= config.min_scan_theta_degrees,
+					.max_scan_theta_deg		= config.max_scan_theta_degrees,
+					.min_scan_range_cm		= config.min_scan_range_cm,
+					.max_pmf_range_cm		= config.max_pmf_range_cm,
+					.max_z_thresh_cm		= config.max_z_thresh_cm,
+					.min_z_thresh_cm		= config.min_z_thresh_cm,
+					.voxel_size_cm			= config.voxel_size_cm,
+					.map_resolution_cm		= config.map_resolution_cm,
+					.pmf_window_base		= config.pmf_window_base,
+					.pmf_max_window_size_cm	= config.pmf_max_window_size_cm,
+					.pmf_cell_size_cm		= config.pmf_cell_size_cm,
+					.pmf_init_distance_cm	= config.pmf_init_distance_cm,
+					.pmf_slope				= config.pmf_slope
+				},
+
+			}
 		{
 			wpi::DataLogManager::Start(
 				config.datalog_subdirectory,
@@ -214,8 +257,9 @@ namespace ldrp {
 			 * "Eigen::QuaternionXX * Eigen::TranslationXX" IS NOT THE SAME AS "Eigen::TranslationXX * Eigen::QuaternionXX"
 			 * The first ROTATES the translation by the quaternion, whereas the second one DOES NOT!!! */
 			const Eigen::Quaternionf
-				r2w_quat = Eigen::Quaternion{ qw, qxyz[0], qxyz[1], qxyz[2] },	// robot's rotation in the world
-				l2w_quat = (r2w_quat * this->_config.lidar_offset_quat);		// lidar's rotation in the world
+				r2w_quat = Eigen::Quaternionf{ qw, qxyz[0], qxyz[1], qxyz[2] },	// robot's rotation in the world
+				l2w_quat = (this->_config.lidar_offset_quat * r2w_quat);		// lidar's rotation in the world
+				// l2w_quat = Eigen::Quaternionf::Identity() * r2w_quat;
 			const Eigen::Isometry3f
 				r2w_transform = (*reinterpret_cast<const Eigen::Translation3f*>(xyz)) * r2w_quat;	// compose robot's position and rotation
 			const Eigen::Vector3f
@@ -255,71 +299,63 @@ namespace ldrp {
 	public:	// global inst, constant values, configs
 		inline static std::unique_ptr<LidarImpl> _global{ nullptr };
 
-		enum : uint32_t {
-			POINTS_LOGGING_NONE		= 0,
-			POINTS_LOGGING_TAR		= (1 << 1),
-			POINTS_LOGGING_NT		= (1 << 2),
-
-			POINTS_LOGGING_RAW		= (1 << 3),
-			POINTS_LOGGING_FILTERED	= (1 << 4),
-			POINTS_LOGGING_ALL		= (POINTS_LOGGING_RAW | POINTS_LOGGING_FILTERED)
-		};
 		static constexpr size_t
 			MS100_SEGMENTS_PER_FRAME = 12U,
 			MS100_POINTS_PER_SEGMENT_ECHO = 900U,	// points per segment * segments per frame = 10800 points per frame (with 1 echo)
 			MS100_MAX_ECHOS_PER_POINT = 3U;			// echos get filterd when we apply different settings in the web dashboard
+
 		struct {	// configured constants/parameters
-			const std::string lidar_hostname{ "" };	// always fails when we give a specific hostname?
-			const int lidar_udp_port{ 2115 };
+			const std::string lidar_hostname		= LidarConfig::STATIC_DEFAULT.lidar_hostname;	// always fails when we give a specific hostname?
+			const int lidar_udp_port				= LidarConfig::STATIC_DEFAULT.lidar_udp_port;
 			/* "While MSGPACK can be integrated easily using existing
 			 * libraries and is easy to parse, it requires more computing power and bandwidth than
 			 * the compact data format due to the descriptive names. Compact is significantly more
 			 * efficient and has a lower bandwidth." */
-			const bool use_msgpack{ false };
+			const bool use_msgpack					= LidarConfig::STATIC_DEFAULT.use_msgpack;
 
 			// NOTE: points within the same segment are not 'rotationally' aligned! (only temporally aligned)
-			const uint64_t enabled_segments{ 0b111111111111 };	// 12 sections --> first 12 bits enabled (enable all section)
-			const uint32_t buffered_frames{ 1 };				// how many samples of each segment we require per aquisition
-			const uint32_t max_filter_threads{ (uint32_t)std::max((int)std::thread::hardware_concurrency() - 2, 1) };		// minimum of 1 thread, otherwise reserve the main thread and some extra margin for other processes
-			const uint32_t points_logging_mode{ POINTS_LOGGING_NT | POINTS_LOGGING_ALL };
-			const char* points_log_fname{ "lidar_points.tar" };
-			const double pose_history_range{ 0.25 };		// seconds --> the window only gets applied when we add new poses so this just needs account for the greatest difference between new poses getting added and points getting transformed in a thread
-			const bool skip_invalid_transform_ts{ false };	// skip points for which we don't have a pose from localization (don't use the default pose of nothing!)
+			const uint64_t enabled_segments			= LidarConfig::STATIC_DEFAULT.enabled_segments_bits;	// 12 sections --> first 12 bits enabled (enable all section)
+			const uint32_t buffered_frames			= LidarConfig::STATIC_DEFAULT.buffered_scan_frames;				// how many samples of each segment we require per aquisition
+			const uint32_t max_filter_threads		= ldru::convertNumThreads(LidarConfig::STATIC_DEFAULT.max_filter_threads, 1);		// minimum of 1 thread, otherwise reserve the main thread and some extra margin for other processes
+			const uint64_t points_logging_mode		= LidarConfig::STATIC_DEFAULT.points_logging_mode;
+			const char* points_log_fname			= LidarConfig::STATIC_DEFAULT.points_tar_fname;
+			const double pose_history_range			= LidarConfig::STATIC_DEFAULT.pose_history_period_s;		// seconds --> the window only gets applied when we add new poses so this just needs account for the greatest difference between new poses getting added and points getting transformed in a thread
+			const bool skip_invalid_transform_ts	= LidarConfig::STATIC_DEFAULT.skip_invalid_transform_ts;	// skip points for which we don't have a pose from localization (don't use the default pose of nothing!)
 
-			const Eigen::Vector3f lidar_offset_xyz{ 0.f, 0.f, 0.f };	// TODO: actual lidar offset!
-			const Eigen::Quaternionf lidar_offset_quat{ 1.f, 0.f, 0.f, 0.f };	// identity quat for now
+			const Eigen::Vector3f lidar_offset_xyz{ LidarConfig::STATIC_DEFAULT.lidar_offset_xyz };	// TODO: actual lidar offset!
+			const Eigen::Quaternionf lidar_offset_quat{ LidarConfig::STATIC_DEFAULT.lidar_offset_quat };	// identity quat for now
 
 			struct {
 				float
-					min_scan_theta_deg =		-90.f,		// max scan theta angle used for cutoff -- see ms100 operating manual for coordinate system
-					max_scan_theta_deg =		+90.f,		// min scan theta angle used for cutoff
-					min_scan_range_cm =			10.f,		// the minimum scan range
-					max_pmf_range_cm =			200.f,		// max range for points used in PMF
-					max_z_thresh_cm =			75.f,		// for the "mid cut" z-coord filter
-					min_z_thresh_cm =			25.f,
+					min_scan_theta_deg		= LidarConfig::STATIC_DEFAULT.min_scan_theta_degrees,		// max scan theta angle used for cutoff -- see ms100 operating manual for coordinate system
+					max_scan_theta_deg		= LidarConfig::STATIC_DEFAULT.max_scan_theta_degrees,		// min scan theta angle used for cutoff
+					min_scan_range_cm		= LidarConfig::STATIC_DEFAULT.min_scan_range_cm,		// the minimum scan range
+					max_pmf_range_cm		= LidarConfig::STATIC_DEFAULT.max_pmf_range_cm,		// max range for points used in PMF
+					max_z_thresh_cm			= LidarConfig::STATIC_DEFAULT.max_z_thresh_cm,		// for the "mid cut" z-coord filter
+					min_z_thresh_cm			= LidarConfig::STATIC_DEFAULT.min_z_thresh_cm,
 					// filter by intensity? (test this)
 
-					voxel_size_cm =				3.f,		// voxel cell size used during voxelization filter
-					map_resolution_cm =			5.f,		// the resolution of each grid cell
-					pmf_window_base =			1.f,
-					pmf_max_window_size_cm =	40.f,
-					pmf_cell_size_cm =			5.f,
-					pmf_init_distance_cm =		5.f,
-					pmf_max_distance_cm =		12.f,
-					pmf_slope =					0.2f;
+					voxel_size_cm			= LidarConfig::STATIC_DEFAULT.voxel_size_cm,		// voxel cell size used during voxelization filter
+					map_resolution_cm		= LidarConfig::STATIC_DEFAULT.map_resolution_cm,		// the resolution of each grid cell
+					pmf_window_base			= LidarConfig::STATIC_DEFAULT.pmf_window_base,
+					pmf_max_window_size_cm	= LidarConfig::STATIC_DEFAULT.pmf_max_window_size_cm,
+					pmf_cell_size_cm		= LidarConfig::STATIC_DEFAULT.pmf_cell_size_cm,
+					pmf_init_distance_cm	= LidarConfig::STATIC_DEFAULT.pmf_init_distance_cm,
+					pmf_max_distance_cm		= LidarConfig::STATIC_DEFAULT.pmf_max_distance_cm,
+					pmf_slope				= LidarConfig::STATIC_DEFAULT.pmf_slope;
 
 			} fpipeline;
 		} _config;
 
 		struct {	// states to be communicated across threads
-			int32_t log_level{ 1 };
+			int32_t log_level = LidarConfig::STATIC_DEFAULT.log_level;
 
 			std::atomic<bool> enable_threads{false};
 		} _state;
 
 	protected:	// nt pointers and filter instance struct
 		struct {	// networktables
-			nt::NetworkTableInstance instance;
+			nt::NetworkTableInstance instance;	// = nt::NetworkTableInstance::GetDefault()
 			std::shared_ptr<nt::NetworkTable> base;
 
 			nt::IntegerEntry
@@ -337,12 +373,12 @@ namespace ldrp {
 			FilterInstance(const FilterInstance&) = delete;
 			FilterInstance(FilterInstance&&) = default;
 
-			const uint32_t index;
+			const uint32_t index{ 0 };
 			SampleBuffer samples{};
 
 			std::unique_ptr<std::thread> thread{ nullptr };
 			// std::mutex link_mutex;
-			std::condition_variable link_condition;
+			std::condition_variable link_condition{};
 			std::atomic<uint32_t> link_state{ 0 };
 
 			struct {
@@ -490,7 +526,7 @@ void LidarImpl::lidarWorker() {
 		fifo_timestamp scan_timestamp{};
 		size_t scan_count{0};	// not used but we need for a param
 
-		if(this->_config.points_logging_mode & POINTS_LOGGING_TAR) {
+		if(this->_config.points_logging_mode & POINT_LOGGING_TAR) {
 			this->pcd_writer.setFile(this->_config.points_log_fname);
 		}
 
@@ -626,7 +662,7 @@ void LidarImpl::lidarWorker() {
 							size_t idx = ::countBitsBeforeN(this->_config.enabled_segments, parsed_segment.segmentIndex);	// get the index of the enabled bit (for our buffer)
 
 							frame_segments[idx].emplace_front();	// create empty segment buffer
-							::swapSegmentsNoIMU(frame_segments[idx].front(), parsed_segment);		// efficient buffer transfer (no deep copying!)
+							ldru::swapSegmentsNoIMU(frame_segments[idx].front(), parsed_segment);		// efficient buffer transfer (no deep copying!)
 							if(frame_segments[idx].size() >= this->_config.buffered_frames) {
 								frame_segments[idx].resize(this->_config.buffered_frames);	// cut off oldest scans beyond the buffer size (resize() removes from the back)
 								filled_segments |= seg_bit;		// save this segment as finished by enabling it's bit
@@ -778,11 +814,11 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 		point_cloud.height = 1;
 		point_cloud.is_dense = true;
 
-		if(this->_config.points_logging_mode & POINTS_LOGGING_RAW) {
-			if(this->_config.points_logging_mode & POINTS_LOGGING_TAR) {
+		if(this->_config.points_logging_mode & POINT_LOGGING_INCLUDE_RAW) {
+			if(this->_config.points_logging_mode & POINT_LOGGING_TAR) {
 				this->pcd_writer.addCloud(point_cloud);
 			}
-			if(this->_config.points_logging_mode & POINTS_LOGGING_NT) {
+			if(this->_config.points_logging_mode & POINT_LOGGING_NT) {
 				this->_nt.raw_scan_points.Set(
 					std::span<const uint8_t>{
 						reinterpret_cast<uint8_t*>( point_cloud.points.data() ),
@@ -863,7 +899,7 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 
 			// TEST
 			pc_normalize_selection(voxelized_points.points, pmf_filtered_obstacles);
-			if(this->_config.points_logging_mode & (POINTS_LOGGING_NT | POINTS_LOGGING_FILTERED)) {
+			if(this->_config.points_logging_mode & (POINT_LOGGING_NT | POINT_LOGGING_INCLUDE_FILTERED)) {
 				this->_nt.test_filtered_points.Set(
 					std::span<const uint8_t>{
 						reinterpret_cast<uint8_t*>( voxelized_points.points.data() ),
