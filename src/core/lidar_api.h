@@ -39,21 +39,63 @@ namespace ldrp {
 		STATUS_PREREQ_UNINITIALIZED	= (1 << 6),		// prerequisite resources not available or not initialized
 	};
 
+	enum : uint64_t {
+		POINT_LOGGING_NONE		= 0,
+		POINT_LOGGING_TAR		= (1 << 0),
+		POINT_LOGGING_NT		= (1 << 1),
+		POINT_LOGGING_ALL		= (POINT_LOGGING_TAR | POINT_LOGGING_NT),	// not recommended
 
-	// struct PipelineConfig {
-	// 	float
-	// 		min_scan_theta,
-	// 		max_scan_theta,
-	// 		voxel_size_cm,
-	// 		map_resolution_cm,
-	// 		pmf_window_base_cm,
-	// 		pmf_cell_size_cm,
-	// 		pmf_init_distance_cm,
-	// 		pmf_max_distance_cm,
-	// 		pmf_slope;
-	// 	int32_t
-	// 		pmf_max_window_size;
-	// };
+		POINT_LOGGING_INCLUDE_RAW		= (1 << 10),
+		POINT_LOGGING_INCLUDE_VOXELIZED	= (1 << 11),	// not implemented
+		POINT_LOGGING_INCLUDE_FILTERED	= (1 << 12),
+		POINT_LOGGING_INCLUDE_ALL		= (POINT_LOGGING_INCLUDE_RAW | POINT_LOGGING_INCLUDE_FILTERED),
+	};
+
+
+	struct LidarConfig {
+
+		const char* datalog_subdirectory{ "" };
+		const char* datalog_fname{ "lidar_log.wpilog" };
+		double datalog_flush_period_s{ 0.05 };
+		int32_t log_level{ 1 };					// a default value -- can be changed during runtime
+
+		const char* lidar_hostname{ "" };
+		int lidar_udp_port{ 2115 };
+		bool use_msgpack{ false };
+
+		uint64_t enabled_segments_bits{ 0b111111111111 };
+		uint32_t buffered_scan_frames{ 1 };
+		int32_t max_filter_threads{ -2 };		// 0 = use all available, <0 = however many less than std::thread::hardware_concurrency()
+		uint64_t points_logging_mode{ POINT_LOGGING_NT | POINT_LOGGING_INCLUDE_ALL };
+		const char* points_tar_fname{ "lidar_points.tar" };
+		double pose_history_period_s{ 0.25 };
+		bool skip_invalid_transform_ts{ false };
+
+		float
+			min_scan_theta_degrees	= -90.f,
+			max_scan_theta_degrees	= 90.f,
+			min_scan_range_cm		= 10.f,
+			max_pmf_range_cm		= 200.f,
+			max_z_thresh_cm			= 75.f,
+			min_z_thresh_cm			= 25.f,
+			voxel_size_cm			= 3.f,
+			map_resolution_cm		= 5.f,
+			pmf_window_base			= 1.f,
+			pmf_max_window_size_cm	= 40.f,
+			pmf_cell_size_cm		= 5.f,
+			pmf_init_distance_cm	= 5.f,
+			pmf_max_distance_cm		= 12.f,
+			pmf_slope				= 0.2f;
+
+		float
+			lidar_offset_xyz[3]		= { 0.f, 0.f, 0.f },
+			lidar_offset_quat[4]	= { 1.f, 0.f, 0.f, 0.f };	// w, x, y, z
+
+
+		static const LidarConfig
+			STATIC_DEFAULT;
+
+	};
 
 
 
@@ -65,13 +107,8 @@ namespace ldrp {
 	__API const bool hasWpilib();
 
 	/** Initialize the global instance resources.
-	 * @param dlm_dir - the log directory for the internal [wpi::]DataLogManager
-	 * @param dlm_fname - the name of the log file exported by the internal [wpi::]DataLogManager
-	 * @param dlm_period - the time between file writes for the internal [wpi::DataLogManager]
-	 * @param log_lvl - the maximum log level that will be output: 0 = none, 1 = standard, 2 = verbose, 3 = VERBOOOSE! */
-	__API const status_t apiInit(
-		const char* dlm_dir = "", const char* dlm_fname = "", double dlm_period = 0.05,
-		const int32_t log_lvl = 1);
+	 * @param config -- the struct containing all the configs for the lidar instance */
+	__API const status_t apiInit(const LidarConfig& config = LidarConfig::STATIC_DEFAULT);
 
 	/** Deletes the global api instance. Does not need to be called unless a hard reset is necessary. */
 	__API const status_t apiDestroy();

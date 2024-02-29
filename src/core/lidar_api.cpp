@@ -150,11 +150,19 @@ namespace ldrp {
 #endif
 
 
+	const LidarConfig LidarConfig::STATIC_DEFAULT{};
+
 	/** Interfacing and Filtering Implementation (singleton usage) */
 	struct LidarImpl {
 	public:
-		LidarImpl(const char* dlm_dir = "", const char* dlm_fname = "", double dlm_period = 0.05) {
-			wpi::DataLogManager::Start(dlm_dir, dlm_fname, dlm_period);
+		LidarImpl(const LidarConfig& config = LidarConfig::STATIC_DEFAULT) :
+			_state{ .log_level = config.log_level }
+		{
+			wpi::DataLogManager::Start(
+				config.datalog_subdirectory,
+				config.datalog_fname,
+				config.datalog_flush_period_s
+			);
 			this->initNT();
 
 			LDRP_LOG( LOG_ALWAYS, "LDRP global instance initialized." )
@@ -248,9 +256,13 @@ namespace ldrp {
 		inline static std::unique_ptr<LidarImpl> _global{ nullptr };
 
 		enum : uint32_t {
-			PCD_LOGGING_NONE	= 0,
-			PCD_LOGGING_TAR		= (1 << 1),
-			PCD_LOGGING_NT		= (1 << 2),
+			POINTS_LOGGING_NONE		= 0,
+			POINTS_LOGGING_TAR		= (1 << 1),
+			POINTS_LOGGING_NT		= (1 << 2),
+
+			POINTS_LOGGING_RAW		= (1 << 3),
+			POINTS_LOGGING_FILTERED	= (1 << 4),
+			POINTS_LOGGING_ALL		= (POINTS_LOGGING_RAW | POINTS_LOGGING_FILTERED)
 		};
 		static constexpr size_t
 			MS100_SEGMENTS_PER_FRAME = 12U,
@@ -269,26 +281,26 @@ namespace ldrp {
 			const uint64_t enabled_segments{ 0b111111111111 };	// 12 sections --> first 12 bits enabled (enable all section)
 			const uint32_t buffered_frames{ 1 };				// how many samples of each segment we require per aquisition
 			const uint32_t max_filter_threads{ (uint32_t)std::max((int)std::thread::hardware_concurrency() - 2, 1) };		// minimum of 1 thread, otherwise reserve the main thread and some extra margin for other processes
-			const uint32_t pcd_logging_mode{ PCD_LOGGING_NT };
-			const char* pcd_log_fname{ "lidar_points.tar" };
-			const double pose_storage_window{ 0.1 };	// how many seconds
-			const bool skip_invalid_transform_ts{ false };	// skip points for which we don't have a pose directly from localization
+			const uint32_t points_logging_mode{ POINTS_LOGGING_NT | POINTS_LOGGING_ALL };
+			const char* points_log_fname{ "lidar_points.tar" };
+			const double pose_history_range{ 0.25 };		// seconds --> the window only gets applied when we add new poses so this just needs account for the greatest difference between new poses getting added and points getting transformed in a thread
+			const bool skip_invalid_transform_ts{ false };	// skip points for which we don't have a pose from localization (don't use the default pose of nothing!)
 
 			const Eigen::Vector3f lidar_offset_xyz{ 0.f, 0.f, 0.f };	// TODO: actual lidar offset!
 			const Eigen::Quaternionf lidar_offset_quat{ 1.f, 0.f, 0.f, 0.f };	// identity quat for now
 
 			struct {
 				float
-					min_scan_theta_deg =		-90.f,			// max scan theta angle used for cutoff -- see ms100 operating manual for coordinate system
-					max_scan_theta_deg =		+90.f,			// min scan theta angle used for cutoff
-					min_scan_range_cm =			10.f,			// the minimum scan range
-					max_pmf_range_cm =			200.f,			// max range for points used in PMF
-					max_z_thresh_cm =			75.f,			// for the "mid cut" z-coord filter
+					min_scan_theta_deg =		-90.f,		// max scan theta angle used for cutoff -- see ms100 operating manual for coordinate system
+					max_scan_theta_deg =		+90.f,		// min scan theta angle used for cutoff
+					min_scan_range_cm =			10.f,		// the minimum scan range
+					max_pmf_range_cm =			200.f,		// max range for points used in PMF
+					max_z_thresh_cm =			75.f,		// for the "mid cut" z-coord filter
 					min_z_thresh_cm =			25.f,
 					// filter by intensity? (test this)
 
-					voxel_size_cm =				3.f,			// voxel cell size used during voxelization filter
-					map_resolution_cm =			5.f,			// the resolution of each grid cell
+					voxel_size_cm =				3.f,		// voxel cell size used during voxelization filter
+					map_resolution_cm =			5.f,		// the resolution of each grid cell
 					pmf_window_base =			1.f,
 					pmf_max_window_size_cm =	40.f,
 					pmf_cell_size_cm =			5.f,
@@ -348,7 +360,7 @@ namespace ldrp {
 		std::shared_mutex
 			_localization_mutex{};
 		frc::TimeInterpolatableBuffer<Eigen::Isometry3f> _transform_map{
-			units::time::second_t{ _config.pose_storage_window },
+			units::time::second_t{ _config.pose_history_range },
 			&lerpClosest<const Eigen::Isometry3f&>
 		};
 		PCDTarWriter pcd_writer{};
@@ -375,10 +387,9 @@ namespace ldrp {
 	}
 
 
-	const status_t apiInit(const char* dlm_dir, const char* dlm_fname, double dlm_period, const int32_t log_lvl) {
+	const status_t apiInit(const LidarConfig& config) {
 		if(!LidarImpl::_global) {
-			LidarImpl::_global = std::make_unique<LidarImpl>(dlm_dir, dlm_fname, dlm_period);
-			return setLogLevel(log_lvl);
+			LidarImpl::_global = std::make_unique<LidarImpl>(config);
 		}
 		return STATUS_ALREADY_SATISFIED;
 	}
@@ -479,8 +490,8 @@ void LidarImpl::lidarWorker() {
 		fifo_timestamp scan_timestamp{};
 		size_t scan_count{0};	// not used but we need for a param
 
-		if(this->_config.pcd_logging_mode & PCD_LOGGING_TAR) {
-			this->pcd_writer.setFile(this->_config.pcd_log_fname);
+		if(this->_config.points_logging_mode & POINTS_LOGGING_TAR) {
+			this->pcd_writer.setFile(this->_config.points_log_fname);
 		}
 
 		// main loop!
@@ -699,6 +710,7 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 
 	LDRP_LOG( LOG_STANDARD, "LDRP Filter Instance {} [Init]: Resources initialized - running filter loop...", f_inst->index )
 
+	// thread loop
 	for(;this->_state.enable_threads.load();) {
 
 		f_inst->nt.is_active.Set(true);
@@ -747,7 +759,7 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 							{
 #endif
 								point_cloud.points.emplace_back();
-								reinterpret_cast<Eigen::Vector4f&>(point_cloud.points.back()) = transform * Eigen::Vector4f{lidar_point.x, lidar_point.y, lidar_point.z, 1.f};
+								reinterpret_cast<Eigen::Vector4f&>(point_cloud.points.back()) = transform * Eigen::Vector4f{lidar_point.x, lidar_point.y, lidar_point.z, 1.f};	// EEEEEE :O
 								point_ranges.push_back(lidar_point.range);
 							}
 						}
@@ -766,16 +778,18 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 		point_cloud.height = 1;
 		point_cloud.is_dense = true;
 
-		if(this->_config.pcd_logging_mode & PCD_LOGGING_TAR) {
-			this->pcd_writer.addCloud(point_cloud);
-		}
-		if(this->_config.pcd_logging_mode & PCD_LOGGING_NT) {
-			this->_nt.raw_scan_points.Set(
-				std::span<const uint8_t>{
-					reinterpret_cast<uint8_t*>( point_cloud.points.data() ),
-					reinterpret_cast<uint8_t*>( point_cloud.points.data() + point_cloud.points.size() )
-				}
-			);
+		if(this->_config.points_logging_mode & POINTS_LOGGING_RAW) {
+			if(this->_config.points_logging_mode & POINTS_LOGGING_TAR) {
+				this->pcd_writer.addCloud(point_cloud);
+			}
+			if(this->_config.points_logging_mode & POINTS_LOGGING_NT) {
+				this->_nt.raw_scan_points.Set(
+					std::span<const uint8_t>{
+						reinterpret_cast<uint8_t*>( point_cloud.points.data() ),
+						reinterpret_cast<uint8_t*>( point_cloud.points.data() + point_cloud.points.size() )
+					}
+				);
+			}
 		}
 
 		// 2. run filtering on points
@@ -849,7 +863,7 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 
 			// TEST
 			pc_normalize_selection(voxelized_points.points, pmf_filtered_obstacles);
-			if(this->_config.pcd_logging_mode & PCD_LOGGING_NT) {
+			if(this->_config.points_logging_mode & (POINTS_LOGGING_NT | POINTS_LOGGING_FILTERED)) {
 				this->_nt.test_filtered_points.Set(
 					std::span<const uint8_t>{
 						reinterpret_cast<uint8_t*>( voxelized_points.points.data() ),
@@ -875,7 +889,7 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 			f_inst->link_condition.wait(lock);
 		}
 
-	}
+	}	// thread loop
 
 }	// LidarImpl::filterWorker()
 

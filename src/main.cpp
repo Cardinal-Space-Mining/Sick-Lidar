@@ -44,8 +44,7 @@ int main(int argc, char** argv) {
 	using ldrp::status_t;
 
 	status_t s{0};
-	s = ldrp::apiInit("", "lidar_log.wpilog");
-	s = ldrp::setLogLevel(1);
+	s = ldrp::apiInit();
 	s = ldrp::lidarInit();
 
 	const float					// x    y    z    w
