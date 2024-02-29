@@ -111,26 +111,6 @@ static void swapSegmentsNoIMU(sick_scansegment_xd::ScanSegmentParserOutput& a, s
 #endif
 }
 
-/** Create a matrix for transforming points into world space given a pose relative to world space. */
-static inline Eigen::Isometry3f getWorldTransform(const float* xyz, const float* qxyz, const float qw) {
-	// Eigen::Quaternionf q = Eigen::Quaternionf{qw, qxyz[1], qxyz[2], qxyz[3]};
-	// Eigen::Matrix3f m3 = q.normalized().conjugate().toRotationMatrix();
-
-	// return Eigen::Matrix4f{
-	// 	{m3(0, 0), m3(0, 1), m3(0, 2), xyz[0]},
-	// 	{m3(1, 0), m3(1, 1), m3(1, 2), xyz[1]},
-	// 	{m3(2, 0), m3(2, 1), m3(2, 2), xyz[2]},
-	// 	{0,        0,        0,        1     }
-	// };
-
-	return Eigen::Quaternionf{qw, qxyz[1], qxyz[2], qxyz[3]}.inverse() * (*reinterpret_cast<const Eigen::Translation3f*>(xyz));		// TODO: verify this actually works
-
-}
-static inline Eigen::Isometry3f getWorldTransform(const Eigen::Translation3f& t, const Eigen::Quaternionf& r) {
-	return r.inverse() * t;
-}
-
-
 
 
 
@@ -222,16 +202,18 @@ namespace ldrp {
 					(double)ts_us / 1e6
 			};
 
+			/* >> FOR FUTURE REFERENCE!!! <<
+			 * "Eigen::QuaternionXX * Eigen::TranslationXX" IS NOT THE SAME AS "Eigen::TranslationXX * Eigen::QuaternionXX"
+			 * The first ROTATES the translation by the quaternion, whereas the second one DOES NOT!!! */
 			const Eigen::Quaternionf
-				w2r_quat = Eigen::Quaternion{ qw, qxyz[0], qxyz[1], qxyz[2] },
-				r2w_quat = w2r_quat.inverse(),	// robot to world rotation
-				l2w_quat = (w2r_quat * this->_config.lidar_offset_quat).inverse();			// lidar to world rotation
+				r2w_quat = Eigen::Quaternion{ qw, qxyz[0], qxyz[1], qxyz[2] },	// robot's rotation in the world
+				l2w_quat = (r2w_quat * this->_config.lidar_offset_quat);		// lidar's rotation in the world
 			const Eigen::Isometry3f
-				r2w_transform = r2w_quat * (*reinterpret_cast<const Eigen::Translation3f*>(xyz));	// robot to world transform
-			const Eigen::Vector4f	// lidar relative position is getting applied backwards
-				l_w_pos = r2w_transform * this->_config.lidar_offset_xyz;							// lidar world position via robot to world transform
+				r2w_transform = (*reinterpret_cast<const Eigen::Translation3f*>(xyz)) * r2w_quat;	// compose robot's position and rotation
+			const Eigen::Vector3f
+				l_w_pos = r2w_transform * this->_config.lidar_offset_xyz;	// transform lidar's offset in robot space -- the same as rotating the lidar position to global coords and adding the robot's position
 			const Eigen::Isometry3f
-				l2w_transform = l2w_quat * (*reinterpret_cast<const Eigen::Translation3f*>(&l_w_pos));	// lidar to world transform from lidar to world rotation and lidar world position
+				l2w_transform = (*reinterpret_cast<const Eigen::Translation3f*>(&l_w_pos)) * l2w_quat;	// compose the lidar's global position and the lidar's global rotation
 
 			this->_localization_mutex.lock();
 			this->_transform_map.AddSample(
@@ -292,8 +274,8 @@ namespace ldrp {
 			const double pose_storage_window{ 0.1 };	// how many seconds
 			const bool skip_invalid_transform_ts{ false };	// skip points for which we don't have a pose directly from localization
 
-			const Eigen::Vector4f lidar_offset_xyz{ 0.f, 0.f, 0.f, 1.f };	// TODO: actual lidar offset!
-			const Eigen::Quaternionf lidar_offset_quat = Eigen::Quaternionf::Identity();	// identity quat for now
+			const Eigen::Vector3f lidar_offset_xyz{ 0.f, 0.f, 0.f };	// TODO: actual lidar offset!
+			const Eigen::Quaternionf lidar_offset_quat{ 1.f, 0.f, 0.f, 0.f };	// identity quat for now
 
 			struct {
 				float

@@ -49,7 +49,7 @@ int main(int argc, char** argv) {
 	s = ldrp::lidarInit();
 
 	const float					// x    y    z    w
-		pose[] = { 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 1.f };
+		pose[] = { 1.f, 0.f, 1.f, 0.f, 0.f, 0.947f, 0.320f };
 	s = ldrp::updateWorldPose(pose);
 
 // #ifdef WIN32
