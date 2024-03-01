@@ -259,7 +259,6 @@ namespace ldrp {
 			const Eigen::Quaternionf
 				r2w_quat = Eigen::Quaternionf{ qw, qxyz[0], qxyz[1], qxyz[2] },	// robot's rotation in the world
 				l2w_quat = (this->_config.lidar_offset_quat * r2w_quat);		// lidar's rotation in the world
-				// l2w_quat = Eigen::Quaternionf::Identity() * r2w_quat;
 			const Eigen::Isometry3f
 				r2w_transform = (*reinterpret_cast<const Eigen::Translation3f*>(xyz)) * r2w_quat;	// compose robot's position and rotation
 			const Eigen::Vector3f
@@ -315,14 +314,14 @@ namespace ldrp {
 
 			// NOTE: points within the same segment are not 'rotationally' aligned! (only temporally aligned)
 			const uint64_t enabled_segments			= LidarConfig::STATIC_DEFAULT.enabled_segments_bits;	// 12 sections --> first 12 bits enabled (enable all section)
-			const uint32_t buffered_frames			= LidarConfig::STATIC_DEFAULT.buffered_scan_frames;				// how many samples of each segment we require per aquisition
-			const uint32_t max_filter_threads		= ldru::convertNumThreads(LidarConfig::STATIC_DEFAULT.max_filter_threads, 1);		// minimum of 1 thread, otherwise reserve the main thread and some extra margin for other processes
+			const uint32_t buffered_frames			= LidarConfig::STATIC_DEFAULT.buffered_scan_frames;		// how many samples of each segment we require per aquisition
+			const uint32_t max_filter_threads		= ldru::convertNumThreads(LidarConfig::STATIC_DEFAULT.max_filter_threads, 1);	// minimum of 1 thread, otherwise reserve the main thread and some extra margin for other processes
 			const uint64_t points_logging_mode		= LidarConfig::STATIC_DEFAULT.points_logging_mode;
 			const char* points_log_fname			= LidarConfig::STATIC_DEFAULT.points_tar_fname;
 			const double pose_history_range			= LidarConfig::STATIC_DEFAULT.pose_history_period_s;		// seconds --> the window only gets applied when we add new poses so this just needs account for the greatest difference between new poses getting added and points getting transformed in a thread
 			const bool skip_invalid_transform_ts	= LidarConfig::STATIC_DEFAULT.skip_invalid_transform_ts;	// skip points for which we don't have a pose from localization (don't use the default pose of nothing!)
 
-			const Eigen::Vector3f lidar_offset_xyz{ LidarConfig::STATIC_DEFAULT.lidar_offset_xyz };	// TODO: actual lidar offset!
+			const Eigen::Vector3f lidar_offset_xyz{ LidarConfig::STATIC_DEFAULT.lidar_offset_xyz };			// TODO: actual lidar offset!
 			const Eigen::Quaternionf lidar_offset_quat{ LidarConfig::STATIC_DEFAULT.lidar_offset_quat };	// identity quat for now
 
 			struct {
@@ -469,7 +468,13 @@ namespace ldrp {
 		return STATUS_PREREQ_UNINITIALIZED;
 	}
 
-	const status_t getAccumulator(std::shared_ptr<void>& out_inst) {
+	const status_t getObstacleGrid(ObstacleGrid& grid, float*(*grid_resize)(uint64_t)) {
+		if(LidarImpl::_global) {
+			// TODO
+		}
+		return STATUS_PREREQ_UNINITIALIZED;
+	}
+	const status_t waitNextObstacleGrid(ObstacleGrid& grid, float*(*grid_resize)(uint64_t), double timeout_ms) {
 		if(LidarImpl::_global) {
 			// TODO
 		}
@@ -880,7 +885,7 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 			);
 
 			// apply pmf to selected points
-			progressive_morph_filter(		// !!!: Crashing somewhere in here :(
+			progressive_morph_filter(
 				voxelized_points, pre_pmf_range_filtered, pmf_filtered_ground,
 				this->_config.fpipeline.pmf_window_base,
 				this->_config.fpipeline.pmf_max_window_size_cm * 1e-2f,

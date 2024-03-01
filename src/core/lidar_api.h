@@ -1,7 +1,7 @@
 #pragma once
 
 #include <cstdint>
-#include <memory>
+#include <cstddef>
 
 #ifdef WIN32
 	#ifdef _LDRP_SOURCE
@@ -97,6 +97,19 @@ namespace ldrp {
 
 	};
 
+	struct ObstacleGrid {
+
+		uint32_t
+			cells_x = 0,
+			cells_y = 0;
+		float
+			origin_x_cm = 0.f,
+			origin_y_cm = 0.f,
+			cell_resolution_cm = 1.f,
+			*grid;
+
+	};
+
 
 
 /** API */
@@ -109,7 +122,6 @@ namespace ldrp {
 	/** Initialize the global instance resources.
 	 * @param config -- the struct containing all the configs for the lidar instance */
 	__API const status_t apiInit(const LidarConfig& config = LidarConfig::STATIC_DEFAULT);
-
 	/** Deletes the global api instance. Does not need to be called unless a hard reset is necessary. */
 	__API const status_t apiDestroy();
 	/** Spools up lidar processing resources and threads. */
@@ -123,7 +135,11 @@ namespace ldrp {
 	__API const status_t setLogLevel(const int32_t lvl);
 
 	/** Apply a new world pose for the lidar -- used directly to transform points to world space.
-	 * Note that the position is internally interpreted as being in meters! The q** params represent quaternion components. */
+	 * Note that the position is interpreted as being in meters!
+	 * @param xyz - the (x, y, z) position as a float array (pointer to any contiguous float buffer)
+	 * @param qxyz - the (x, y, z) imaginary components of the pose quaternion as a float array (pointer to any contiguous float buffer)
+	 * @param qw - the w real component of the pose quaternion as a float (not a pointer!)
+	 * @param ts_microseconds - the timestamp in microseconds (relative to epoch) when the pose was collected */
 	__API const status_t updateWorldPose(const float* xyz, const float* qxyz, const float qw, const uint64_t ts_microseconds = 0);
 	/** Apply a new world pose for the lidar -- used directly to transform points to world space.
 	 * The provided buffer is expected to contain an xyz position and quaternion component -
@@ -135,8 +151,15 @@ namespace ldrp {
 	inline const status_t updateWorldPose(const float* xyz, const float* qxyzw, const uint64_t ts_microseconds = 0)
 		{ return updateWorldPose(xyz, qxyzw, qxyzw[3], ts_microseconds); }
 
-	/** Access the accumulator map */
-	__API const status_t getAccumulator(std::shared_ptr<void>& out_inst);	// not finalized
+	/** Export the current obstacle grid.
+	 * @param grid - struct to which all grid data will be exported
+	 * @param grid_resize - function pointer which provides a buffer of at least the size passed in	*/
+	__API const status_t getObstacleGrid(ObstacleGrid& grid, float*(*grid_resize)(uint64_t));
+	/** Wait until the internal accumulator gets updated (relative to last call of this function) and export the obstacle grid or unblock after the given timeout period.
+	 * @param grid - struct to which all grid data will be exported
+	 * @param grid_resize - function pointer which provides a buffer of at least the size passed in
+	 * @param timeout_ms - the timeout, in milliseconds, after which the function will unblock if no new data is available -- a value of <= 0.0 (default value) blocks indefinitely */
+	__API const status_t waitNextObstacleGrid(ObstacleGrid& grid, float*(*grid_resize)(uint64_t), double timeout_ms = 0.0);
 
 
 };
