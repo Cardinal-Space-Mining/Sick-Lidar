@@ -3,6 +3,7 @@
 #include <vector>
 #include <limits>
 #include <memory>
+#include <span>
 
 #include <Eigen/Core>
 
@@ -615,6 +616,62 @@ void pc_negate_selection(
 		} else /*if (_base < selection[_select])*/ {
 			negated[_negate] = _base;
 			_negate++;
+		}
+	}
+}
+
+/** Merge two presorted selections into a single sorted selection (non-descending)
+ * prereq: both selections must be sorted in non-descending order */
+template<typename IntT = pcl::index_t>
+void pc_combine_sorted(
+	const std::vector<IntT>& sel1,
+	const std::vector<IntT>& sel2,
+	std::vector<IntT>& out
+) {
+	out.clear();
+	out.reserve(sel1.size() + sel2.size());
+	size_t
+		_p1 = 0,
+		_p2 = 0;
+	for(; _p1 < sel1.size() && _p2 < sel2.size();) {
+		const IntT
+			_a = sel1[_p1],
+			_b = sel2[_p2];
+		if(_a <= _b) {
+			out.push_back(_a);
+			_p1++;
+			_p2 += (_a == _b);
+		} else {
+			out.push_back(_b);
+			_p2++;
+		}
+	}
+	for(; _p1 < sel1.size(); _p1++) out.push_back( sel1[_p1] );
+	for(; _p2 < sel2.size(); _p2++) out.push_back( sel2[_p2] );
+}
+
+/**  */
+template<
+	size_t interlace_rep = 4,
+	size_t interlace_off = 3,
+	typename IntT = pcl::index_t,
+	typename ElemT = int32_t>
+void write_interlaced_selection_bytes(
+	std::span<ElemT> buffer,
+	const std::vector<IntT>& selection,
+	const ElemT selected, const ElemT unselected
+) {
+	static_assert(interlace_off < interlace_rep, "");
+	size_t
+		_buff = 0,
+		_sel = 0;
+	for(; _buff < buffer.size() / interlace_rep; _buff++) {
+		const size_t idx = interlace_rep * _buff + interlace_off;
+		if(_sel < selection.size() && _buff == selection[_sel]) {
+			buffer[idx] = selected;
+			_sel++;
+		} else {
+			buffer[idx] = unselected;
 		}
 	}
 }

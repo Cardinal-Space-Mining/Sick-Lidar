@@ -1,7 +1,7 @@
 #include "lidar_api.h"
 
 #include "filtering.hpp"
-#include "weight_map.hpp"
+#include "accumulator_grid.hpp"
 #include "mem_utils.hpp"
 #include "pcd_streaming.h"
 
@@ -180,8 +180,11 @@ namespace ldrp {
 				.pose_history_range			= config.pose_history_period_s,
 				.skip_invalid_transform_ts	= config.skip_invalid_transform_ts,
 
-				.lidar_offset_xyz			= *reinterpret_cast<const Eigen::Vector3f*>(config.lidar_offset_xyz),
-				.lidar_offset_quat			= *reinterpret_cast<const Eigen::Quaternionf*>(config.lidar_offset_quat),	// note that this only works because we define XYZW order in the header default
+				.obstacle_point_color		= config.obstacle_point_color,
+				.standard_point_color		= config.standard_point_color,
+
+				.lidar_offset_xyz			= Eigen::Vector3f{ config.lidar_offset_xyz },
+				.lidar_offset_quat			= Eigen::Quaternionf{ config.lidar_offset_quat },	// I no longer trust reinterpret_cast<> with Eigen::Quaternionf :|
 
 				.fpipeline{
 					.min_scan_theta_deg		= config.min_scan_theta_degrees,
@@ -246,7 +249,7 @@ namespace ldrp {
 			return s;
 		}
 
-		const status_t addWorldRef(const float* xyz, const float* qxyz, const float qw, const uint64_t ts_us) {
+		const status_t addWorldRef(const float* xyz, const float* qxyzw, const uint64_t ts_us) {
 			const units::time::second_t timestamp{
 				ts_us == 0 ?
 					crno::duration<double>{ crno::hrc::now().time_since_epoch() }.count() :
@@ -257,8 +260,8 @@ namespace ldrp {
 			 * "Eigen::QuaternionXX * Eigen::TranslationXX" IS NOT THE SAME AS "Eigen::TranslationXX * Eigen::QuaternionXX"
 			 * The first ROTATES the translation by the quaternion, whereas the second one DOES NOT!!! */
 			const Eigen::Quaternionf
-				r2w_quat = Eigen::Quaternionf{ qw, qxyz[0], qxyz[1], qxyz[2] },	// robot's rotation in the world
-				l2w_quat = (this->_config.lidar_offset_quat * r2w_quat);		// lidar's rotation in the world
+				r2w_quat = Eigen::Quaternionf{ qxyzw },						// robot's rotation in the world
+				l2w_quat = (this->_config.lidar_offset_quat * r2w_quat);	// lidar's rotation in the world
 			const Eigen::Isometry3f
 				r2w_transform = (*reinterpret_cast<const Eigen::Translation3f*>(xyz)) * r2w_quat;	// compose robot's position and rotation
 			const Eigen::Vector3f
@@ -320,6 +323,9 @@ namespace ldrp {
 			const char* points_log_fname			= LidarConfig::STATIC_DEFAULT.points_tar_fname;
 			const double pose_history_range			= LidarConfig::STATIC_DEFAULT.pose_history_period_s;		// seconds --> the window only gets applied when we add new poses so this just needs account for the greatest difference between new poses getting added and points getting transformed in a thread
 			const bool skip_invalid_transform_ts	= LidarConfig::STATIC_DEFAULT.skip_invalid_transform_ts;	// skip points for which we don't have a pose from localization (don't use the default pose of nothing!)
+
+			const uint32_t obstacle_point_color		= LidarConfig::STATIC_DEFAULT.obstacle_point_color;
+			const uint32_t standard_point_color		= LidarConfig::STATIC_DEFAULT.standard_point_color;
 
 			const Eigen::Vector3f lidar_offset_xyz{ LidarConfig::STATIC_DEFAULT.lidar_offset_xyz };			// TODO: actual lidar offset!
 			const Eigen::Quaternionf lidar_offset_quat{ LidarConfig::STATIC_DEFAULT.lidar_offset_quat };	// identity quat for now
@@ -393,11 +399,13 @@ namespace ldrp {
 		std::mutex
 			_finished_queue_mutex{};
 		std::shared_mutex
-			_localization_mutex{};
+			_localization_mutex{},
+			_accumulation_mutex{};
 		frc::TimeInterpolatableBuffer<Eigen::Isometry3f> _transform_map{
 			units::time::second_t{ _config.pose_history_range },
 			&lerpClosest<const Eigen::Isometry3f&>
 		};
+		AccumulatorGrid<float> accumulator{};
 		PCDTarWriter pcd_writer{};
 
 		/** The main lidar I/O worker */
@@ -461,16 +469,16 @@ namespace ldrp {
 		return STATUS_PREREQ_UNINITIALIZED;
 	}
 
-	const status_t updateWorldPose(const float* xyz, const float* qxyz, const float qw, const uint64_t ts_us) {
+	const status_t updateWorldPose(const float* xyz, const float* qxyzw, const uint64_t ts_us) {
 		if(LidarImpl::_global) {
-			return LidarImpl::_global->addWorldRef(xyz, qxyz, qw, ts_us);
+			return LidarImpl::_global->addWorldRef(xyz, qxyzw, ts_us);
 		}
 		return STATUS_PREREQ_UNINITIALIZED;
 	}
 
 	const status_t getObstacleGrid(ObstacleGrid& grid, float*(*grid_resize)(uint64_t)) {
 		if(LidarImpl::_global) {
-			// TODO
+			
 		}
 		return STATUS_PREREQ_UNINITIALIZED;
 	}
@@ -534,6 +542,8 @@ void LidarImpl::lidarWorker() {
 		if(this->_config.points_logging_mode & POINT_LOGGING_TAR) {
 			this->pcd_writer.setFile(this->_config.points_log_fname);
 		}
+
+		this->accumulator.reset(this->_config.fpipeline.map_resolution_cm * 1e-2f);
 
 		// main loop!
 		LDRP_LOG( LOG_STANDARD, "LDRP Worker [Init]: Succesfully initialized all resources. Begining aquisition and filtering..." )
@@ -657,7 +667,7 @@ void LidarImpl::lidarWorker() {
 						}
 					}
 					parsed_segment.segmentIndex = aquisition_loop_count;
-					std::this_thread::sleep_until(s + 4ms);
+					std::this_thread::sleep_until(s + 4900us);
 					if constexpr(true) {
 #endif
 						LDRP_LOG( LOG_DEBUG && LOG_VERBOSE, "LDRP Worker [Aquisition Loop]: Successfully parsed scan segment idx {}!", parsed_segment.segmentIndex )
@@ -741,10 +751,11 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 	pcl::Indices
 		z_high_filtered{},
 		z_low_subset_filtered{},
-		z_mid_subset_filtered{},
+		z_mid_filtered_obstacles{},
 		pre_pmf_range_filtered{},
 		pmf_filtered_ground{},
-		pmf_filtered_obstacles{};
+		pmf_filtered_obstacles{},
+		combined_obstacles{};
 
 	point_cloud.points.reserve( max_points );
 	point_ranges.reserve( max_points );
@@ -841,10 +852,11 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 
 			z_high_filtered.clear();
 			z_low_subset_filtered.clear();
-			z_mid_subset_filtered.clear();
+			z_mid_filtered_obstacles.clear();
 			pre_pmf_range_filtered.clear();
 			pmf_filtered_ground.clear();
 			pmf_filtered_obstacles.clear();
+			combined_obstacles.clear();
 
 			if(origin_samples > 1) avg_origin /= origin_samples;
 
@@ -872,7 +884,7 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 			pc_negate_selection(
 				z_high_filtered,
 				z_low_subset_filtered,
-				z_mid_subset_filtered
+				z_mid_filtered_obstacles
 			);
 
 			// filter close enough points for PMF
@@ -902,8 +914,24 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 				pmf_filtered_obstacles
 			);
 
-			// TEST
-			pc_normalize_selection(voxelized_points.points, pmf_filtered_obstacles);
+			// combine all obstacle points into a single selection
+			pc_combine_sorted(
+				z_mid_filtered_obstacles,
+				pmf_filtered_obstacles,
+				combined_obstacles
+			);
+
+			// export filter results
+			// pc_normalize_selection(voxelized_points.points, combined_obstacles);
+			write_interlaced_selection_bytes<4, 3>(
+				std::span<uint32_t>{
+					reinterpret_cast<uint32_t*>( voxelized_points.points.data() ),
+					reinterpret_cast<uint32_t*>( voxelized_points.points.data() + voxelized_points.points.size() ),
+				},
+				combined_obstacles,
+				this->_config.obstacle_point_color,
+				this->_config.standard_point_color
+			);
 			if(this->_config.points_logging_mode & (POINT_LOGGING_NT | POINT_LOGGING_INCLUDE_FILTERED)) {
 				this->_nt.test_filtered_points.Set(
 					std::span<const uint8_t>{
@@ -913,11 +941,20 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 				);
 			}
 
-			// add "obstacle" and "wall" indices --> output! (to accumulator >>>)
-
 		}
 
 		// 3. update accumulator
+		{
+			this->_accumulation_mutex.lock();
+			this->accumulator.insertPoints(voxelized_points, combined_obstacles);
+			LDRP_LOG( LOG_DEBUG, "LDRP Filter Instance {} [Filter Loop]: Successfully added points to accumulator. Map size: {}x{}, origin: ({}, {}), max weight: {}",
+				f_inst->index,
+				this->accumulator.size().x(), this->accumulator.size().y(),
+				this->accumulator.origin().x(), this->accumulator.origin().y(),
+				this->accumulator.max()
+			)
+			this->_accumulation_mutex.unlock();
+		}
 		// 4. [when configured] update map
 
 		// processing finished, push instance idx to queue

@@ -37,6 +37,8 @@ namespace ldrp {
 		STATUS_IO_ERROR				= (1 << 4),		// self explainatory
 		STATUS_BUSY_MUTEX			= (1 << 5),		// could not aquire mutex control
 		STATUS_PREREQ_UNINITIALIZED	= (1 << 6),		// prerequisite resources not available or not initialized
+		STATUS_NOT_IMPLEMENTED		= (1 << 7),		// the underlying functionality has not been implemented yet or was disabled during compile time
+		STATUS_TIMED_OUT			= (1 << 8),		// a timeout occurred
 	};
 
 	enum : uint64_t {
@@ -70,6 +72,10 @@ namespace ldrp {
 		const char* points_tar_fname{ "lidar_points.tar" };
 		double pose_history_period_s{ 0.25 };
 		bool skip_invalid_transform_ts{ false };
+
+		uint32_t
+			obstacle_point_color = 0x0011DD00U,
+			standard_point_color = 0x00E82E88U;
 
 		float
 			min_scan_theta_degrees	= -90.f,
@@ -137,19 +143,9 @@ namespace ldrp {
 	/** Apply a new world pose for the lidar -- used directly to transform points to world space.
 	 * Note that the position is interpreted as being in meters!
 	 * @param xyz - the (x, y, z) position as a float array (pointer to any contiguous float buffer)
-	 * @param qxyz - the (x, y, z) imaginary components of the pose quaternion as a float array (pointer to any contiguous float buffer)
-	 * @param qw - the w real component of the pose quaternion as a float (not a pointer!)
+	 * @param qxyz - the quaternion representing the robot's rotation in world space -- ordered XYZW!
 	 * @param ts_microseconds - the timestamp in microseconds (relative to epoch) when the pose was collected */
-	__API const status_t updateWorldPose(const float* xyz, const float* qxyz, const float qw, const uint64_t ts_microseconds = 0);
-	/** Apply a new world pose for the lidar -- used directly to transform points to world space.
-	 * The provided buffer is expected to contain an xyz position and quaternion component -
-	 * the _** params represent the respective offsets of each component in the buffer */
-	inline const status_t updateWorldPose(const float* pose3, const size_t _xyz = 0, const size_t _qxyz = 3, const size_t _qw = 6, const uint64_t ts_microseconds = 0)
-		{ return updateWorldPose(pose3 + _xyz, pose3 + _qxyz, pose3[_qw], ts_microseconds); }
-	/** Apply a new world pose for the lidar -- used directly to transform points to world space.
-	 * This method assumes the quaternion components are ordered X, Y, Z, W */
-	inline const status_t updateWorldPose(const float* xyz, const float* qxyzw, const uint64_t ts_microseconds = 0)
-		{ return updateWorldPose(xyz, qxyzw, qxyzw[3], ts_microseconds); }
+	__API const status_t updateWorldPose(const float* xyz, const float* qxyzw, const uint64_t ts_microseconds = 0);
 
 	/** Export the current obstacle grid.
 	 * @param grid - struct to which all grid data will be exported
