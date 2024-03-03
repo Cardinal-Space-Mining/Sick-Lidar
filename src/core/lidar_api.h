@@ -103,18 +103,22 @@ namespace ldrp {
 
 	};
 
-	struct ObstacleGrid {
+	template<typename Weight_t = uint8_t>
+	struct ObstacleGrid_ {
+		using Weight_T = Weight_t;
 
-		uint32_t
+		int32_t
 			cells_x = 0,
 			cells_y = 0;
 		float
-			origin_x_cm = 0.f,
-			origin_y_cm = 0.f,
-			cell_resolution_cm = 1.f,
-			*grid;
+			origin_x_m = 0.f,
+			origin_y_m = 0.f,
+			cell_resolution_m = 1.f;
+		Weight_T*
+			grid = nullptr;
 
 	};
+	using ObstacleGrid = ObstacleGrid_<>;
 
 
 
@@ -123,39 +127,39 @@ namespace ldrp {
 	/** Get the pcl version string of the currently linked library */
 	__API const char* pclVer();
 	/** Get whether wpilib and supported functionality was compiled in */
-	__API const bool hasWpilib();
+	__API bool hasWpilib();
 
 	/** Initialize the global instance resources.
 	 * @param config -- the struct containing all the configs for the lidar instance */
-	__API const status_t apiInit(const LidarConfig& config = LidarConfig::STATIC_DEFAULT);
+	__API status_t apiInit(const LidarConfig& config = LidarConfig::STATIC_DEFAULT);
 	/** Deletes the global api instance. Does not need to be called unless a hard reset is necessary. */
-	__API const status_t apiDestroy();
+	__API status_t apiDestroy();
 	/** Spools up lidar processing resources and threads. */
-	__API const status_t lidarInit();
+	__API status_t lidarInit();
 	/** Stops and joins lidar processing threads. */
-	__API const status_t lidarShutdown();
+	__API status_t lidarShutdown();
 	/** Calls lidarInit() or lidarShutdown() depending on the given state. */
-	__API const status_t lidarSetState(const bool enabled);
+	__API status_t lidarSetState(const bool enabled);
 
 	/** Specify the logging level: 0 = none, 1 = standard, 2 = verbose, 3 = VERBOOOSE! */
-	__API const status_t setLogLevel(const int32_t lvl);
+	__API status_t setLogLevel(const int32_t lvl);
 
 	/** Apply a new world pose for the lidar -- used directly to transform points to world space.
 	 * Note that the position is interpreted as being in meters!
 	 * @param xyz - the (x, y, z) position as a float array (pointer to any contiguous float buffer)
 	 * @param qxyz - the quaternion representing the robot's rotation in world space -- ordered XYZW!
 	 * @param ts_microseconds - the timestamp in microseconds (relative to epoch) when the pose was collected */
-	__API const status_t updateWorldPose(const float* xyz, const float* qxyzw, const uint64_t ts_microseconds = 0);
+	__API status_t updateWorldPose(const float* xyz, const float* qxyzw, const uint64_t ts_microseconds = 0);
 
 	/** Export the current obstacle grid.
 	 * @param grid - struct to which all grid data will be exported
 	 * @param grid_resize - function pointer which provides a buffer of at least the size passed in	*/
-	__API const status_t getObstacleGrid(ObstacleGrid& grid, float*(*grid_resize)(uint64_t));
+	__API status_t getObstacleGrid(ObstacleGrid& grid, ObstacleGrid::Weight_T*(*grid_resize)(size_t));
 	/** Wait until the internal accumulator gets updated (relative to last call of this function) and export the obstacle grid or unblock after the given timeout period.
 	 * @param grid - struct to which all grid data will be exported
 	 * @param grid_resize - function pointer which provides a buffer of at least the size passed in
-	 * @param timeout_ms - the timeout, in milliseconds, after which the function will unblock if no new data is available -- a value of <= 0.0 (default value) blocks indefinitely */
-	__API const status_t waitNextObstacleGrid(ObstacleGrid& grid, float*(*grid_resize)(uint64_t), double timeout_ms = 0.0);
+	 * @param timeout_ms - the timeout, in milliseconds, after which the function will unblock if no new data is available */
+	__API status_t waitNextObstacleGrid(ObstacleGrid& grid, ObstacleGrid::Weight_T*(*grid_resize)(size_t), double timeout_ms);
 
 
 };

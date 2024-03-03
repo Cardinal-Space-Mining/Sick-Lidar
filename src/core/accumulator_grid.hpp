@@ -146,6 +146,9 @@ public:
 	inline const FloatT gridRes() const {
 		return this->resolution;
 	}
+	inline const Cell_T* gridData() const {
+		return this->grid;
+	}
 
 	inline const Eigen::Vector2<IntT> boundingCell(const FloatT x, const FloatT y) const {
 		return Base_T::gridAlign<IntT, FloatT>(x, y, this->map_origin, this->resolution);
@@ -246,11 +249,10 @@ protected:
 	}
 
 protected:
-	FloatT resolution{ 1.f };
 	Eigen::Vector2<FloatT> map_origin{};
 	Eigen::Vector2<IntT> map_size{};
-	Cell_T* grid{ nullptr };
-
+	FloatT resolution{ 1.f };
 	Accumulation_T max_weight{ AccVal<0>() };
+	Cell_T* grid{ nullptr };
 
 };

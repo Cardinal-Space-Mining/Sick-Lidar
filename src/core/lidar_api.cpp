@@ -226,10 +226,10 @@ namespace ldrp {
 
 
 		/** launch the lidar processing thread */
-		const status_t startLidar() {
-			if(!this->_lidar_thread || !this->_lidar_thread->joinable()) {
+		status_t startLidar() {
+			if(!this->lidar_thread || !this->lidar_thread->joinable()) {
 				this->_state.enable_threads.store(true);
-				this->_lidar_thread.reset(
+				this->lidar_thread.reset(
 					new std::thread{ &LidarImpl::lidarWorker, this }
 				);
 				return STATUS_SUCCESS;
@@ -237,47 +237,17 @@ namespace ldrp {
 			return STATUS_ALREADY_SATISFIED;
 		}
 		/** join the lidar thread and release resources */
-		const status_t closeLidar() {
+		status_t closeLidar() {
 			status_t s = STATUS_ALREADY_SATISFIED;
 			this->_state.enable_threads.store(false);
-			if(this->_lidar_thread && this->_lidar_thread->joinable()) {
+			if(this->lidar_thread && this->lidar_thread->joinable()) {
 				if(this->udp_fifo) this->udp_fifo->Shutdown();		// break out of a possible infinite block when the scanner isn't connected
-				this->_lidar_thread->join();
+				this->lidar_thread->join();
 				s = STATUS_SUCCESS;
 			}
-			this->_lidar_thread.reset(nullptr);		// don't need to do this but probably good to explicitly signify the thread isn't valid
+			this->lidar_thread.reset(nullptr);		// don't need to do this but probably good to explicitly signify the thread isn't valid
 			return s;
 		}
-
-		const status_t addWorldRef(const float* xyz, const float* qxyzw, const uint64_t ts_us) {
-			const units::time::second_t timestamp{
-				ts_us == 0 ?
-					crno::duration<double>{ crno::hrc::now().time_since_epoch() }.count() :
-					(double)ts_us / 1e6
-			};
-
-			/* >> FOR FUTURE REFERENCE!!! <<
-			 * "Eigen::QuaternionXX * Eigen::TranslationXX" IS NOT THE SAME AS "Eigen::TranslationXX * Eigen::QuaternionXX"
-			 * The first ROTATES the translation by the quaternion, whereas the second one DOES NOT!!! */
-			const Eigen::Quaternionf
-				r2w_quat = Eigen::Quaternionf{ qxyzw },						// robot's rotation in the world
-				l2w_quat = (this->_config.lidar_offset_quat * r2w_quat);	// lidar's rotation in the world
-			const Eigen::Isometry3f
-				r2w_transform = (*reinterpret_cast<const Eigen::Translation3f*>(xyz)) * r2w_quat;	// compose robot's position and rotation
-			const Eigen::Vector3f
-				l_w_pos = r2w_transform * this->_config.lidar_offset_xyz;	// transform lidar's offset in robot space -- the same as rotating the lidar position to global coords and adding the robot's position
-			const Eigen::Isometry3f
-				l2w_transform = (*reinterpret_cast<const Eigen::Translation3f*>(&l_w_pos)) * l2w_quat;	// compose the lidar's global position and the lidar's global rotation
-
-			this->_localization_mutex.lock();
-			this->_transform_map.AddSample(
-				timestamp,
-				l2w_transform
-			);
-			this->_localization_mutex.unlock();
-			return STATUS_SUCCESS;
-		}
-
 
 	protected:
 		void initNT() {
@@ -297,8 +267,19 @@ namespace ldrp {
 			this->_nt.instance.StopServer();
 		}
 
+	public:
+		/** add a world pose + linked timestamp */
+		status_t addWorldRef(const float* xyz, const float* qxyzw, const uint64_t ts_us);
+		/** export obstacles from the accumulator grid */
+		status_t exportObstacles(ObstacleGrid& grid, ObstacleGrid::Weight_T*(*grid_resize)(size_t));
+		/** wait for the next accumulator update (or pull cached updates) and export obstacles */
+		status_t exportNextObstacles(ObstacleGrid& grid, ObstacleGrid::Weight_T*(*grid_resize)(size_t), double timeout_ms);
 
-	public:	// global inst, constant values, configs
+	protected:
+		status_t gridExportInternal(ObstacleGrid& grid, ObstacleGrid::Weight_T*(*grid_resize)(size_t), std::unique_lock<std::mutex>& lock);
+
+
+	public:	// global inst, constant values, configs, states
 		inline static std::unique_ptr<LidarImpl> _global{ nullptr };
 
 		static constexpr size_t
@@ -350,12 +331,23 @@ namespace ldrp {
 					pmf_slope				= LidarConfig::STATIC_DEFAULT.pmf_slope;
 
 			} fpipeline;
+
 		} _config;
 
 		struct {	// states to be communicated across threads
 			int32_t log_level = LidarConfig::STATIC_DEFAULT.log_level;
 
-			std::atomic<bool> enable_threads{false};
+			std::atomic<bool> enable_threads{ false };
+			size_t obstacle_updates{ 0U };
+
+			std::mutex
+				finished_queue_mutex{},
+				accumulation_mutex{};
+			std::shared_mutex
+				localization_mutex{};
+			std::condition_variable
+				obstacles_updated{};
+
 		} _state;
 
 	protected:	// nt pointers and filter instance struct
@@ -370,6 +362,7 @@ namespace ldrp {
 			nt::RawEntry
 				raw_scan_points,
 				test_filtered_points;
+
 		} _nt;
 
 		using SampleBuffer = std::vector< std::deque< sick_scansegment_xd::ScanSegmentParserOutput > >;
@@ -391,22 +384,24 @@ namespace ldrp {
 			} nt;
 		};
 
-	protected:	// main instance members
-		std::unique_ptr<std::thread> _lidar_thread{ nullptr };
-		sick_scansegment_xd::PayloadFifo* udp_fifo{ nullptr };
-		std::vector<std::unique_ptr<FilterInstance> > _filter_threads{};	// need pointers since filter instance doesn't like to be copied (vector impl)
-		std::deque<uint32_t> _finished_queue{};
-		std::mutex
-			_finished_queue_mutex{};
-		std::shared_mutex
-			_localization_mutex{},
-			_accumulation_mutex{};
-		frc::TimeInterpolatableBuffer<Eigen::Isometry3f> _transform_map{
-			units::time::second_t{ _config.pose_history_range },
-			&lerpClosest<const Eigen::Isometry3f&>
-		};
-		AccumulatorGrid<float> accumulator{};
-		PCDTarWriter pcd_writer{};
+	protected:	// main internal entities
+		std::unique_ptr<std::thread>
+			lidar_thread{ nullptr };
+		sick_scansegment_xd::PayloadFifo*
+			udp_fifo{ nullptr };
+		std::vector<std::unique_ptr<FilterInstance> >
+			filter_threads{};	// need pointers since filter instance doesn't like to be copied (vector issue)
+		std::deque<uint32_t>
+			finished_queue{};
+		frc::TimeInterpolatableBuffer<Eigen::Isometry3f>
+			transform_map{
+				units::time::second_t{ _config.pose_history_range },
+				&lerpClosest<const Eigen::Isometry3f&>
+			};
+		AccumulatorGrid<float>
+			accumulator{};
+		PCDTarWriter
+			pcd_writer{};
 
 		/** The main lidar I/O worker */
 		void lidarWorker();
@@ -425,18 +420,18 @@ namespace ldrp {
 	const char* pclVer() {
 		return PCL_VERSION_PRETTY;
 	}
-	const bool hasWpilib() {
+	bool hasWpilib() {
 		return USING_WPILIB;
 	}
 
 
-	const status_t apiInit(const LidarConfig& config) {
+	status_t apiInit(const LidarConfig& config) {
 		if(!LidarImpl::_global) {
 			LidarImpl::_global = std::make_unique<LidarImpl>(config);
 		}
 		return STATUS_ALREADY_SATISFIED;
 	}
-	const status_t apiDestroy() {
+	status_t apiDestroy() {
 		if(LidarImpl::_global) {
 			LidarImpl::_global.reset(nullptr);
 			return STATUS_SUCCESS;
@@ -444,56 +439,148 @@ namespace ldrp {
 		return STATUS_PREREQ_UNINITIALIZED | STATUS_ALREADY_SATISFIED;
 	}
 
-	const status_t lidarInit() {
+	status_t lidarInit() {
 		if(LidarImpl::_global) {
 			return LidarImpl::_global->startLidar();
 		}
-		return STATUS_PREREQ_UNINITIALIZED;
+		return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
 	}
-	const status_t lidarShutdown() {
+	status_t lidarShutdown() {
 		if(LidarImpl::_global) {
 			return LidarImpl::_global->closeLidar();
 		}
-		return STATUS_PREREQ_UNINITIALIZED;
+		return STATUS_PREREQ_UNINITIALIZED | STATUS_ALREADY_SATISFIED;
 	}
-	const status_t lidarSetState(const bool enabled) {
+	status_t lidarSetState(const bool enabled) {
 		return enabled ? lidarInit() : lidarShutdown();
 	}
 
-	const status_t setLogLevel(const int32_t lvl) {
-		if(lvl < 0 || lvl > 3) return STATUS_BAD_PARAM;
+	status_t setLogLevel(const int32_t lvl) {
+		if(lvl < 0 || lvl > 3) return STATUS_BAD_PARAM | STATUS_FAIL;
 		if(LidarImpl::_global) {
 			LidarImpl::_global->_state.log_level = lvl;
 			return STATUS_SUCCESS;
 		}
-		return STATUS_PREREQ_UNINITIALIZED;
+		return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
 	}
 
-	const status_t updateWorldPose(const float* xyz, const float* qxyzw, const uint64_t ts_us) {
+	status_t updateWorldPose(const float* xyz, const float* qxyzw, const uint64_t ts_us) {
 		if(LidarImpl::_global) {
 			return LidarImpl::_global->addWorldRef(xyz, qxyzw, ts_us);
 		}
-		return STATUS_PREREQ_UNINITIALIZED;
+		return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
 	}
 
-	const status_t getObstacleGrid(ObstacleGrid& grid, float*(*grid_resize)(uint64_t)) {
+	status_t getObstacleGrid(ObstacleGrid& grid, ObstacleGrid::Weight_T*(*grid_resize)(size_t)) {
 		if(LidarImpl::_global) {
-			
+			return LidarImpl::_global->exportObstacles(grid, grid_resize);
 		}
-		return STATUS_PREREQ_UNINITIALIZED;
+		return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
 	}
-	const status_t waitNextObstacleGrid(ObstacleGrid& grid, float*(*grid_resize)(uint64_t), double timeout_ms) {
+	status_t waitNextObstacleGrid(ObstacleGrid& grid, ObstacleGrid::Weight_T*(*grid_resize)(size_t), double timeout_ms) {
 		if(LidarImpl::_global) {
-			// TODO
+			return LidarImpl::_global->exportNextObstacles(grid, grid_resize, timeout_ms);
 		}
-		return STATUS_PREREQ_UNINITIALIZED;
+		return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
 	}
 
 
 
 
 
-/** LidarImpl Worker(s) Implementation */
+/** LidarImpl interfacing implementation */
+
+status_t LidarImpl::addWorldRef(const float* xyz, const float* qxyzw, const uint64_t ts_us) {
+
+	// check if lidar is running?
+	const units::time::second_t timestamp{
+		ts_us == 0 ?
+			crno::duration<double>{ crno::hrc::now().time_since_epoch() }.count() :
+			(double)ts_us / 1e6
+	};
+
+	/* >> FOR FUTURE REFERENCE!!! <<
+		* "Eigen::QuaternionXX * Eigen::TranslationXX" IS NOT THE SAME AS "Eigen::TranslationXX * Eigen::QuaternionXX"
+		* The first ROTATES the translation by the quaternion, whereas the second one DOES NOT!!! */
+	const Eigen::Quaternionf
+		r2w_quat = Eigen::Quaternionf{ qxyzw },						// robot's rotation in the world
+		l2w_quat = (this->_config.lidar_offset_quat * r2w_quat);	// lidar's rotation in the world
+	const Eigen::Isometry3f
+		r2w_transform = (*reinterpret_cast<const Eigen::Translation3f*>(xyz)) * r2w_quat;	// compose robot's position and rotation
+	const Eigen::Vector3f
+		l_w_pos = r2w_transform * this->_config.lidar_offset_xyz;	// transform lidar's offset in robot space -- the same as rotating the lidar position to global coords and adding the robot's position
+	const Eigen::Isometry3f
+		l2w_transform = (*reinterpret_cast<const Eigen::Translation3f*>(&l_w_pos)) * l2w_quat;	// compose the lidar's global position and the lidar's global rotation
+
+	this->_state.localization_mutex.lock();
+	this->transform_map.AddSample( timestamp, l2w_transform );
+	this->_state.localization_mutex.unlock();
+	return STATUS_SUCCESS;
+
+}
+
+status_t LidarImpl::exportObstacles(ObstacleGrid& grid, ObstacleGrid::Weight_T*(*grid_resize)(size_t)) {
+
+	if(this->_state.enable_threads.load()) {
+		std::unique_lock<std::mutex> lock{ this->_state.accumulation_mutex };
+		return this->gridExportInternal(grid, grid_resize, lock);
+	}
+	return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
+
+}
+status_t LidarImpl::exportNextObstacles(ObstacleGrid& grid, ObstacleGrid::Weight_T*(*grid_resize)(size_t), double timeout_ms) {
+
+	if(this->_state.enable_threads.load()) {
+		crno::hrc::time_point _until = crno::hrc::now() + crno::nanoseconds{ static_cast<int64_t>(timeout_ms * 1e6) };
+		std::unique_lock<std::mutex> lock{ this->_state.accumulation_mutex, std::try_to_lock };
+		for(;this->_state.enable_threads.load() && this->_state.obstacle_updates < 1;) {
+			if(this->_state.obstacles_updated.wait_until(lock, _until) == std::cv_status::timeout) {
+				return STATUS_TIMED_OUT | STATUS_FAIL;
+			}
+		}
+		return this->gridExportInternal(grid, grid_resize, lock);
+	}
+	return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
+
+}
+
+status_t LidarImpl::gridExportInternal(ObstacleGrid& grid, ObstacleGrid::Weight_T*(*grid_resize)(size_t), std::unique_lock<std::mutex>& lock) {
+
+	if(lock.mutex() != &this->_state.accumulation_mutex) {
+		std::unique_lock<std::mutex> _temp{ this->_state.accumulation_mutex };
+		lock.swap(_temp);
+	} else
+	if(!lock.owns_lock()) lock.lock();
+
+	const size_t _area = static_cast<size_t>(this->accumulator.area());
+	const Eigen::Vector2f& _origin = this->accumulator.origin();
+	const Eigen::Vector2i& _grid_size = this->accumulator.size();
+	const auto* _cells = this->accumulator.gridData();
+	const float _max_val = this->accumulator.max();
+
+	grid.cell_resolution_m = this->accumulator.gridRes();
+	grid.origin_x_m = _origin.x();
+	grid.origin_y_m = _origin.y();
+	grid.cells_x = _grid_size.x();
+	grid.cells_y = _grid_size.y();
+	grid.grid = grid_resize(_area);
+
+	for(size_t i = 0; i < _area; i++) {		// could use some intrinsics for deinterlacing and vectorized ops here
+		const auto& _cell = _cells[i];
+		grid.grid[i] = static_cast<uint8_t>(0xFFU * (_cell.val / _max_val));
+	}
+
+	this->_state.obstacle_updates = 0;
+	return STATUS_SUCCESS;
+
+}
+
+
+
+
+
+/** LidarImpl threads implementation */
+
 void LidarImpl::lidarWorker() {
 
 	wpi::DataLogManager::SignalNewDSDataOccur();
@@ -560,13 +647,13 @@ void LidarImpl::lidarWorker() {
 					LDRP_LOG( LOG_DEBUG && LOG_VERBOSE, "LDRP Worker [Aquisition Loop]: Aquisition quota satisfied after {} loops - exporting buffer to thread...", aquisition_loop_count )
 
 					// attempt to find or create a thread for processing the frame
-					this->_finished_queue_mutex.lock();	// aquire mutex for queue
-					if(this->_finished_queue.size() > 0) {
+					this->_state.finished_queue_mutex.lock();	// aquire mutex for queue
+					if(this->finished_queue.size() > 0) {
 
-						const uint32_t filter_idx = this->_finished_queue.front();	// maybe check that this is valid?
-						this->_finished_queue.pop_front();
-						this->_finished_queue_mutex.unlock();
-						FilterInstance& f_inst = *this->_filter_threads[filter_idx];
+						const uint32_t filter_idx = this->finished_queue.front();	// maybe check that this is valid?
+						this->finished_queue.pop_front();
+						this->_state.finished_queue_mutex.unlock();
+						FilterInstance& f_inst = *this->filter_threads[filter_idx];
 						std::swap(f_inst.samples, frame_segments);		// figure out where we want to clear the buffer that is swapped in so we don't start with old data in the queues
 						f_inst.link_state.store(true);
 						f_inst.link_condition.notify_all();
@@ -575,12 +662,12 @@ void LidarImpl::lidarWorker() {
 						break;
 
 					} else {
-						this->_finished_queue_mutex.unlock();
-						if(this->_filter_threads.size() < this->_config.max_filter_threads) {	// start a new thread
+						this->_state.finished_queue_mutex.unlock();
+						if(this->filter_threads.size() < this->_config.max_filter_threads) {	// start a new thread
 
 							// create a new thread and swap in the sample
-							this->_filter_threads.emplace_back( std::make_unique<FilterInstance>( static_cast<uint32_t>(this->_filter_threads.size()) ) );
-							FilterInstance& f_inst = *this->_filter_threads.back();
+							this->filter_threads.emplace_back( std::make_unique<FilterInstance>( static_cast<uint32_t>(this->filter_threads.size()) ) );
+							FilterInstance& f_inst = *this->filter_threads.back();
 							std::swap(f_inst.samples, frame_segments);
 							f_inst.thread.reset( new std::thread{&LidarImpl::filterWorker, this, &f_inst} );
 
@@ -590,7 +677,7 @@ void LidarImpl::lidarWorker() {
 						}
 					}
 				}	// insufficient samples or no thread available... (keep updating the current framebuff)
-#define SIM_GENERATE_POINTS
+// #define SIM_GENERATE_POINTS
 #ifndef SIM_GENERATE_POINTS
 				if(this->udp_fifo->Pop(udp_payload_bytes, scan_timestamp, scan_count)) {	// blocks until packet is received
 
@@ -709,7 +796,7 @@ void LidarImpl::lidarWorker() {
 	this->pcd_writer.closeIO();		// doesn't do anything if we never initialized
 
 	// join and delete all filter instances
-	for(std::unique_ptr<FilterInstance>& f_inst : this->_filter_threads) {
+	for(std::unique_ptr<FilterInstance>& f_inst : this->filter_threads) {
 		const uint32_t idx = f_inst->index;
 		if(f_inst->thread && f_inst->thread->joinable()) {
 			LDRP_LOG( LOG_DEBUG, "LDRP Worker [Exit]: Waiting for filter instance {} to join...", idx )
@@ -778,10 +865,10 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 			for(size_t j = 0; j < f_inst->samples[i].size(); j++) {
 				const sick_scansegment_xd::ScanSegmentParserOutput& segment = f_inst->samples[i][j];
 
-				_localization_mutex.lock_shared();	// other threads can read from the buffer as well
-				std::optional<Eigen::Isometry3f> ts_transform = this->_transform_map.Sample(
+				this->_state.localization_mutex.lock_shared();	// other threads can read from the buffer as well
+				std::optional<Eigen::Isometry3f> ts_transform = this->transform_map.Sample(
 					units::time::second_t{ segment.timestamp_sec + (segment.timestamp_nsec * 1E-9) } );
-				_localization_mutex.unlock_shared();
+				this->_state.localization_mutex.unlock_shared();
 
 				if(this->_config.skip_invalid_transform_ts && !ts_transform.has_value()) continue;
 				const Eigen::Isometry3f& transform = ts_transform.has_value() ? *ts_transform : DEFAULT_NO_POSE;	// need to convert to transform matrix
@@ -945,23 +1032,25 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 
 		// 3. update accumulator
 		{
-			this->_accumulation_mutex.lock();
+			this->_state.accumulation_mutex.lock();
 			this->accumulator.insertPoints(voxelized_points, combined_obstacles);
-			LDRP_LOG( LOG_DEBUG, "LDRP Filter Instance {} [Filter Loop]: Successfully added points to accumulator. Map size: {}x{}, origin: ({}, {}), max weight: {}",
-				f_inst->index,
-				this->accumulator.size().x(), this->accumulator.size().y(),
-				this->accumulator.origin().x(), this->accumulator.origin().y(),
-				this->accumulator.max()
-			)
-			this->_accumulation_mutex.unlock();
+			this->_state.obstacle_updates++;
+			this->_state.obstacles_updated.notify_all();
+			// LDRP_LOG( LOG_DEBUG, "LDRP Filter Instance {} [Filter Loop]: Successfully added points to accumulator. Map size: {}x{}, origin: ({}, {}), max weight: {}",
+			// 	f_inst->index,
+			// 	this->accumulator.size().x(), this->accumulator.size().y(),
+			// 	this->accumulator.origin().x(), this->accumulator.origin().y(),
+			// 	this->accumulator.max()
+			// )
+			this->_state.accumulation_mutex.unlock();
 		}
-		// 4. [when configured] update map
+		// done!!!
 
 		// processing finished, push instance idx to queue
 		f_inst->nt.is_active.Set(false);
 		f_inst->link_state = false;
-		std::unique_lock<std::mutex> lock{ this->_finished_queue_mutex };
-		this->_finished_queue.push_back(f_inst->index);
+		std::unique_lock<std::mutex> lock{ this->_state.finished_queue_mutex };
+		this->finished_queue.push_back(f_inst->index);
 		// wait for signal to continue...
 		for(;this->_state.enable_threads.load() && !f_inst->link_state;) {
 			f_inst->link_condition.wait(lock);
