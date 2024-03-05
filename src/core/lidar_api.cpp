@@ -209,7 +209,7 @@ namespace ldrp {
 				config.datalog_fname,
 				config.datalog_flush_period_s
 			);
-			this->initNT();
+			this->initNT(config);
 
 			LDRP_LOG( LOG_ALWAYS, "LDRP global instance initialized." )
 		}
@@ -250,10 +250,31 @@ namespace ldrp {
 		}
 
 	protected:
-		void initNT() {
+		void initNT(const LidarConfig& config) {
 			this->_nt.instance = nt::NetworkTableInstance::GetDefault();
 
-			this->_nt.instance.StartServer();	// config or auto-detect for server/client
+			bool started_client = false;
+			if(config.nt_use_client) {
+				if(config.nt_client_server != nullptr) {
+					this->_nt.instance.StartClient4("perception");
+					this->_nt.instance.SetServer(
+						config.nt_client_server,
+						config.nt_client_port
+					);
+					started_client = true;
+				}
+				if(config.nt_client_team >= 0) {
+					this->_nt.instance.StartClient4("perception");
+					this->_nt.instance.SetServerTeam(
+						static_cast<unsigned int>(config.nt_client_team),
+						config.nt_client_port
+					);
+					started_client = true;
+				}
+			}
+			if(!started_client) {
+				this->_nt.instance.StartServer();	// config or auto-detect for server/client
+			}
 			this->_nt.base = this->_nt.instance.GetTable("Perception");
 
 			this->_nt.last_parsed_seg_idx = this->_nt.base->GetIntegerTopic("last segment").GetEntry(-1);
@@ -417,12 +438,12 @@ namespace ldrp {
 
 /** Static API */
 
-	const char* pclVer() {
-		return PCL_VERSION_PRETTY;
-	}
-	bool hasWpilib() {
-		return USING_WPILIB;
-	}
+	// const char* pclVer() {	// these are dumb
+	// 	return PCL_VERSION_PRETTY;
+	// }
+	// bool hasWpilib() {
+	// 	return USING_WPILIB;
+	// }
 
 
 	status_t apiInit(const LidarConfig& config) {
@@ -677,7 +698,7 @@ void LidarImpl::lidarWorker() {
 						}
 					}
 				}	// insufficient samples or no thread available... (keep updating the current framebuff)
-// #define SIM_GENERATE_POINTS
+#define SIM_GENERATE_POINTS
 #ifndef SIM_GENERATE_POINTS
 				if(this->udp_fifo->Pop(udp_payload_bytes, scan_timestamp, scan_count)) {	// blocks until packet is received
 

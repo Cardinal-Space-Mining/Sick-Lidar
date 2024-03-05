@@ -56,6 +56,11 @@ namespace ldrp {
 
 	struct LidarConfig {
 
+		bool nt_use_client{ false };
+		unsigned int nt_client_port{ 0 };	// 0 uses default port
+		int nt_client_team{ -1 };			// does not apply if < 0
+		const char* nt_client_server{ "localhost" };
+
 		const char* datalog_subdirectory{ "" };
 		const char* datalog_fname{ "lidar_log.wpilog" };
 		double datalog_flush_period_s{ 0.05 };
@@ -124,10 +129,10 @@ namespace ldrp {
 
 /** API */
 
-	/** Get the pcl version string of the currently linked library */
-	__API const char* pclVer();
-	/** Get whether wpilib and supported functionality was compiled in */
-	__API bool hasWpilib();
+	// /** Get the pcl version string of the currently linked library */
+	// __API const char* pclVer();
+	// /** Get whether wpilib and supported functionality was compiled in */
+	// __API bool hasWpilib();
 
 	/** Initialize the global instance resources.
 	 * @param config -- the struct containing all the configs for the lidar instance */

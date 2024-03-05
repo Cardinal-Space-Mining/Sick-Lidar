@@ -124,6 +124,10 @@ endif()
 		add_executable(${PROJECT_NAME}_test "src/main.cpp")
 		target_link_libraries(${PROJECT_NAME}_test
 			PRIVATE ${PROJECT_NAME}_lib
+			PRIVATE wpiutil
+			PRIVATE wpinet
+			PRIVATE wpimath
+			PRIVATE ntcore
 		)
 		if(${BUILD_SHARED_LIBS})
 			target_compile_definitions(${PROJECT_NAME}_test

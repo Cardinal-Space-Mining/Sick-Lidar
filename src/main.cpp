@@ -4,6 +4,9 @@
 #include <csignal>
 #include <atomic>
 
+#include <networktables/NetworkTableInstance.h>
+#include <networktables/FloatArrayTopic.h>
+
 #include "lidar_api.h"
 #include "./core/mem_utils.hpp"
 
@@ -24,6 +27,7 @@ int main(int argc, char** argv) {
 	status_t s{0};
 	ldrp::LidarConfig _config{};
 	_config.points_logging_mode = (ldrp::POINT_LOGGING_INCLUDE_FILTERED | ldrp::POINT_LOGGING_NT);
+	_config.nt_use_client = true;
 	// _config.lidar_offset_xyz[2] = 1.f;
 	// _config.lidar_offset_quat[0] = 1.f;
 	// _config.lidar_offset_quat[3] = 0.f;
@@ -32,6 +36,10 @@ int main(int argc, char** argv) {
 	s = ldrp::apiInit(_config);
 	s = ldrp::lidarInit();
 	// std::cout << "lidar inited from main" << std::endl;
+
+	// nt::NetworkTableInstance::GetDefault().StartServer();
+	nt::NetworkTableInstance nt_inst = nt::NetworkTableInstance::GetDefault();
+	nt::FloatArrayEntry nt_localization = nt_inst.GetFloatArrayTopic("uesim/pose").GetEntry({});
 
 	signal(SIGINT, _action);
 
@@ -42,6 +50,12 @@ int main(int argc, char** argv) {
 	ldrp::ObstacleGrid grid{};
 	for(;_program_running.load();) {
 
+		std::vector<nt::TimestampedFloatArray> updates = nt_localization.ReadQueue();
+		std::cout << "[Main Thread]: Localization recieved " << updates.size() << " pose updates" << std::endl;
+		for(const nt::TimestampedFloatArray& u : updates) {
+			ldrp::updateWorldPose(u.value.data(), u.value.data() + 3, u.time);
+		}
+
 		// s = ldrp::updateWorldPose(pose, pose + 3);
 		// pose[0] += 0.1;
 		high_resolution_clock::time_point a = high_resolution_clock::now();
@@ -50,8 +64,8 @@ int main(int argc, char** argv) {
 		if(s & ldrp::STATUS_TIMED_OUT) {
 			std::cout << "[Main Thread]: Obstacle export timed out after " << dur << " seconds." << std::endl;
 		} else if(s == ldrp::STATUS_SUCCESS) {
-			std::cout << "[Main Thread]: Obstacle export succeeded after " << dur << " seconds." << std::endl;
-			std::cout << "\t>> grid origin: (" << grid.origin_x_m << ", " << grid.origin_y_m << "), grid size: {" << grid.cells_x << " x " << grid.cells_y << "}" << std::endl;
+			// std::cout << "[Main Thread]: Obstacle export succeeded after " << dur << " seconds." << std::endl;
+			// std::cout << "\t>> grid origin: (" << grid.origin_x_m << ", " << grid.origin_y_m << "), grid size: {" << grid.cells_x << " x " << grid.cells_y << "}" << std::endl;
 		} else {
 			std::cout << "[Main Thread]: Obstacle export failed after " << dur << " seconds." << std::endl;
 		}
