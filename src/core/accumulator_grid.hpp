@@ -6,7 +6,8 @@
 
 #include <Eigen/Core>
 #include <pcl/point_cloud.h>
-#include <pcl/common/common.h>
+
+#include "filtering.hpp"
 
 
 /** Static utilities used in AccumulatorGrid */
@@ -90,7 +91,10 @@ public:
 
 };
 
-template<typename Acc_t = float, typename Int_t = int, typename Float_t = float>
+template<
+	typename Acc_t = float,
+	typename Int_t = int,
+	typename Float_t = float>
 class AccumulatorGrid : public AccumulatorGridBase_ {
 	static_assert(std::is_integral_v<Int_t>, "");
 	static_assert(std::is_floating_point_v<Float_t>, "");
@@ -201,18 +205,11 @@ public:
 	template<typename PointT>
 	void insertPoints(const pcl::PointCloud<PointT>& cloud, const pcl::Indices& selection) {
 
-		const bool _use_selection = !selection.empty();
-		Eigen::Vector4f _min, _max;
-		if (_use_selection) {
-			pcl::getMinMax3D<PointT>(cloud, selection, _min, _max);
-		} else {
-			pcl::getMinMax3D<PointT>(cloud, _min, _max);
-		}
-		if (this->resizeToBounds(
-				Eigen::Vector2<FloatT>{ static_cast<FloatT>(_min.x()), static_cast<FloatT>(_min.y()) },
-				Eigen::Vector2<FloatT>{ static_cast<FloatT>(_max.x()), static_cast<FloatT>(_min.y()) } )
-		) {
-			if (_use_selection) {
+		Eigen::Vector2<FloatT> _min, _max;
+		minMaxXY(cloud, selection, _min, _max);
+
+		if (this->resizeToBounds(_min, _max)) {
+			if (!selection.empty()) {
 				for (const pcl::index_t idx : selection) {
 					this->insert<PointT>(cloud.points[idx]);
 				}

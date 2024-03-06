@@ -16,6 +16,64 @@
 
 
 
+/** Get the min/max of first N dimensions for a selection of points. Does not properly handle non-dense clouds */
+template<
+	int Ndims = 3,
+	typename PointT = pcl::PointXYZ,
+	typename IntT = pcl::index_t,
+	typename FloatT = float>
+void minMaxND(
+	const pcl::PointCloud<PointT>& cloud,
+	const std::vector<IntT>& selection,
+	Eigen::Vector<FloatT, Ndims>& min,
+	Eigen::Vector<FloatT, Ndims>& max
+) {
+	static_assert(Ndims > 0 && Ndims <= 4, "");
+	using VecT = Eigen::Vector<FloatT, Ndims>;
+
+	min.setConstant( std::numeric_limits<float>::max() );
+	max.setConstant( std::numeric_limits<float>::min() );
+
+	if(selection.empty()) {
+		for(const PointT& pt : cloud.points) {
+			const VecT* pt2 = reinterpret_cast<const VecT*>(&pt);
+			min = min.cwiseMin(*pt2);
+			max = max.cwiseMax(*pt2);
+		}
+	} else {
+		for(const IntT i : selection) {
+			const VecT* pt2 = reinterpret_cast<const VecT*>(&cloud.points[i]);
+			min = min.cwiseMin(*pt2);
+			max = max.cwiseMax(*pt2);
+		}
+	}
+}
+
+/** minMaxND<>() alias for getting min/max for x and y */
+template<
+	typename PointT = pcl::PointXYZ,
+	typename IntT = pcl::index_t,
+	typename FloatT = float>
+constexpr void(*minMaxXY)(
+	const pcl::PointCloud<PointT>&, const std::vector<IntT>&,
+	Eigen::Vector2<FloatT>&, Eigen::Vector2<FloatT>&
+) = &minMaxND<2, PointT, IntT, FloatT>;
+
+/** minMaxND<>() alias for getting min/max for x, y, and z */
+template<
+	typename PointT = pcl::PointXYZ,
+	typename IntT = pcl::index_t,
+	typename FloatT = float>
+constexpr void(*minMaxXYZ)(
+	const pcl::PointCloud<PointT>&, const std::vector<IntT>&,
+	Eigen::Vector3<FloatT>&, Eigen::Vector3<FloatT>&
+) = &minMaxND<3, PointT, IntT, FloatT>;
+
+
+
+
+
+
 /** Voxelization static reimpl -- copied from VoxelGrid<>::applyFilter() and simplified */
 template<
 	typename PointT = pcl::PointXYZ,
@@ -31,22 +89,24 @@ void voxel_filter(
 ) {
 	const bool use_selection = !selection.empty();
 
-	const Eigen::Vector4f
-		leaf_size_{ leaf_x, leaf_y, leaf_z, 1.f };
-	const Eigen::Array4f
-		inverse_leaf_size_{ Eigen::Array4f::Ones() / leaf_size_.array() };
+	const Eigen::Vector3<FloatT>
+		leaf_size_{ leaf_x, leaf_y, leaf_z };
+	const Eigen::Array3<FloatT>
+		inverse_leaf_size_{ Eigen::Array3<FloatT>::Ones() / leaf_size_.array() };
 
 	// Copy the header (and thus the frame_id) + allocate enough space for points
 	voxelized.height       = 1;                    // downsampling breaks the organized structure
 	voxelized.is_dense     = true;                 // we filter out invalid points
 
-	Eigen::Vector4f min_p, max_p;
-	// Get the minimum and maximum dimensions
-	if(use_selection) {
-		pcl::getMinMax3D<PointT>(cloud, selection, min_p, max_p);
-	} else {
-		pcl::getMinMax3D<PointT>(cloud, min_p, max_p);
-	}
+	// Eigen::Vector4f min_p, max_p;
+	// // Get the minimum and maximum dimensions
+	// if(use_selection) {
+	// 	pcl::getMinMax3D<PointT>(cloud, selection, min_p, max_p);
+	// } else {
+	// 	pcl::getMinMax3D<PointT>(cloud, min_p, max_p);
+	// }
+	Eigen::Vector3<FloatT> min_p, max_p;
+	minMaxXYZ<PointT>(cloud, selection, min_p, max_p);
 
 	// Check that the leaf size is not too small, given the size of the data
 	std::int64_t dx = static_cast<std::int64_t>((max_p[0] - min_p[0]) * inverse_leaf_size_[0]) + 1;

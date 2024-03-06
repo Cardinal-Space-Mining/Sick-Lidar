@@ -64,8 +64,8 @@ int main(int argc, char** argv) {
 		if(s & ldrp::STATUS_TIMED_OUT) {
 			std::cout << "[Main Thread]: Obstacle export timed out after " << dur << " seconds." << std::endl;
 		} else if(s == ldrp::STATUS_SUCCESS) {
-			// std::cout << "[Main Thread]: Obstacle export succeeded after " << dur << " seconds." << std::endl;
-			// std::cout << "\t>> grid origin: (" << grid.origin_x_m << ", " << grid.origin_y_m << "), grid size: {" << grid.cells_x << " x " << grid.cells_y << "}" << std::endl;
+			std::cout << "[Main Thread]: Obstacle export succeeded after " << dur << " seconds." << std::endl;
+			std::cout << "\t>> grid origin: (" << grid.origin_x_m << ", " << grid.origin_y_m << "), grid size: {" << grid.cells_x << " x " << grid.cells_y << "}" << std::endl;
 		} else {
 			std::cout << "[Main Thread]: Obstacle export failed after " << dur << " seconds." << std::endl;
 		}

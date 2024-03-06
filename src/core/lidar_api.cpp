@@ -1,7 +1,7 @@
 #include "lidar_api.h"
 
 #include "filtering.hpp"
-#include "accumulator_grid.hpp"
+#include "accumulator_grid2.hpp"
 #include "mem_utils.hpp"
 #include "pcd_streaming.h"
 
@@ -419,7 +419,7 @@ namespace ldrp {
 				units::time::second_t{ _config.pose_history_range },
 				&lerpClosest<const Eigen::Isometry3f&>
 			};
-		AccumulatorGrid<float>
+		RatioGrid<float>
 			accumulator{};
 		PCDTarWriter
 			pcd_writer{};
@@ -577,9 +577,8 @@ status_t LidarImpl::gridExportInternal(ObstacleGrid& grid, ObstacleGrid::Weight_
 	const Eigen::Vector2f& _origin = this->accumulator.origin();
 	const Eigen::Vector2i& _grid_size = this->accumulator.size();
 	const auto* _cells = this->accumulator.gridData();
-	const float _max_val = this->accumulator.max();
 
-	grid.cell_resolution_m = this->accumulator.gridRes();
+	grid.cell_resolution_m = this->accumulator.cellRes();
 	grid.origin_x_m = _origin.x();
 	grid.origin_y_m = _origin.y();
 	grid.cells_x = _grid_size.x();
@@ -588,7 +587,7 @@ status_t LidarImpl::gridExportInternal(ObstacleGrid& grid, ObstacleGrid::Weight_
 
 	for(size_t i = 0; i < _area; i++) {		// could use some intrinsics for deinterlacing and vectorized ops here
 		const auto& _cell = _cells[i];
-		grid.grid[i] = static_cast<uint8_t>(0xFFU * (_cell.val / _max_val));
+		grid.grid[i] = static_cast<uint8_t>(0xFFU * (_cell.accum / _cell.base));
 	}
 
 	this->_state.obstacle_updates = 0;
@@ -1054,7 +1053,9 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 		// 3. update accumulator
 		{
 			this->_state.accumulation_mutex.lock();
-			this->accumulator.insertPoints(voxelized_points, combined_obstacles);
+			// this->accumulator.insertPoints(voxelized_points, combined_obstacles);
+			this->accumulator.incrementBase(voxelized_points, pre_pmf_range_filtered);
+			this->accumulator.incrementAccum(voxelized_points, pmf_filtered_obstacles);
 			this->_state.obstacle_updates++;
 			this->_state.obstacles_updated.notify_all();
 			// LDRP_LOG( LOG_DEBUG, "LDRP Filter Instance {} [Filter Loop]: Successfully added points to accumulator. Map size: {}x{}, origin: ({}, {}), max weight: {}",
