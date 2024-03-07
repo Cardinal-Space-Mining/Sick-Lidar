@@ -419,7 +419,7 @@ namespace ldrp {
 				units::time::second_t{ _config.pose_history_range },
 				&lerpClosest<const Eigen::Isometry3f&>
 			};
-		RatioGrid<float>
+		QuantizedRatioGrid<ObstacleGrid::Weight_T, float>
 			accumulator{};
 		PCDTarWriter
 			pcd_writer{};
@@ -576,7 +576,6 @@ status_t LidarImpl::gridExportInternal(ObstacleGrid& grid, ObstacleGrid::Weight_
 	const size_t _area = static_cast<size_t>(this->accumulator.area());
 	const Eigen::Vector2f& _origin = this->accumulator.origin();
 	const Eigen::Vector2i& _grid_size = this->accumulator.size();
-	const auto* _cells = this->accumulator.gridData();
 
 	grid.cell_resolution_m = this->accumulator.cellRes();
 	grid.origin_x_m = _origin.x();
@@ -585,10 +584,7 @@ status_t LidarImpl::gridExportInternal(ObstacleGrid& grid, ObstacleGrid::Weight_
 	grid.cells_y = _grid_size.y();
 	grid.grid = grid_resize(_area);
 
-	for(size_t i = 0; i < _area; i++) {		// could use some intrinsics for deinterlacing and vectorized ops here
-		const auto& _cell = _cells[i];
-		grid.grid[i] = static_cast<uint8_t>(0xFFU * (_cell.accum / _cell.base));
-	}
+	memcpy(grid.grid, this->accumulator.buffData(), _area * sizeof(ObstacleGrid::Weight_T));
 
 	this->_state.obstacle_updates = 0;
 	return STATUS_SUCCESS;
@@ -697,8 +693,8 @@ void LidarImpl::lidarWorker() {
 						}
 					}
 				}	// insufficient samples or no thread available... (keep updating the current framebuff)
-#define SIM_GENERATE_POINTS
-#ifndef SIM_GENERATE_POINTS
+#define POINT_SOURCE_MODE 2
+#if POINT_SOURCE_MODE == 0	// live sensor operation
 				if(this->udp_fifo->Pop(udp_payload_bytes, scan_timestamp, scan_count)) {	// blocks until packet is received
 
 					if(this->_config.use_msgpack ?	// parse based on format
@@ -711,7 +707,7 @@ void LidarImpl::lidarWorker() {
 							udp_payload_bytes, scan_timestamp, no_transform, parsed_segment,
 							true, LOG_VERBOSE)
 					) {	// if successful parse
-#else
+#elif POINT_SOURCE_MODE == 1	// internal simulation
 				{
 					static constexpr float const
 						phi_angles_deg[] = { -22.2, -17.2, -12.3, -7.3, -2.5, 2.2, 7.0, 12.9, 17.2, 21.8, 26.6, 31.5, 36.7, 42.2 },
@@ -776,6 +772,45 @@ void LidarImpl::lidarWorker() {
 					parsed_segment.segmentIndex = aquisition_loop_count;
 					std::this_thread::sleep_until(s + 4900us);
 					if constexpr(true) {
+#elif POINT_SOURCE_MODE == 2	// pull data from nt (uesim)
+				{
+					crno::hrc::time_point s = crno::hrc::now();
+					
+					static nt::RawEntry _entry = this->_nt.instance.GetRawTopic("uesim/points").GetEntry("PointXYZ_[]", {});
+					std::vector<nt::TimestampedRaw> points_queue = _entry.ReadQueue();
+					bool valid = false;
+					if(points_queue.size() > 0) {
+						nt::TimestampedRaw& ts_raw = points_queue[0];
+						parsed_segment.scandata.resize(1);
+						parsed_segment.scandata[0].scanlines.resize(1);
+						auto& pts_out = parsed_segment.scandata[0].scanlines[0].points;
+						
+						const size_t len = ts_raw.value.size() / 16U;
+						pts_out.resize(len);
+						const pcl::PointXYZ* _points = reinterpret_cast<const pcl::PointXYZ*>(ts_raw.value.data());
+						for(size_t i = 0; i < len; i++) {
+							sick_scansegment_xd::ScanSegmentParserOutput::LidarPoint& lpt = pts_out[i];
+							const pcl::PointXYZ& pt = _points[i];
+							lpt.x = pt.x;
+							lpt.y = pt.y;
+							lpt.z = pt.z;
+							lpt.range = 100.f;
+							lpt.azimuth = 0.f;
+							lpt.elevation = 0.f;
+						}
+						parsed_segment.segmentIndex = 0;
+						parsed_segment.timestamp_sec = (ts_raw.time % 1000000U);
+						parsed_segment.timestamp_nsec = (ts_raw.time - (ts_raw.time % 1000000U)) * 1000U;
+						filled_segments = this->_config.enabled_segments;	// export immediately
+						valid = true;
+					}
+
+					std::this_thread::sleep_until(s + 4900us);
+					if(valid) {
+#else
+				{
+					std::this_thread::sleep_for(5ms);
+					if constexpr(false) {
 #endif
 						LDRP_LOG( LOG_DEBUG && LOG_VERBOSE, "LDRP Worker [Aquisition Loop]: Successfully parsed scan segment idx {}!", parsed_segment.segmentIndex )
 
@@ -853,7 +888,7 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 		point_cloud,
 		voxelized_points;
 	std::vector<float>
-		point_ranges,
+		// point_ranges,	// currently don't need since we voxelize and have to regenerate anyway
 		voxelized_ranges;
 	pcl::Indices
 		z_high_filtered{},
@@ -865,7 +900,7 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 		combined_obstacles{};
 
 	point_cloud.points.reserve( max_points );
-	point_ranges.reserve( max_points );
+	// point_ranges.reserve( max_points );
 
 	LDRP_LOG( LOG_STANDARD, "LDRP Filter Instance {} [Init]: Resources initialized - running filter loop...", f_inst->index )
 
@@ -875,7 +910,7 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 		f_inst->nt.is_active.Set(true);
 
 		point_cloud.clear();	// clear the vector and set w,h to 0
-		point_ranges.clear();	// << MEMORY LEAK!!! (it was)
+		// point_ranges.clear();	// << MEMORY LEAK!!! (it was)
 
 		Eigen::Vector3f avg_origin{ 0.f, 0.f, 0.f };
 		size_t origin_samples = 0;
@@ -919,7 +954,7 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 #endif
 								point_cloud.points.emplace_back();
 								reinterpret_cast<Eigen::Vector4f&>(point_cloud.points.back()) = transform * Eigen::Vector4f{lidar_point.x, lidar_point.y, lidar_point.z, 1.f};	// EEEEEE :O
-								point_ranges.push_back(lidar_point.range);
+								// point_ranges.push_back(lidar_point.range);
 							}
 						}
 					}
@@ -1053,9 +1088,16 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 		// 3. update accumulator
 		{
 			this->_state.accumulation_mutex.lock();
-			// this->accumulator.insertPoints(voxelized_points, combined_obstacles);
-			this->accumulator.incrementBase(voxelized_points, pre_pmf_range_filtered);
-			this->accumulator.incrementAccum(voxelized_points, pmf_filtered_obstacles);
+			this->accumulator.incrementRatio(	// insert PMF obstacles
+				voxelized_points,
+				pre_pmf_range_filtered,		// base
+				pmf_filtered_obstacles		// subset
+			);
+			this->accumulator.incrementRatio(	// insert z-thresh obstacles
+				voxelized_points,
+				z_mid_filtered_obstacles,	// base
+				DEFAULT_NO_SELECTION		// use all of base
+			);
 			this->_state.obstacle_updates++;
 			this->_state.obstacles_updated.notify_all();
 			// LDRP_LOG( LOG_DEBUG, "LDRP Filter Instance {} [Filter Loop]: Successfully added points to accumulator. Map size: {}x{}, origin: ({}, {}), max weight: {}",

@@ -2,8 +2,9 @@
 
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <type_traits>
-#include <iostream>
+// #include <iostream>
 
 #include <Eigen/Core>
 #include <pcl/point_cloud.h>
@@ -100,27 +101,48 @@ public:
 		return this->grid;
 	}
 
-	inline const Eigen::Vector2<IntT> boundingCell(const FloatT x, const FloatT y) const {
+// 	inline const Cell_T& cellAt(size_t idx) {
+// #ifndef GRID_IMPL_SKIP_BOUND_CHECKING
+// 		if(idx < this->area())
+// #endif
+// 		{
+// 			return this->grid[idx];
+// 		}
+// 		return *reinterpret_cast<Cell_T*>(nullptr);
+// 	}
+
+	inline const Eigen::Vector2<IntT> boundingLoc(const FloatT x, const FloatT y) const {
 		return GBase_T::gridAlign<IntT, FloatT>(x, y, this->grid_origin, this->cell_res);
 	}
 	inline const int64_t cellIdxOf(const FloatT x, const FloatT y) const {
-		return GBase_T::gridIdx<IntT>(this->boundingCell(x, y), this->grid_size);
+		return GBase_T::gridIdx<IntT>(this->boundingLoc(x, y), this->grid_size);
 	}
 
 
 	/** Returns false if an invalid realloc was skipped */
 	bool resizeToBounds(const Eigen::Vector2<FloatT>& min, const Eigen::Vector2<FloatT>& max) {
+		Eigen::Vector2<IntT> _diff;
+		return this->resizeToBounds(min, max, _diff);
+	}
+
+protected:
+	/** For internal and extension use only. Exports the difference between the last grid origin and the new grid origin. */
+	bool resizeToBounds(
+		const Eigen::Vector2<FloatT>& min, const Eigen::Vector2<FloatT>& max,
+		Eigen::Vector2<IntT>& diff_out
+	) {
 
 		static const Eigen::Vector2<IntT>
-			_zero = Eigen::Vector2<IntT>::Zero();
+			_zero = Eigen::Vector2<IntT>::Zero(),
+			_one = Eigen::Vector2<IntT>::Ones();
 		const Eigen::Vector2<IntT>
-			_min = this->boundingCell(min.x(), min.y()),	// grid cell locations containing min and max, aligned with current offsets
-			_max = this->boundingCell(max.x(), max.y());
+			_min = this->boundingLoc(min.x(), min.y()),	// grid cell locations containing min and max, aligned with current offsets
+			_max = this->boundingLoc(max.x(), max.y());
 
 		if (_min.cwiseLess(_zero).any() || _max.cwiseGreater(this->grid_size).any()) {
 			const Eigen::Vector2<IntT>
 				_low = _min.cwiseMin(_zero),		// new high and low bounds for the map
-				_high = _max.cwiseMax(this->grid_size),
+				_high = _max.cwiseMax(this->grid_size) + _one,	// need to add an additional row + col since indexing happens in the corner, thus by default the difference between corners will not cover the entire size
 				_size = _high - _low;				// new map size
 
 			const int64_t _area = static_cast<int64_t>(_size.x()) * _size.y();
@@ -129,11 +151,11 @@ public:
 			Cell_T* _grid = new Cell_T[_area];
 			memset(_grid, 0x00, _area * GBase_T::Cell_Size);	// :O don't forget this otherwise the map will start with all garbage data
 
-			const Eigen::Vector2<IntT> _diff = _zero - _low;	// by how many grid cells did the origin shift
+			diff_out = _zero - _low;	// by how many grid cells did the origin shift
 			if (this->grid) {
 				for (IntT r = 0; r < this->grid_size.x(); r++) {		// for each row in existing...
 					memcpy(									// remap to new buffer
-						_grid + ((static_cast<int64_t>(r) + _diff.x()) * _size.y() + _diff.y()),	// (row + offset rows) * new row size + offset cols
+						_grid + ((static_cast<int64_t>(r) + diff_out.x()) * _size.y() + diff_out.y()),	// (row + offset rows) * new row size + offset cols
 						this->grid + (static_cast<int64_t>(r) * this->grid_size.y()),
 						this->grid_size.y() * GBase_T::Cell_Size
 					);
@@ -142,7 +164,9 @@ public:
 			}
 			this->grid = _grid;
 			this->grid_size = _size;
-			this->grid_origin -= (_diff.template cast<FloatT>() * this->cell_res);
+			this->grid_origin -= (diff_out.template cast<FloatT>() * this->cell_res);
+		} else {
+			diff_out = _zero;
 		}
 		return true;
 
@@ -190,6 +214,15 @@ public:
 	using typename Base_T::IntT;
 	using typename Base_T::FloatT;
 	using typename Base_T::Cell_T;
+	using PreciseFloatT = typename std::conditional<
+		std::is_floating_point<RatioT>::value,	// check if the ratio internal type is fp
+		typename std::conditional<
+			(sizeof(RatioT) > sizeof(FloatT)),	// get the fp type with highest precision
+			RatioT,
+			FloatT
+		>::type,
+		FloatT		// use default fp type
+	>::type;
 
 	template<long long int V>
 	inline static constexpr RatioT RatioVal() { return static_cast<RatioT>(V); }
@@ -206,83 +239,324 @@ public:
 	// 	const pcl::Indices& base_selection
 	// ) {
 
-	// 	if(accum_selection.size() > base_selection.size() && !base_selection.empty()) {	// definitely not a subset
-	// 		this->incrementAccum<PointT>(cloud, accum_selection);
-	// 		this->incrementBase<PointT>(cloud, base_selection);
-	// 	} else {
-	// 		Eigen::Vector2<FloatT> _min, _max;
-	// 		minMaxXY<PointT>(cloud, base_selection, _min, _max);
+	// 	if(accum_selection.size() > base_selection.size() && !base_selection.empty()) return;	// definitely not a subset - don't add since we don't want to risk cells having a base of 0 (div by 0 on export)
 
-	// 		if(this->resizeToBounds(_min, _max)) {
-				
+	// 	Eigen::Vector2<FloatT> _min, _max;
+	// 	minMaxXY<PointT>(cloud, base_selection, _min, _max);
+
+	// 	if(this->resizeToBounds(_min, _max)) {
+	// 		if(accum_selection.size() == base_selection.size()) {
+	// 			this->incrementAllInternal(cloud, base_selection);
+	// 		} else {
+
 	// 		}
 	// 	}
 
+	// 	// accum:all, base:all --> shortcut
+	// 	// accum:some, base:all --> iternative
+	// 	// accum:some, base:some --> check for shortcut : iterative
+	// 	// accum:all, base:some --> NOT VALID
+
 	// }
 
+public:
+	template<typename ExportT = RatioT>
+	inline ExportT exportRatio(size_t idx, ExportT normalization = (ExportT)1) {
+		const Cell_T* _cell = this->grid[idx];
+		const PreciseFloatT _ratio = static_cast<PreciseFloatT>(_cell.accum) / _cell.base;
+		return std::isnan(_ratio) ?
+			static_cast<ExportT>(0) :
+			static_cast<ExportT>(normalization * _ratio)
+		;
+	}
+
+	inline RatioT operator[](size_t idx) {
+		return this->exportRatio(idx);
+	}
+
 	template<typename PointT>
-	void incrementAccum(
+	inline void incrementAccum(
 		const pcl::PointCloud<PointT>& cloud,
 		const pcl::Indices& selection
 	) {
-
-		Eigen::Vector2<FloatT> _min, _max;
-		minMaxXY<PointT>(cloud, selection, _min, _max);
-
-		if(this->resizeToBounds(_min, _max)) {
-			if(selection.empty()) {
-				for(const PointT& pt : cloud.points) {
-					const uint64_t i = this->getPointCellIdx(pt);
-					if(i >= 0 && i < this->area()) {
-						this->grid[i].accum += RatioVal<1>();
-					}
-				}
-			} else {
-				for(const pcl::index_t idx : selection) {
-					const uint64_t i = this->getPointCellIdx(cloud.points[idx]);
-					if(i >= 0 && i < this->area()) {
-						this->grid[i].accum += RatioVal<1>();
-					}
-				}
-			}
-		}
-
+		this->increment<0>(cloud, selection);
 	}
 	template<typename PointT>
-	void incrementBase(
+	inline void incrementBase(
 		const pcl::PointCloud<PointT>& cloud,
 		const pcl::Indices& selection
 	) {
-
-		Eigen::Vector2<FloatT> _min, _max;
-		minMaxXY<PointT>(cloud, selection, _min, _max);
-
-		if(this->resizeToBounds(_min, _max)) {
-			if(selection.empty()) {
-				for(const PointT& pt : cloud.points) {
-					const uint64_t i = this->getPointCellIdx(pt);
-					if(i >= 0 && i < this->area()) {
-						this->grid[i].base += RatioVal<1>();
-					}
-				}
-			} else {
-				for(const pcl::index_t idx : selection) {
-					const uint64_t i = this->getPointCellIdx(cloud.points[idx]);
-					if(i >= 0 && i < this->area()) {
-						this->grid[i].base += RatioVal<1>();
-					}
-				}
-			}
-		}
-
+		this->increment<1>(cloud, selection);
 	}
+
 
 protected:
 	/** Does not implement any safety checks! */
 	template<typename PointT>
-	inline const int64_t getPointCellIdx(const PointT& pt) {
-		return this->cellIdxOf(static_cast<FloatT>(pt.x), static_cast<FloatT>(pt.y));
+	inline Cell_T* boundingCell(const PointT& pt) {
+		const int64_t i = this->cellIdxOf(static_cast<FloatT>(pt.x), static_cast<FloatT>(pt.y));
+#ifndef GRID_IMPL_SKIP_BOUND_CHECKING
+		if (i >= 0 && i < this->area())
+#endif
+		{
+			return this->grid + i;
+		}
+		return nullptr;
 	}
+
+	template<size_t data_off, typename PointT>
+	void increment(
+		const pcl::PointCloud<PointT>& cloud,
+		const pcl::Indices& selection
+	) {
+		static_assert(data_off < (sizeof(Cell_T) / sizeof(RatioT)), "");
+
+		Eigen::Vector2<FloatT> _min, _max;
+		minMaxXY<PointT>(cloud, selection, _min, _max);
+
+		if(this->resizeToBounds(_min, _max)) {
+			this->incrementInternal<data_off, PointT>(cloud, selection);
+		}
+
+	}
+
+	/** Do not use before checking bounds and resizing the grid!!! */
+	template<size_t data_off, typename PointT>
+	void incrementInternal(
+		const pcl::PointCloud<PointT>& cloud,
+		const pcl::Indices& selection
+	) {
+		Cell_T* _cell;
+		if(selection.empty()) {
+			for(const PointT& pt : cloud.points) {
+				if(_cell = this->boundingCell(pt)) {
+					_cell->data[data_off] += RatioVal<1>();
+				}
+			}
+		} else {
+			for(const pcl::index_t idx : selection) {
+				if(_cell = this->boundingCell(cloud.points[idx])) {
+					_cell->data[data_off] += RatioVal<1>();
+				}
+			}
+		}
+	}
+
+	template<typename PointT>
+	void incrementAllInternal(
+		const pcl::PointCloud<PointT>& cloud,
+		const pcl::Indices& selection
+	) {
+		Cell_T* _cell;
+		if(selection.empty()) {
+			for(const PointT& pt : cloud.points) {
+				if((_cell = this->boundingCell(pt))) {
+					_cell->accum += RatioVal<1>();
+					_cell->base += RatioVal<1>();
+				}
+			}
+		} else {
+			for(const pcl::index_t idx : selection) {
+				if((_cell = this->boundingCell(cloud.points[idx]))) {
+					_cell->accum += RatioVal<1>();
+					_cell->base += RatioVal<1>();
+				}
+			}
+		}
+	}
+
+
+};
+
+
+
+
+
+/** constexpr conditional value (v1 = true val, v2 = false val) */
+template<bool _test, typename T, T v1, T v2>
+struct conditional_value {
+	static constexpr T result = v1;
+};
+template<typename T, T v1, T v2>
+struct conditional_value<false, T, v1, v2> {
+	static constexpr T result = v2;
+};
+
+/** RatioGrid that also stores the result buffer, and updates it inline with ratio updates */
+template<
+	typename Buff_t = uint8_t,
+	typename Ratio_t = float,
+	typename Int_t = int,
+	typename Float_t = float,
+	size_t Max_Alloc_Bytes = (1ULL << 30)>
+class QuantizedRatioGrid : public RatioGrid< Ratio_t, Int_t, Float_t, Max_Alloc_Bytes > {
+public:
+	using This_T = QuantizedRatioGrid< Buff_t, Ratio_t, Int_t, Float_t, Max_Alloc_Bytes >;
+	using Super_T = RatioGrid< Ratio_t, Int_t, Float_t, Max_Alloc_Bytes >;
+	using Buff_T = Buff_t;
+	using typename Super_T::Base_T;
+	using typename Super_T::RatioT;
+	using typename Super_T::IntT;
+	using typename Super_T::FloatT;
+	using typename Super_T::Cell_T;
+	using typename Super_T::PreciseFloatT;
+
+	static constexpr size_t
+		Buff_Cell_Size = sizeof(Buff_T);
+	static constexpr Buff_T
+		Buff_Norm_Val = conditional_value<
+			std::is_integral<Buff_T>::value, Buff_T,
+			std::numeric_limits<Buff_T>::max(),		// Use the full range for integral types
+			static_cast<Buff_T>(1)					// Buff_T is floating point or a special type. Normalize to 1 (or equivalent)
+		>::result;
+
+public:
+	QuantizedRatioGrid() = default;
+	~QuantizedRatioGrid() {
+		if(this->buffer) delete[] this->buffer;
+	}
+
+
+	/** Calls super reset() and resets buffer */
+	void reset(FloatT resolution = (FloatT)1, const Eigen::Vector2<FloatT> origin = Eigen::Vector2<FloatT>::Zero()) {
+		if(this->buffer) {
+			delete[] this->buffer;
+			this->buffer = nullptr;
+		}
+		this->Base_T::reset(resolution, origin);
+	}
+
+	/** The quantized ratio buffer */
+	inline const Buff_T* buffData() {
+		return this->buffer;
+	}
+
+
+	/** Resize all buffers and copy old data into new viewport */
+	bool resizeToBounds(const Eigen::Vector2<FloatT>& min, const Eigen::Vector2<FloatT>& max) {
+
+		Eigen::Vector2<IntT>
+			_diff,
+			prev_size = this->grid_size;
+		const bool result = this->Base_T::resizeToBounds(min, max, _diff);	// call super method since we haven't reimplemented
+
+		if(result && (_diff.x() != 0 || _diff.y() != 0)) {
+			Buff_T* _buffer = new Buff_T[this->area()];
+			memset(_buffer, 0x00, this->area() * This_T::Buff_Cell_Size);
+
+			if(this->buffer) {
+				for(IntT r = 0; r < prev_size.x(); r++) {
+					memcpy(
+						_buffer + ((static_cast<int64_t>(r) + _diff.x()) * this->grid_size.y() + _diff.y()),	// see super base impl
+						this->buffer + (static_cast<int64_t>(r) * prev_size.y()),
+						prev_size.y() * This_T::Buff_Cell_Size
+					);
+				}
+				delete[] this->buffer;
+			}
+			this->buffer = _buffer;
+		}
+		return result;
+
+	}
+
+
+	template<typename PointT>
+	void incrementRatio(
+		const pcl::PointCloud<PointT>& cloud,
+		const pcl::Indices& base_selection,
+		const pcl::Indices& accum_selection
+	) {
+
+		Eigen::Vector2<FloatT> min, max;
+		minMaxXY<PointT>(cloud, base_selection, min, max);
+
+		if(!this->resizeToBounds(min, max)) return;
+
+		if(base_selection.empty()) {
+
+			if(accum_selection.empty()) {	// CASE 1: increment both for all points
+				for(const PointT& pt : cloud) {
+					const int64_t i = this->cellIdxOf(static_cast<FloatT>(pt.x), static_cast<FloatT>(pt.y));
+#ifndef GRID_IMPL_SKIP_BOUND_CHECKING
+					if (i >= 0 && i < this->area())
+#endif
+					{
+						Cell_T* _cell = this->grid + i;
+						_cell->accum += Super_T::template RatioVal<1>();
+						_cell->base += Super_T::template RatioVal<1>();
+						this->buffer[i] = static_cast<Buff_T>( This_T::Buff_Norm_Val * (static_cast<PreciseFloatT>(_cell->accum) / _cell->base) );
+					}
+				}
+			} else {						// CASE 2: increment all base + selected accumulator indices
+				size_t
+					_pt = 0,
+					_sel = 0;
+				for(; _pt < cloud.points.size(); _pt++) {
+					const PointT& pt = cloud.points[_pt];
+					const int64_t i = this->cellIdxOf(static_cast<FloatT>(pt.x), static_cast<FloatT>(pt.y));
+#ifndef GRID_IMPL_SKIP_BOUND_CHECKING
+					if (i < 0 || i >= this->area()) {	// opposite the usual so that we only need one macro test!
+						if(_sel < accum_selection.size() && accum_selection[_sel] == _pt) _sel++;	// need to test for increment even if point is invalid
+					} else	// else since we tested the opposite!
+#endif
+					{
+						Cell_T* _cell = this->grid + i;
+						if(_sel < accum_selection.size() && accum_selection[_sel] == _pt) {
+							_cell->accum += Super_T::template RatioVal<1>();
+							_sel++;
+						}
+						_cell->base += Super_T::template RatioVal<1>();
+						this->buffer[i] = static_cast<Buff_T>( This_T::Buff_Norm_Val * (static_cast<PreciseFloatT>(_cell->accum) / _cell->base) );
+					}
+				}
+			}
+
+		} else {
+
+			if(accum_selection.empty()) {	// CASE 3: increment both for entire base selection
+				for(const pcl::index_t _pt : base_selection) {
+					const PointT& pt = cloud.points[_pt];
+					const int64_t i = this->cellIdxOf(static_cast<FloatT>(pt.x), static_cast<FloatT>(pt.y));
+#ifndef GRID_IMPL_SKIP_BOUND_CHECKING
+					if (i >= 0 && i < this->area())
+#endif
+					{
+						Cell_T* _cell = this->grid + i;
+						_cell->accum += Super_T::template RatioVal<1>();
+						_cell->base += Super_T::template RatioVal<1>();
+						this->buffer[i] = static_cast<Buff_T>( This_T::Buff_Norm_Val * (static_cast<PreciseFloatT>(_cell->accum) / _cell->base) );
+					}
+				}
+			} else {						// CASE 4: increment through base and accum selections (in case subset is invalid)
+				size_t _accum = 0;
+				for(const pcl::index_t _pt : base_selection) {
+					const PointT& pt = cloud.points[_pt];
+					const int64_t i = this->cellIdxOf(static_cast<FloatT>(pt.x), static_cast<FloatT>(pt.y));
+#ifndef GRID_IMPL_SKIP_BOUND_CHECKING
+					if (i < 0 || i >= this->area()) {	// opposite the usual so that we only need one macro test!
+						if(_accum < accum_selection.size() && accum_selection[_accum] == _pt) _accum++;	// need to test for increment even if point is invalid
+					} else	// else since we tested the opposite!
+#endif
+					{
+						Cell_T* _cell = this->grid + i;
+						if(_accum < accum_selection.size() && accum_selection[_accum] == _pt) {
+							_cell->accum += Super_T::template RatioVal<1>();
+							_accum++;
+						}
+						_cell->base += Super_T::template RatioVal<1>();
+						this->buffer[i] = static_cast<Buff_T>( This_T::Buff_Norm_Val * (static_cast<PreciseFloatT>(_cell->accum) / _cell->base) );
+					}
+				}
+			}
+
+		}
+
+	}
+
+
+protected:
+	Buff_T* buffer{ nullptr };
 
 
 };
@@ -295,7 +569,7 @@ protected:
 
 
 
-
+/** OLD */
 
 /** Statistical grid cell types */
 struct StatCellTypes {
@@ -397,7 +671,7 @@ protected:
 	template<typename PointT>
 	bool insert(const PointT& pt) {
 		const int64_t i = this->cellIdxOf(static_cast<FloatT>(pt.x), static_cast<FloatT>(pt.y));
-#ifndef SKIP_MAP_BOUND_CHECKS
+#ifndef GRID_IMPL_SKIP_BOUND_CHECKING
 		if (i >= 0 && i < this->area())
 #endif
 		{
