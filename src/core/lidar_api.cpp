@@ -693,7 +693,7 @@ void LidarImpl::lidarWorker() {
 						}
 					}
 				}	// insufficient samples or no thread available... (keep updating the current framebuff)
-#define POINT_SOURCE_MODE 2
+#define POINT_SOURCE_MODE 1
 #if POINT_SOURCE_MODE == 0	// live sensor operation
 				if(this->udp_fifo->Pop(udp_payload_bytes, scan_timestamp, scan_count)) {	// blocks until packet is received
 

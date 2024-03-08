@@ -224,13 +224,17 @@ target_link_directories(${PROJECT_NAME}_lib
 	PRIVATE ${PCL_LIBRARY_DIRS}
 )
 # message(STATUS "PCL Libraries: ${PCL_LIBRARIES}")
-target_link_libraries(${PROJECT_NAME}_lib
-	# PRIVATE debug ${PCL_LIBRARIES}
-	PRIVATE pcl_common pcl_io pcl_octree #PCL_FILTERS
-	PRIVATE general SickScanInternal_lib
-	# PRIVATE sick_scan_xd_shared_lib
-	# PRIVATE "${PROJECT_SOURCE_DIR}/lib/${SICK_SCAN_LIB_REL}"
-)
+if(${CMAKE_BUILD_TYPE} STREQUAL "Debug")
+	target_link_libraries(${PROJECT_NAME}_lib
+		PRIVATE debug ${PCL_LIBRARIES}
+		PRIVATE general SickScanInternal_lib
+	)
+else()
+	target_link_libraries(${PROJECT_NAME}_lib
+		PRIVATE pcl_common pcl_io pcl_octree #PCL_FILTERS
+		PRIVATE general SickScanInternal_lib
+	)
+endif()
 if(${sickperception_USE_WPILIB})
 	list(APPEND _PROJECT_DEFINES -DUSING_WPILIB=true)
 	target_link_libraries(${PROJECT_NAME}_lib

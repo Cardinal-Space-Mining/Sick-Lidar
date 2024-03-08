@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <limits>
 #include <type_traits>
-// #include <iostream>
+#include <iostream>
 
 #include <Eigen/Core>
 #include <pcl/point_cloud.h>
@@ -62,7 +62,7 @@ public:
 	using Cell_T = Cell_t;
 	using IntT = Int_t;
 	using FloatT = Float_t;
-	using GBase_T = GridBase<Cell_T, IntT, FloatT>;
+	using This_T = GridBase< Cell_T, IntT, FloatT, Max_Alloc_Bytes >;
 
 	static constexpr size_t
 		Cell_Size = sizeof(Cell_T),
@@ -101,36 +101,16 @@ public:
 		return this->grid;
 	}
 
-// 	inline const Cell_T& cellAt(size_t idx) {
-// #ifndef GRID_IMPL_SKIP_BOUND_CHECKING
-// 		if(idx < this->area())
-// #endif
-// 		{
-// 			return this->grid[idx];
-// 		}
-// 		return *reinterpret_cast<Cell_T*>(nullptr);
-// 	}
-
 	inline const Eigen::Vector2<IntT> boundingLoc(const FloatT x, const FloatT y) const {
-		return GBase_T::gridAlign<IntT, FloatT>(x, y, this->grid_origin, this->cell_res);
+		return StaticGridBase::gridAlign<IntT, FloatT>(x, y, this->grid_origin, this->cell_res);
 	}
 	inline const int64_t cellIdxOf(const FloatT x, const FloatT y) const {
-		return GBase_T::gridIdx<IntT>(this->boundingLoc(x, y), this->grid_size);
+		return StaticGridBase::gridIdx<IntT>(this->boundingLoc(x, y), this->grid_size);
 	}
 
 
 	/** Returns false if an invalid realloc was skipped */
 	bool resizeToBounds(const Eigen::Vector2<FloatT>& min, const Eigen::Vector2<FloatT>& max) {
-		Eigen::Vector2<IntT> _diff;
-		return this->resizeToBounds(min, max, _diff);
-	}
-
-protected:
-	/** For internal and extension use only. Exports the difference between the last grid origin and the new grid origin. */
-	bool resizeToBounds(
-		const Eigen::Vector2<FloatT>& min, const Eigen::Vector2<FloatT>& max,
-		Eigen::Vector2<IntT>& diff_out
-	) {
 
 		static const Eigen::Vector2<IntT>
 			_zero = Eigen::Vector2<IntT>::Zero(),
@@ -146,27 +126,25 @@ protected:
 				_size = _high - _low;				// new map size
 
 			const int64_t _area = static_cast<int64_t>(_size.x()) * _size.y();
-			if (_area > GBase_T::Max_Alloc_NCells || _area < 0ULL) return false;		// less than a gigabyte of allocated buffer is ideal
+			if (_area > This_T::Max_Alloc_NCells || _area < 0LL) return false;		// less than a gigabyte of allocated buffer is ideal
 
 			Cell_T* _grid = new Cell_T[_area];
-			memset(_grid, 0x00, _area * GBase_T::Cell_Size);	// :O don't forget this otherwise the map will start with all garbage data
+			memset(_grid, 0x00, _area * This_T::Cell_Size);	// :O don't forget this otherwise the map will start with all garbage data
 
-			diff_out = _zero - _low;	// by how many grid cells did the origin shift
+			const Eigen::Vector2<IntT> _diff = _zero - _low;	// by how many grid cells did the origin shift
 			if (this->grid) {
 				for (IntT r = 0; r < this->grid_size.x(); r++) {		// for each row in existing...
 					memcpy(									// remap to new buffer
-						_grid + ((static_cast<int64_t>(r) + diff_out.x()) * _size.y() + diff_out.y()),	// (row + offset rows) * new row size + offset cols
+						_grid + ((static_cast<int64_t>(r) + _diff.x()) * _size.y() + _diff.y()),	// (row + offset rows) * new row size + offset cols
 						this->grid + (static_cast<int64_t>(r) * this->grid_size.y()),
-						this->grid_size.y() * GBase_T::Cell_Size
+						this->grid_size.y() * This_T::Cell_Size
 					);
 				}
 				delete[] this->grid;
 			}
-			this->grid = _grid;
+			this->grid_origin -= (_diff.template cast<FloatT>() * this->cell_res);
 			this->grid_size = _size;
-			this->grid_origin -= (diff_out.template cast<FloatT>() * this->cell_res);
-		} else {
-			diff_out = _zero;
+			this->grid = _grid;
 		}
 		return true;
 
@@ -206,10 +184,10 @@ template<
 	typename Int_t = int,
 	typename Float_t = float,
 	size_t Max_Alloc_Bytes = (1ULL << 30)>
-class RatioGrid : public GridBase< RatioGridCell<Ratio_t> > {
+class RatioGrid : public GridBase< RatioGridCell<Ratio_t>, Int_t, Float_t, Max_Alloc_Bytes > {
 public:
 	using This_T = RatioGrid< Ratio_t, Int_t, Float_t >;
-	using Base_T = GridBase< RatioGridCell<Ratio_t> >;
+	using Base_T = GridBase< RatioGridCell<Ratio_t>, Int_t, Float_t, Max_Alloc_Bytes >;
 	using RatioT = Ratio_t;
 	using typename Base_T::IntT;
 	using typename Base_T::FloatT;
@@ -402,7 +380,8 @@ public:
 	using typename Super_T::PreciseFloatT;
 
 	static constexpr size_t
-		Buff_Cell_Size = sizeof(Buff_T);
+		Buff_Cell_Size = sizeof(Buff_T),
+		Max_Alloc_NBlocks = Max_Alloc_Bytes / Buff_Cell_Size;
 	static constexpr Buff_T
 		Buff_Norm_Val = conditional_value<
 			std::is_integral<Buff_T>::value, Buff_T,
@@ -435,28 +414,50 @@ public:
 	/** Resize all buffers and copy old data into new viewport */
 	bool resizeToBounds(const Eigen::Vector2<FloatT>& min, const Eigen::Vector2<FloatT>& max) {
 
-		Eigen::Vector2<IntT>
-			_diff,
-			prev_size = this->grid_size;
-		const bool result = this->Base_T::resizeToBounds(min, max, _diff);	// call super method since we haven't reimplemented
+		static const Eigen::Vector2<IntT>
+			_zero = Eigen::Vector2<IntT>::Zero(),
+			_one = Eigen::Vector2<IntT>::Ones();
+		const Eigen::Vector2<IntT>
+			_min = this->boundingLoc(min.x(), min.y()),	// grid cell locations containing min and max, aligned with current offsets
+			_max = this->boundingLoc(max.x(), max.y());
 
-		if(result && (_diff.x() != 0 || _diff.y() != 0)) {
-			Buff_T* _buffer = new Buff_T[this->area()];
-			memset(_buffer, 0x00, this->area() * This_T::Buff_Cell_Size);
+		if (_min.cwiseLess(_zero).any() || _max.cwiseGreater(this->grid_size).any()) {
+			const Eigen::Vector2<IntT>
+				_low = _min.cwiseMin(_zero),		// new high and low bounds for the map
+				_high = _max.cwiseMax(this->grid_size) + _one,	// need to add an additional row + col since indexing happens in the corner, thus by default the difference between corners will not cover the entire size
+				_size = _high - _low;				// new map size
 
-			if(this->buffer) {
-				for(IntT r = 0; r < prev_size.x(); r++) {
+			const int64_t _area = static_cast<int64_t>(_size.x()) * _size.y();
+			if (_area < 0LL || _area > Base_T::Max_Alloc_NCells || _area > This_T::Max_Alloc_NBlocks) return false;		// less than a gigabyte of allocated buffer is ideal
+
+			Cell_T* _grid = new Cell_T[_area];
+			Buff_T* _buffer = new Buff_T[_area];
+			memset(_grid, 0x00, _area * Base_T::Cell_Size);	// :O don't forget this otherwise the map will start with all garbage data
+			memset(_buffer, 0x00, _area * This_T::Buff_Cell_Size);
+
+			const Eigen::Vector2<IntT> _diff = _zero - _low;	// by how many grid cells did the origin shift
+			if(this->grid || this->buffer) {	// should be synchronized :?
+				for (IntT r = 0; r < this->grid_size.x(); r++) {		// for each row in existing...
+					memcpy(									// remap to new buffer
+						_grid + ((static_cast<int64_t>(r) + _diff.x()) * _size.y() + _diff.y()),	// (row + offset rows) * new row size + offset cols
+						this->grid + (static_cast<int64_t>(r) * this->grid_size.y()),
+						this->grid_size.y() * Base_T::Cell_Size
+					);
 					memcpy(
-						_buffer + ((static_cast<int64_t>(r) + _diff.x()) * this->grid_size.y() + _diff.y()),	// see super base impl
-						this->buffer + (static_cast<int64_t>(r) * prev_size.y()),
-						prev_size.y() * This_T::Buff_Cell_Size
+						_buffer + ((static_cast<int64_t>(r) + _diff.x()) * _size.y() + _diff.y()),
+						this->buffer + (static_cast<int64_t>(r) * this->grid_size.y()),
+						this->grid_size.y() * This_T::Buff_Cell_Size
 					);
 				}
+				delete[] this->grid;
 				delete[] this->buffer;
 			}
+			this->grid_origin -= (_diff.template cast<FloatT>() * this->cell_res);
+			this->grid_size = _size;
+			this->grid = _grid;
 			this->buffer = _buffer;
 		}
-		return result;
+		return true;
 
 	}
 
@@ -471,7 +472,7 @@ public:
 		Eigen::Vector2<FloatT> min, max;
 		minMaxXY<PointT>(cloud, base_selection, min, max);
 
-		if(!this->resizeToBounds(min, max)) return;
+		if(!this->This_T::resizeToBounds(min, max)) return;
 
 		if(base_selection.empty()) {
 
