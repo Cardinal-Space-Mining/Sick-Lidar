@@ -484,8 +484,8 @@ void progressive_morph_filter(
 
 		// Find indices of the points whose difference between the source and
 		// filtered point clouds is less than the current height threshold.
-		size_t _end = ground.size() - 1;
-		for(size_t p_idx = 0; p_idx <= _end; p_idx++) {
+		int64_t _end = static_cast<int64_t>(ground.size()) - 1;
+		for(int64_t p_idx = 0; p_idx <= _end; p_idx++) {
 
 			const float
 				diff_p = cloud_[ground[p_idx]].z - zp_final[ground[p_idx]],

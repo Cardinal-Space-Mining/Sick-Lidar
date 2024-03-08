@@ -72,7 +72,7 @@ namespace ldrp {
 
 		uint64_t enabled_segments_bits{ 0b111111111111 };
 		uint32_t buffered_scan_frames{ 1 };
-		int32_t max_filter_threads{ -1 };		// 0 = use all available, <0 = however many less than std::thread::hardware_concurrency()
+		int32_t max_filter_threads{ -1 };		// 0 = use all available, <0 = however many less than std::thread::hardware_concurrency() - 1
 		uint64_t points_logging_mode{ POINT_LOGGING_NT | POINT_LOGGING_INCLUDE_ALL };
 		const char* points_tar_fname{ "lidar_points.tar" };
 		double pose_history_period_s{ 0.25 };

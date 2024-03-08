@@ -1,7 +1,7 @@
 #include "lidar_api.h"
 
 #include "filtering.hpp"
-#include "accumulator_grid2.hpp"
+// #include "accumulator_grid2.hpp"
 #include "mem_utils.hpp"
 #include "pcd_streaming.h"
 
@@ -114,7 +114,7 @@ static void swapSegmentsNoIMU(sick_scansegment_xd::ScanSegmentParserOutput& a, s
 static inline const uint32_t convertNumThreads(const int32_t input_num, const int32_t reserved = 0) {
 	const int32_t _max = (int32_t)std::thread::hardware_concurrency() - reserved;
 	return input_num < 1 ?
-		(uint32_t)std::max(_max - input_num, 1) :
+		(uint32_t)std::max(_max + input_num, 1) :
 		(uint32_t)std::max(_max, input_num)
 	;
 }
@@ -419,8 +419,8 @@ namespace ldrp {
 				units::time::second_t{ _config.pose_history_range },
 				&lerpClosest<const Eigen::Isometry3f&>
 			};
-		QuantizedRatioGrid<ObstacleGrid::Weight_T, float>
-			accumulator{};
+		// QuantizedRatioGrid<ObstacleGrid::Weight_T, float>
+		// 	accumulator{};
 		PCDTarWriter
 			pcd_writer{};
 
@@ -573,21 +573,29 @@ status_t LidarImpl::gridExportInternal(ObstacleGrid& grid, ObstacleGrid::Weight_
 	} else
 	if(!lock.owns_lock()) lock.lock();
 
-	const size_t _area = static_cast<size_t>(this->accumulator.area());
-	const Eigen::Vector2f& _origin = this->accumulator.origin();
-	const Eigen::Vector2i& _grid_size = this->accumulator.size();
+	// const size_t _area = static_cast<size_t>(this->accumulator.area());
+	// const Eigen::Vector2f& _origin = this->accumulator.origin();
+	// const Eigen::Vector2i& _grid_size = this->accumulator.size();
 
-	grid.cell_resolution_m = this->accumulator.cellRes();
-	grid.origin_x_m = _origin.x();
-	grid.origin_y_m = _origin.y();
-	grid.cells_x = _grid_size.x();
-	grid.cells_y = _grid_size.y();
-	grid.grid = grid_resize(_area);
+	// grid.cell_resolution_m = this->accumulator.cellRes();
+	// grid.origin_x_m = _origin.x();
+	// grid.origin_y_m = _origin.y();
+	// grid.cells_x = _grid_size.x();
+	// grid.cells_y = _grid_size.y();
+	// grid.grid = grid_resize(_area);
 
-	memcpy(grid.grid, this->accumulator.buffData(), _area * sizeof(ObstacleGrid::Weight_T));
+	// memcpy(grid.grid, this->accumulator.buffData(), _area * sizeof(ObstacleGrid::Weight_T));
+
+	grid.cell_resolution_m = 0.f;
+	grid.origin_x_m = 0.f;
+	grid.origin_y_m = 0.f;
+	grid.cells_x = 0;
+	grid.cells_y = 0;
+	grid.grid = nullptr;
 
 	this->_state.obstacle_updates = 0;
-	return STATUS_SUCCESS;
+	// return STATUS_SUCCESS;
+	return STATUS_FAIL;
 
 }
 
@@ -646,7 +654,7 @@ void LidarImpl::lidarWorker() {
 			this->pcd_writer.setFile(this->_config.points_log_fname);
 		}
 
-		this->accumulator.reset(this->_config.fpipeline.map_resolution_cm * 1e-2f);
+		// this->accumulator.reset(this->_config.fpipeline.map_resolution_cm * 1e-2f);
 
 		// main loop!
 		LDRP_LOG( LOG_STANDARD, "LDRP Worker [Init]: Succesfully initialized all resources. Begining aquisition and filtering..." )
@@ -693,7 +701,7 @@ void LidarImpl::lidarWorker() {
 						}
 					}
 				}	// insufficient samples or no thread available... (keep updating the current framebuff)
-#define POINT_SOURCE_MODE 1
+#define POINT_SOURCE_MODE 2
 #if POINT_SOURCE_MODE == 0	// live sensor operation
 				if(this->udp_fifo->Pop(udp_payload_bytes, scan_timestamp, scan_count)) {	// blocks until packet is received
 
@@ -1064,7 +1072,6 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 			);
 
 			// export filter results
-			// pc_normalize_selection(voxelized_points.points, combined_obstacles);
 			write_interlaced_selection_bytes<4, 3>(
 				std::span<uint32_t>{
 					reinterpret_cast<uint32_t*>( voxelized_points.points.data() ),
@@ -1088,17 +1095,17 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 		// 3. update accumulator
 		{
 			this->_state.accumulation_mutex.lock();
-			this->accumulator.incrementRatio(	// insert PMF obstacles
-				voxelized_points,
-				pre_pmf_range_filtered,		// base
-				pmf_filtered_obstacles		// subset
-			);
-			this->accumulator.incrementRatio(	// insert z-thresh obstacles
-				voxelized_points,
-				z_mid_filtered_obstacles,	// base
-				DEFAULT_NO_SELECTION		// use all of base
-			);
-			this->_state.obstacle_updates++;
+			// this->accumulator.incrementRatio(	// insert PMF obstacles
+			// 	voxelized_points,
+			// 	pre_pmf_range_filtered,		// base
+			// 	pmf_filtered_obstacles		// subset
+			// );
+			// this->accumulator.incrementRatio(	// insert z-thresh obstacles
+			// 	voxelized_points,
+			// 	z_mid_filtered_obstacles,	// base
+			// 	DEFAULT_NO_SELECTION		// use all of base
+			// );
+			// this->_state.obstacle_updates++;
 			this->_state.obstacles_updated.notify_all();
 			// LDRP_LOG( LOG_DEBUG, "LDRP Filter Instance {} [Filter Loop]: Successfully added points to accumulator. Map size: {}x{}, origin: ({}, {}), max weight: {}",
 			// 	f_inst->index,
