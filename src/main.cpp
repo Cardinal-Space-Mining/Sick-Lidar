@@ -144,11 +144,11 @@ int main(int argc, char** argv) {
 	ldrp::ObstacleGrid grid{};
 	for(;_program_running.load();) {
 
-		std::vector<nt::TimestampedFloatArray> updates = nt_localization.ReadQueue();
-		std::cout << "[Main Thread]: Localization recieved " << updates.size() << " pose updates" << std::endl;
-		for(const nt::TimestampedFloatArray& u : updates) {
-			ldrp::updateWorldPose(u.value.data(), u.value.data() + 3, u.time);
-		}
+		// std::vector<nt::TimestampedFloatArray> updates = nt_localization.ReadQueue();
+		// std::cout << "[Main Thread]: Localization recieved " << updates.size() << " pose updates" << std::endl;
+		// for(const nt::TimestampedFloatArray& u : updates) {
+		// 	ldrp::updateWorldPose(u.value.data(), u.value.data() + 3, u.time);
+		// }
 
 		// s = ldrp::updateWorldPose(pose, pose + 3);
 		// pose[0] += 0.1;

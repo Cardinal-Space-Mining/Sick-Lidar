@@ -934,7 +934,7 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 				this->_state.localization_mutex.unlock_shared();
 
 				if(this->_config.skip_invalid_transform_ts && !ts_transform.has_value()) continue;
-				const Eigen::Isometry3f& transform = ts_transform.has_value() ? *ts_transform : DEFAULT_NO_POSE;	// need to convert to transform matrix
+				const Eigen::Isometry3f& transform = ts_transform.has_value() ? *ts_transform : DEFAULT_NO_POSE;
 
 				avg_origin += transform.translation();
 				origin_samples++;
