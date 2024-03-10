@@ -12,9 +12,8 @@
 #include "filtering.hpp"
 
 
-/** Static base for all grids */
-class StaticGridBase {
-public:
+/** Generic grid helpers */
+namespace GridUtils {
 
 	/** Align a point to a box grid of the given resolution and offset origin. Result may be negative if lower than current offset. */
 	template<typename IntT = int, typename FloatT = float>
@@ -46,6 +45,7 @@ public:
 		};
 	}
 
+
 };
 
 /** GridBase contains all generic functinality for a dynamic grid cells (template type) */
@@ -54,7 +54,7 @@ template<
 	typename Int_t = int,
 	typename Float_t = float,
 	size_t Max_Alloc_Bytes = (1ULL << 30)>
-class GridBase : public StaticGridBase {
+class GridBase {
 	static_assert(std::is_integral_v<Int_t>, "");
 	static_assert(std::is_floating_point_v<Float_t>, "");
 	static_assert(Max_Alloc_Bytes >= sizeof(Cell_t), "");
@@ -64,9 +64,17 @@ public:
 	using FloatT = Float_t;
 	using This_T = GridBase< Cell_T, IntT, FloatT, Max_Alloc_Bytes >;
 
+	using Vec2i = Eigen::Vector2<IntT>;
+	using Vec2f = Eigen::Vector2<FloatT>;
+
 	static constexpr size_t
 		Cell_Size = sizeof(Cell_T),
 		Max_Alloc_NCells = Max_Alloc_Bytes / Cell_Size;
+
+	template<IntT v>
+	constexpr inline static const IntT literalI() { return v; }
+	template<FloatT v>
+	constexpr inline static const FloatT literalF() { return v; }
 
 public:
 	GridBase() = default;
@@ -75,23 +83,23 @@ public:
 	}
 
 
-	void reset(FloatT resolution = (FloatT)1, const Eigen::Vector2<FloatT> origin = Eigen::Vector2<FloatT>::Zero()) {
+	void reset(FloatT resolution = literalF<1>(), const Vec2f origin = Vec2f::Zero()) {
 		if (this->grid) {
 			delete[] this->grid;
 			this->grid = nullptr;
 		}
-		this->grid_size = Eigen::Vector2<IntT>::Zero();
-		this->cell_res = resolution <= (FloatT)0 ? (FloatT)1 : resolution;
+		this->grid_size = Vec2i::Zero();
+		this->cell_res = resolution <= literalF<0>() ? literalF<1>() : resolution;
 		this->grid_origin = origin;
 	}
 
-	inline const Eigen::Vector2<IntT>& size() const {
+	inline const Vec2i& size() const {
 		return this->grid_size;
 	}
 	inline const int64_t area() const {
 		return static_cast<int64_t>(this->grid_size.x()) * this->grid_size.y();
 	}
-	inline const Eigen::Vector2<FloatT>& origin() const {
+	inline const Vec2f& origin() const {
 		return this->grid_origin;
 	}
 	inline const FloatT cellRes() const {
@@ -101,26 +109,26 @@ public:
 		return this->grid;
 	}
 
-	inline const Eigen::Vector2<IntT> boundingLoc(const FloatT x, const FloatT y) const {
-		return StaticGridBase::gridAlign<IntT, FloatT>(x, y, this->grid_origin, this->cell_res);
+	inline const Vec2i boundingLoc(const FloatT x, const FloatT y) const {
+		return GridUtils::gridAlign<IntT, FloatT>(x, y, this->grid_origin, this->cell_res);
 	}
 	inline const int64_t cellIdxOf(const FloatT x, const FloatT y) const {
-		return StaticGridBase::gridIdx<IntT>(this->boundingLoc(x, y), this->grid_size);
+		return GridUtils::gridIdx<IntT>(this->boundingLoc(x, y), this->grid_size);
 	}
 
 
 	/** Returns false if an invalid realloc was skipped */
-	bool resizeToBounds(const Eigen::Vector2<FloatT>& min, const Eigen::Vector2<FloatT>& max) {
+	bool resizeToBounds(const Vec2f& min, const Vec2f& max) {
 
-		static const Eigen::Vector2<IntT>
-			_zero = Eigen::Vector2<IntT>::Zero(),
-			_one = Eigen::Vector2<IntT>::Ones();
-		const Eigen::Vector2<IntT>
+		static const Vec2i
+			_zero = Vec2i::Zero(),
+			_one = Vec2i::Ones();
+		const Vec2i
 			_min = this->boundingLoc(min.x(), min.y()),	// grid cell locations containing min and max, aligned with current offsets
 			_max = this->boundingLoc(max.x(), max.y());
 
 		if (_min.cwiseLess(_zero).any() || _max.cwiseGreater(this->grid_size).any()) {
-			const Eigen::Vector2<IntT>
+			const Vec2i
 				_low = _min.cwiseMin(_zero),		// new high and low bounds for the map
 				_high = _max.cwiseMax(this->grid_size) + _one,	// need to add an additional row + col since indexing happens in the corner, thus by default the difference between corners will not cover the entire size
 				_size = _high - _low;				// new map size
@@ -131,7 +139,7 @@ public:
 			Cell_T* _grid = new Cell_T[_area];
 			memset(_grid, 0x00, _area * This_T::Cell_Size);	// :O don't forget this otherwise the map will start with all garbage data
 
-			const Eigen::Vector2<IntT> _diff = _zero - _low;	// by how many grid cells did the origin shift
+			const Vec2i _diff = _zero - _low;	// by how many grid cells did the origin shift
 			if (this->grid) {
 				for (IntT r = 0; r < this->grid_size.x(); r++) {		// for each row in existing...
 					memcpy(									// remap to new buffer
@@ -152,8 +160,8 @@ public:
 
 
 protected:
-	Eigen::Vector2<FloatT> grid_origin{};
-	Eigen::Vector2<IntT> grid_size{};
+	Vec2f grid_origin{};
+	Vec2i grid_size{};
 	FloatT cell_res{ static_cast<FloatT>(1) };
 	Cell_T* grid{ nullptr };
 
@@ -192,6 +200,8 @@ public:
 	using typename Base_T::IntT;
 	using typename Base_T::FloatT;
 	using typename Base_T::Cell_T;
+	using typename Base_T::Vec2i;
+	using typename Base_T::Vec2f;
 	using PreciseFloatT = typename std::conditional<
 		std::is_floating_point<RatioT>::value,	// check if the ratio internal type is fp
 		typename std::conditional<
@@ -202,8 +212,8 @@ public:
 		FloatT		// use default fp type
 	>::type;
 
-	template<long long int V>
-	inline static constexpr RatioT RatioVal() { return static_cast<RatioT>(V); }
+	template<RatioT v>
+	constexpr inline static const RatioT literalR() { return v; }
 
 public:
 	RatioGrid() = default;
@@ -219,7 +229,7 @@ public:
 
 	// 	if(accum_selection.size() > base_selection.size() && !base_selection.empty()) return;	// definitely not a subset - don't add since we don't want to risk cells having a base of 0 (div by 0 on export)
 
-	// 	Eigen::Vector2<FloatT> _min, _max;
+	// 	Vec2f _min, _max;
 	// 	minMaxXY<PointT>(cloud, base_selection, _min, _max);
 
 	// 	if(this->resizeToBounds(_min, _max)) {
@@ -240,7 +250,7 @@ public:
 public:
 	template<typename ExportT = RatioT>
 	inline ExportT exportRatio(size_t idx, ExportT normalization = (ExportT)1) {
-		const Cell_T* _cell = this->grid[idx];
+		const Cell_T& _cell = this->grid[idx];
 		const PreciseFloatT _ratio = static_cast<PreciseFloatT>(_cell.accum) / _cell.base;
 		return std::isnan(_ratio) ?
 			static_cast<ExportT>(0) :
@@ -289,7 +299,7 @@ protected:
 	) {
 		static_assert(data_off < (sizeof(Cell_T) / sizeof(RatioT)), "");
 
-		Eigen::Vector2<FloatT> _min, _max;
+		Vec2f _min, _max;
 		minMaxXY<PointT>(cloud, selection, _min, _max);
 
 		if(this->resizeToBounds(_min, _max)) {
@@ -308,13 +318,13 @@ protected:
 		if(selection.empty()) {
 			for(const PointT& pt : cloud.points) {
 				if(_cell = this->boundingCell(pt)) {
-					_cell->data[data_off] += RatioVal<1>();
+					_cell->data[data_off] += literalR<1>();
 				}
 			}
 		} else {
 			for(const pcl::index_t idx : selection) {
 				if(_cell = this->boundingCell(cloud.points[idx])) {
-					_cell->data[data_off] += RatioVal<1>();
+					_cell->data[data_off] += literalR<1>();
 				}
 			}
 		}
@@ -329,15 +339,15 @@ protected:
 		if(selection.empty()) {
 			for(const PointT& pt : cloud.points) {
 				if((_cell = this->boundingCell(pt))) {
-					_cell->accum += RatioVal<1>();
-					_cell->base += RatioVal<1>();
+					_cell->accum += literalR<1>();
+					_cell->base += literalR<1>();
 				}
 			}
 		} else {
 			for(const pcl::index_t idx : selection) {
 				if((_cell = this->boundingCell(cloud.points[idx]))) {
-					_cell->accum += RatioVal<1>();
-					_cell->base += RatioVal<1>();
+					_cell->accum += literalR<1>();
+					_cell->base += literalR<1>();
 				}
 			}
 		}
@@ -351,13 +361,13 @@ protected:
 
 
 /** constexpr conditional value (v1 = true val, v2 = false val) */
-template<bool _test, typename T, T v1, T v2>
-struct conditional_value {
-	static constexpr T result = v1;
+template<bool _test, typename T, T tV, T fV>
+struct conditional_literal {
+	static constexpr T value = tV;
 };
-template<typename T, T v1, T v2>
-struct conditional_value<false, T, v1, v2> {
-	static constexpr T result = v2;
+template<typename T, T tV, T fV>
+struct conditional_literal<false, T, tV, fV> {
+	static constexpr T value = fV;
 };
 
 /** RatioGrid that also stores the result buffer, and updates it inline with ratio updates */
@@ -377,17 +387,19 @@ public:
 	using typename Super_T::IntT;
 	using typename Super_T::FloatT;
 	using typename Super_T::Cell_T;
+	using typename Super_T::Vec2i;
+	using typename Super_T::Vec2f;
 	using typename Super_T::PreciseFloatT;
 
 	static constexpr size_t
 		Buff_Cell_Size = sizeof(Buff_T),
 		Max_Alloc_NBlocks = Max_Alloc_Bytes / Buff_Cell_Size;
 	static constexpr Buff_T
-		Buff_Norm_Val = conditional_value<
+		Buff_Norm_Val = conditional_literal<
 			std::is_integral<Buff_T>::value, Buff_T,
 			std::numeric_limits<Buff_T>::max(),		// Use the full range for integral types
 			static_cast<Buff_T>(1)					// Buff_T is floating point or a special type. Normalize to 1 (or equivalent)
-		>::result;
+		>::value;
 
 public:
 	QuantizedRatioGrid() = default;
@@ -397,7 +409,7 @@ public:
 
 
 	/** Calls super reset() and resets buffer */
-	void reset(FloatT resolution = (FloatT)1, const Eigen::Vector2<FloatT> origin = Eigen::Vector2<FloatT>::Zero()) {
+	void reset(FloatT resolution = Base_T::template literalF<1>(), const Vec2f origin = Vec2f::Zero()) {
 		if(this->buffer) {
 			delete[] this->buffer;
 			this->buffer = nullptr;
@@ -412,17 +424,17 @@ public:
 
 
 	/** Resize all buffers and copy old data into new viewport */
-	bool resizeToBounds(const Eigen::Vector2<FloatT>& min, const Eigen::Vector2<FloatT>& max) {
+	bool resizeToBounds(const Vec2f& min, const Vec2f& max) {
 
-		static const Eigen::Vector2<IntT>
-			_zero = Eigen::Vector2<IntT>::Zero(),
-			_one = Eigen::Vector2<IntT>::Ones();
-		const Eigen::Vector2<IntT>
+		static const Vec2i
+			_zero = Vec2i::Zero(),
+			_one = Vec2i::Ones();
+		const Vec2i
 			_min = this->boundingLoc(min.x(), min.y()),	// grid cell locations containing min and max, aligned with current offsets
 			_max = this->boundingLoc(max.x(), max.y());
 
 		if (_min.cwiseLess(_zero).any() || _max.cwiseGreater(this->grid_size).any()) {
-			const Eigen::Vector2<IntT>
+			const Vec2i
 				_low = _min.cwiseMin(_zero),		// new high and low bounds for the map
 				_high = _max.cwiseMax(this->grid_size) + _one,	// need to add an additional row + col since indexing happens in the corner, thus by default the difference between corners will not cover the entire size
 				_size = _high - _low;				// new map size
@@ -432,30 +444,38 @@ public:
 
 			Cell_T* _grid = new Cell_T[_area];
 			Buff_T* _buffer = new Buff_T[_area];
+			std::cout << "[QRG]: Allocated new buffers of area " << _area << " -- diff: " << (_area - this->area()) << std::endl;
 			memset(_grid, 0x00, _area * Base_T::Cell_Size);	// :O don't forget this otherwise the map will start with all garbage data
 			memset(_buffer, 0x00, _area * This_T::Buff_Cell_Size);
 
-			const Eigen::Vector2<IntT> _diff = _zero - _low;	// by how many grid cells did the origin shift
-			if(this->grid || this->buffer) {	// should be synchronized :?
+			const Vec2i _diff = _zero - _low;	// by how many grid cells did the origin shift
+			if(this->grid) {
 				for (IntT r = 0; r < this->grid_size.x(); r++) {		// for each row in existing...
 					memcpy(									// remap to new buffer
 						_grid + ((static_cast<int64_t>(r) + _diff.x()) * _size.y() + _diff.y()),	// (row + offset rows) * new row size + offset cols
 						this->grid + (static_cast<int64_t>(r) * this->grid_size.y()),
 						this->grid_size.y() * Base_T::Cell_Size
 					);
+				}
+				delete[] this->grid;
+				std::cout << "[QRG]: Deleted old grid data with area " << this->area() << std::endl;
+			}
+			if(this->buffer) {
+				for (IntT r = 0; r < this->grid_size.x(); r++) {		// for each row in existing...
 					memcpy(
 						_buffer + ((static_cast<int64_t>(r) + _diff.x()) * _size.y() + _diff.y()),
 						this->buffer + (static_cast<int64_t>(r) * this->grid_size.y()),
 						this->grid_size.y() * This_T::Buff_Cell_Size
 					);
 				}
-				delete[] this->grid;
 				delete[] this->buffer;
+				std::cout << "[QRG]: Deleted old buffer data with area " << this->area() << std::endl;
 			}
 			this->grid_origin -= (_diff.template cast<FloatT>() * this->cell_res);
 			this->grid_size = _size;
 			this->grid = _grid;
 			this->buffer = _buffer;
+			std::cout << "[QRG]: Assigned new buffers with area " << this->area() << std::endl;
 		}
 		return true;
 
@@ -469,7 +489,7 @@ public:
 		const pcl::Indices& accum_selection
 	) {
 
-		Eigen::Vector2<FloatT> min, max;
+		Vec2f min, max;
 		minMaxXY<PointT>(cloud, base_selection, min, max);
 
 		if(!this->This_T::resizeToBounds(min, max)) return;
@@ -484,8 +504,8 @@ public:
 #endif
 					{
 						Cell_T* _cell = this->grid + i;
-						_cell->accum += Super_T::template RatioVal<1>();
-						_cell->base += Super_T::template RatioVal<1>();
+						_cell->accum += Super_T::template literalR<1>();
+						_cell->base += Super_T::template literalR<1>();
 						this->buffer[i] = static_cast<Buff_T>( This_T::Buff_Norm_Val * (static_cast<PreciseFloatT>(_cell->accum) / _cell->base) );
 					}
 				}
@@ -504,10 +524,10 @@ public:
 					{
 						Cell_T* _cell = this->grid + i;
 						if(_sel < accum_selection.size() && accum_selection[_sel] == _pt) {
-							_cell->accum += Super_T::template RatioVal<1>();
+							_cell->accum += Super_T::template literalR<1>();
 							_sel++;
 						}
-						_cell->base += Super_T::template RatioVal<1>();
+						_cell->base += Super_T::template literalR<1>();
 						this->buffer[i] = static_cast<Buff_T>( This_T::Buff_Norm_Val * (static_cast<PreciseFloatT>(_cell->accum) / _cell->base) );
 					}
 				}
@@ -524,8 +544,8 @@ public:
 #endif
 					{
 						Cell_T* _cell = this->grid + i;
-						_cell->accum += Super_T::template RatioVal<1>();
-						_cell->base += Super_T::template RatioVal<1>();
+						_cell->accum += Super_T::template literalR<1>();
+						_cell->base += Super_T::template literalR<1>();
 						this->buffer[i] = static_cast<Buff_T>( This_T::Buff_Norm_Val * (static_cast<PreciseFloatT>(_cell->accum) / _cell->base) );
 					}
 				}
@@ -542,10 +562,10 @@ public:
 					{
 						Cell_T* _cell = this->grid + i;
 						if(_accum < accum_selection.size() && accum_selection[_accum] == _pt) {
-							_cell->accum += Super_T::template RatioVal<1>();
+							_cell->accum += Super_T::template literalR<1>();
 							_accum++;
 						}
-						_cell->base += Super_T::template RatioVal<1>();
+						_cell->base += Super_T::template literalR<1>();
 						this->buffer[i] = static_cast<Buff_T>( This_T::Buff_Norm_Val * (static_cast<PreciseFloatT>(_cell->accum) / _cell->base) );
 					}
 				}
@@ -635,6 +655,8 @@ public:
 	using typename Base_T::IntT;
 	using typename Base_T::FloatT;
 	using typename Base_T::Cell_T;
+	using typename Base_T::Vec2i;
+	using typename Base_T::Vec2f;
 
 	inline static constexpr bool
 		Cell_IsDense = Cell_T::IsDense;
@@ -650,7 +672,7 @@ public:
 	template<typename PointT>
 	void insertPoints(const pcl::PointCloud<PointT>& cloud, const pcl::Indices& selection) {
 
-		Eigen::Vector2<FloatT> _min, _max;
+		Vec2f _min, _max;
 		minMaxXY<PointT>(cloud, selection, _min, _max);
 
 		if (this->resizeToBounds(_min, _max)) {

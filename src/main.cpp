@@ -122,10 +122,11 @@ int main(int argc, char** argv) {
 	ldrp::LidarConfig _config{};
 	_config.points_logging_mode = (ldrp::POINT_LOGGING_INCLUDE_FILTERED | ldrp::POINT_LOGGING_NT);
 	_config.nt_use_client = true;
-	// _config.lidar_offset_xyz[2] = 1.f;
-	// _config.lidar_offset_quat[0] = 1.f;
-	// _config.lidar_offset_quat[3] = 0.f;
-	// _config.datalog_fname = "test_configs_import.wpilog";
+	// _config.lidar_offset_xyz[2] = 7.5f;
+	_config.min_scan_theta_degrees = -180.f;
+	_config.max_scan_theta_degrees = 180.f;
+	// _config.nt_client_team = 1111;
+	_config.pose_history_period_s = 1.0;
 
 	s = ldrp::apiInit(_config);
 	s = ldrp::lidarInit();
@@ -133,6 +134,7 @@ int main(int argc, char** argv) {
 
 	// nt::NetworkTableInstance::GetDefault().StartServer();
 	nt::NetworkTableInstance nt_inst = nt::NetworkTableInstance::GetDefault();
+	// nt::FloatArrayEntry nt_localization = nt_inst.GetFloatArrayTopic("rio telemetry/robot/pigeon rotation quat").GetEntry({});
 	nt::FloatArrayEntry nt_localization = nt_inst.GetFloatArrayTopic("uesim/pose").GetEntry({});
 
 	signal(SIGINT, _action);
@@ -144,11 +146,11 @@ int main(int argc, char** argv) {
 	ldrp::ObstacleGrid grid{};
 	for(;_program_running.load();) {
 
-		// std::vector<nt::TimestampedFloatArray> updates = nt_localization.ReadQueue();
+		std::vector<nt::TimestampedFloatArray> updates = nt_localization.ReadQueue();
 		// std::cout << "[Main Thread]: Localization recieved " << updates.size() << " pose updates" << std::endl;
-		// for(const nt::TimestampedFloatArray& u : updates) {
-		// 	ldrp::updateWorldPose(u.value.data(), u.value.data() + 3, u.time);
-		// }
+		for(const nt::TimestampedFloatArray& u : updates) {
+			ldrp::updateWorldPose(u.value.data(), u.value.data() + 3, u.time);
+		}
 
 		// s = ldrp::updateWorldPose(pose, pose + 3);
 		// pose[0] += 0.1;
