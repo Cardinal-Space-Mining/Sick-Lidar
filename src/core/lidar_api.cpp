@@ -1,7 +1,7 @@
 #include "lidar_api.h"
 
 #include "filtering.hpp"
-// #include "accumulator_grid2.hpp"
+#include "accumulator_grid2.hpp"
 #include "mem_utils.hpp"
 #include "pcd_streaming.h"
 
@@ -292,12 +292,12 @@ namespace ldrp {
 		/** add a world pose + linked timestamp */
 		status_t addWorldRef(const float* xyz, const float* qxyzw, const uint64_t ts_us);
 		/** export obstacles from the accumulator grid */
-		status_t exportObstacles(ObstacleGrid& grid, ObstacleGrid::Weight_T*(*grid_resize)(size_t));
+		status_t exportObstacles(ObstacleGrid& grid, ObstacleGrid::Quant_T*(*grid_resize)(size_t));
 		/** wait for the next accumulator update (or pull cached updates) and export obstacles */
-		status_t exportNextObstacles(ObstacleGrid& grid, ObstacleGrid::Weight_T*(*grid_resize)(size_t), double timeout_ms);
+		status_t exportNextObstacles(ObstacleGrid& grid, ObstacleGrid::Quant_T*(*grid_resize)(size_t), double timeout_ms);
 
 	protected:
-		status_t gridExportInternal(ObstacleGrid& grid, ObstacleGrid::Weight_T*(*grid_resize)(size_t), std::unique_lock<std::mutex>& lock);
+		status_t gridExportInternal(ObstacleGrid& grid, ObstacleGrid::Quant_T*(*grid_resize)(size_t), std::unique_lock<std::mutex>& lock);
 
 
 	public:	// global inst, constant values, configs, states
@@ -419,8 +419,8 @@ namespace ldrp {
 				units::time::second_t{ _config.pose_history_range },
 				&lerpClosest<const Eigen::Isometry3f&>
 			};
-		// QuantizedRatioGrid<ObstacleGrid::Weight_T, float>
-		// 	accumulator{};
+		QuantizedRatioGrid<ObstacleGrid::Quant_T, float>
+			accumulator{};
 		PCDTarWriter
 			pcd_writer{};
 
@@ -492,13 +492,13 @@ namespace ldrp {
 		return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
 	}
 
-	status_t getObstacleGrid(ObstacleGrid& grid, ObstacleGrid::Weight_T*(*grid_resize)(size_t)) {
+	status_t getObstacleGrid(ObstacleGrid& grid, ObstacleGrid::Quant_T*(*grid_resize)(size_t)) {
 		if(LidarImpl::_global) {
 			return LidarImpl::_global->exportObstacles(grid, grid_resize);
 		}
 		return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
 	}
-	status_t waitNextObstacleGrid(ObstacleGrid& grid, ObstacleGrid::Weight_T*(*grid_resize)(size_t), double timeout_ms) {
+	status_t waitNextObstacleGrid(ObstacleGrid& grid, ObstacleGrid::Quant_T*(*grid_resize)(size_t), double timeout_ms) {
 		if(LidarImpl::_global) {
 			return LidarImpl::_global->exportNextObstacles(grid, grid_resize, timeout_ms);
 		}
@@ -540,7 +540,7 @@ status_t LidarImpl::addWorldRef(const float* xyz, const float* qxyzw, const uint
 
 }
 
-status_t LidarImpl::exportObstacles(ObstacleGrid& grid, ObstacleGrid::Weight_T*(*grid_resize)(size_t)) {
+status_t LidarImpl::exportObstacles(ObstacleGrid& grid, ObstacleGrid::Quant_T*(*grid_resize)(size_t)) {
 
 	if(this->_state.enable_threads.load()) {
 		std::unique_lock<std::mutex> lock{ this->_state.accumulation_mutex };
@@ -549,7 +549,7 @@ status_t LidarImpl::exportObstacles(ObstacleGrid& grid, ObstacleGrid::Weight_T*(
 	return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
 
 }
-status_t LidarImpl::exportNextObstacles(ObstacleGrid& grid, ObstacleGrid::Weight_T*(*grid_resize)(size_t), double timeout_ms) {
+status_t LidarImpl::exportNextObstacles(ObstacleGrid& grid, ObstacleGrid::Quant_T*(*grid_resize)(size_t), double timeout_ms) {
 
 	if(this->_state.enable_threads.load()) {
 		crno::hrc::time_point _until = crno::hrc::now() + crno::nanoseconds{ static_cast<int64_t>(timeout_ms * 1e6) };
@@ -565,7 +565,7 @@ status_t LidarImpl::exportNextObstacles(ObstacleGrid& grid, ObstacleGrid::Weight
 
 }
 
-status_t LidarImpl::gridExportInternal(ObstacleGrid& grid, ObstacleGrid::Weight_T*(*grid_resize)(size_t), std::unique_lock<std::mutex>& lock) {
+status_t LidarImpl::gridExportInternal(ObstacleGrid& grid, ObstacleGrid::Quant_T*(*grid_resize)(size_t), std::unique_lock<std::mutex>& lock) {
 
 	if(lock.mutex() != &this->_state.accumulation_mutex) {
 		std::unique_lock<std::mutex> _temp{ this->_state.accumulation_mutex };
@@ -573,29 +573,29 @@ status_t LidarImpl::gridExportInternal(ObstacleGrid& grid, ObstacleGrid::Weight_
 	} else
 	if(!lock.owns_lock()) lock.lock();
 
-	// const size_t _area = static_cast<size_t>(this->accumulator.area());
-	// const Eigen::Vector2f& _origin = this->accumulator.origin();
-	// const Eigen::Vector2i& _grid_size = this->accumulator.size();
+	const size_t _area = static_cast<size_t>(this->accumulator.area());
+	const Eigen::Vector2f& _origin = this->accumulator.origin();
+	const Eigen::Vector2i& _grid_size = this->accumulator.size();
 
-	// grid.cell_resolution_m = this->accumulator.cellRes();
-	// grid.origin_x_m = _origin.x();
-	// grid.origin_y_m = _origin.y();
-	// grid.cells_x = _grid_size.x();
-	// grid.cells_y = _grid_size.y();
-	// grid.grid = grid_resize(_area);
+	grid.cell_resolution_m = this->accumulator.cellRes();
+	grid.origin_x_m = _origin.x();
+	grid.origin_y_m = _origin.y();
+	grid.cells_x = _grid_size.x();
+	grid.cells_y = _grid_size.y();
+	grid.grid = grid_resize(_area);
 
-	// memcpy(grid.grid, this->accumulator.buffData(), _area * sizeof(ObstacleGrid::Weight_T));
+	memcpy(grid.grid, this->accumulator.buffData(), _area * sizeof(ObstacleGrid::Quant_T));
 
-	grid.cell_resolution_m = 0.f;
-	grid.origin_x_m = 0.f;
-	grid.origin_y_m = 0.f;
-	grid.cells_x = 0;
-	grid.cells_y = 0;
-	grid.grid = nullptr;
+	// grid.cell_resolution_m = 0.f;
+	// grid.origin_x_m = 0.f;
+	// grid.origin_y_m = 0.f;
+	// grid.cells_x = 0;
+	// grid.cells_y = 0;
+	// grid.grid = nullptr;
 
 	this->_state.obstacle_updates = 0;
-	// return STATUS_SUCCESS;
-	return STATUS_FAIL;
+	return STATUS_SUCCESS;
+	// return STATUS_FAIL;
 
 }
 
@@ -654,7 +654,7 @@ void LidarImpl::lidarWorker() {
 			this->pcd_writer.setFile(this->_config.points_log_fname);
 		}
 
-		// this->accumulator.reset(this->_config.fpipeline.map_resolution_cm * 1e-2f);
+		this->accumulator.reset(this->_config.fpipeline.map_resolution_cm * 1e-2f);
 
 		// main loop!
 		LDRP_LOG( LOG_STANDARD, "LDRP Worker [Init]: Succesfully initialized all resources. Begining aquisition and filtering..." )
@@ -1095,17 +1095,17 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 		// 3. update accumulator
 		{
 			this->_state.accumulation_mutex.lock();
-			// this->accumulator.incrementRatio(	// insert PMF obstacles
-			// 	voxelized_points,
-			// 	pre_pmf_range_filtered,		// base
-			// 	pmf_filtered_obstacles		// subset
-			// );
-			// this->accumulator.incrementRatio(	// insert z-thresh obstacles
-			// 	voxelized_points,
-			// 	z_mid_filtered_obstacles,	// base
-			// 	DEFAULT_NO_SELECTION		// use all of base
-			// );
-			// this->_state.obstacle_updates++;
+			this->accumulator.incrementRatio(	// insert PMF obstacles
+				voxelized_points,
+				pre_pmf_range_filtered,		// base
+				pmf_filtered_obstacles		// subset
+			);
+			this->accumulator.incrementRatio(	// insert z-thresh obstacles
+				voxelized_points,
+				z_mid_filtered_obstacles,	// base
+				DEFAULT_NO_SELECTION		// use all of base
+			);
+			this->_state.obstacle_updates++;
 			this->_state.obstacles_updated.notify_all();
 			// LDRP_LOG( LOG_DEBUG, "LDRP Filter Instance {} [Filter Loop]: Successfully added points to accumulator. Map size: {}x{}, origin: ({}, {}), max weight: {}",
 			// 	f_inst->index,
