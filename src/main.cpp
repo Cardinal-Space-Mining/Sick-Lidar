@@ -8,101 +8,10 @@
 
 #include <networktables/NetworkTableInstance.h>
 #include <networktables/FloatArrayTopic.h>
+#include <networktables/RawTopic.h>
 
 #include "lidar_api.h"
 #include "./core/mem_utils.hpp"
-
-
-// namespace bmp {
-
-// 	constexpr int BYTES_PER_PIXEL = 1; /// red, green, & blue
-// 	constexpr int FILE_HEADER_SIZE = 14;
-// 	constexpr int INFO_HEADER_SIZE = 40;
-
-// 	unsigned char* createBitmapFileHeader(int height, int stride);
-// 	unsigned char* createBitmapInfoHeader(int height, int width);
-
-
-// 	void generateBitmapImage (unsigned char* image, int height, int width, char* imageFileName)
-// 	{
-// 		int widthInBytes = width * BYTES_PER_PIXEL;
-
-// 		unsigned char padding[3] = {0, 0, 0};
-// 		int paddingSize = (4 - (widthInBytes) % 4) % 4;
-
-// 		int stride = (widthInBytes) + paddingSize;
-
-// 		FILE* imageFile = fopen(imageFileName, "wb");
-
-// 		unsigned char* fileHeader = createBitmapFileHeader(height, stride);
-// 		fwrite(fileHeader, 1, FILE_HEADER_SIZE, imageFile);
-
-// 		unsigned char* infoHeader = createBitmapInfoHeader(height, width);
-// 		fwrite(infoHeader, 1, INFO_HEADER_SIZE, imageFile);
-
-// 		int i;
-// 		for (i = 0; i < height; i++) {
-// 			fwrite(image + (i*widthInBytes), BYTES_PER_PIXEL, width, imageFile);
-// 			fwrite(padding, 1, paddingSize, imageFile);
-// 		}
-
-// 		fclose(imageFile);
-// 	}
-
-// 	unsigned char* createBitmapFileHeader (int height, int stride)
-// 	{
-// 		int fileSize = FILE_HEADER_SIZE + INFO_HEADER_SIZE + (stride * height);
-
-// 		static unsigned char fileHeader[] = {
-// 			0,0,     /// signature
-// 			0,0,0,0, /// image file size in bytes
-// 			0,0,0,0, /// reserved
-// 			0,0,0,0, /// start of pixel array
-// 		};
-
-// 		fileHeader[ 0] = (unsigned char)('B');
-// 		fileHeader[ 1] = (unsigned char)('M');
-// 		fileHeader[ 2] = (unsigned char)(fileSize      );
-// 		fileHeader[ 3] = (unsigned char)(fileSize >>  8);
-// 		fileHeader[ 4] = (unsigned char)(fileSize >> 16);
-// 		fileHeader[ 5] = (unsigned char)(fileSize >> 24);
-// 		fileHeader[10] = (unsigned char)(FILE_HEADER_SIZE + INFO_HEADER_SIZE);
-
-// 		return fileHeader;
-// 	}
-
-// 	unsigned char* createBitmapInfoHeader (int height, int width)
-// 	{
-// 		static unsigned char infoHeader[] = {
-// 			0,0,0,0, /// header size
-// 			0,0,0,0, /// image width
-// 			0,0,0,0, /// image height
-// 			0,0,     /// number of color planes
-// 			0,0,     /// bits per pixel
-// 			0,0,0,0, /// compression
-// 			0,0,0,0, /// image size
-// 			0,0,0,0, /// horizontal resolution
-// 			0,0,0,0, /// vertical resolution
-// 			0,0,0,0, /// colors in color table
-// 			0,0,0,0, /// important color count
-// 		};
-
-// 		infoHeader[ 0] = (unsigned char)(INFO_HEADER_SIZE);
-// 		infoHeader[ 4] = (unsigned char)(width      );
-// 		infoHeader[ 5] = (unsigned char)(width >>  8);
-// 		infoHeader[ 6] = (unsigned char)(width >> 16);
-// 		infoHeader[ 7] = (unsigned char)(width >> 24);
-// 		infoHeader[ 8] = (unsigned char)(height      );
-// 		infoHeader[ 9] = (unsigned char)(height >>  8);
-// 		infoHeader[10] = (unsigned char)(height >> 16);
-// 		infoHeader[11] = (unsigned char)(height >> 24);
-// 		infoHeader[12] = (unsigned char)(1);
-// 		infoHeader[14] = (unsigned char)(BYTES_PER_PIXEL*8);
-
-// 		return infoHeader;
-// 	}
-
-// }
 
 
 static std::atomic<bool> _program_running = true;
@@ -110,8 +19,8 @@ static void _action(int sig) {
 	if(_program_running) std::cout << "Caught signal. Stopping program..." << std::endl;
 	_program_running = false;
 }
-inline static uint8_t* _grid_alloc(size_t s) {
-	return (uint8_t*)malloc(s);
+static uint8_t* _grid_alloc(size_t s) {
+	return (uint8_t*)malloc(s + (sizeof(int64_t) * 2)) + (sizeof(int64_t) * 2);		// extra space for size at the beginning
 }
 
 int main(int argc, char** argv) {
@@ -122,10 +31,12 @@ int main(int argc, char** argv) {
 	ldrp::LidarConfig _config{};
 	_config.points_logging_mode = (ldrp::POINT_LOGGING_INCLUDE_FILTERED | ldrp::POINT_LOGGING_NT);
 	_config.nt_use_client = true;
-	// _config.lidar_offset_xyz[2] = 1.f;
-	// _config.lidar_offset_quat[0] = 1.f;
-	// _config.lidar_offset_quat[3] = 0.f;
-	// _config.datalog_fname = "test_configs_import.wpilog";
+	// _config.lidar_offset_xyz[2] = 7.5f;
+	_config.min_scan_theta_degrees = -180.f;
+	_config.max_scan_theta_degrees = 180.f;
+	// _config.nt_client_team = 1111;
+	_config.pose_history_period_s = 1.0;
+	_config.map_resolution_cm = 3.f;
 
 	s = ldrp::apiInit(_config);
 	s = ldrp::lidarInit();
@@ -133,7 +44,9 @@ int main(int argc, char** argv) {
 
 	// nt::NetworkTableInstance::GetDefault().StartServer();
 	nt::NetworkTableInstance nt_inst = nt::NetworkTableInstance::GetDefault();
+	// nt::FloatArrayEntry nt_localization = nt_inst.GetFloatArrayTopic("rio telemetry/robot/pigeon rotation quat").GetEntry({});
 	nt::FloatArrayEntry nt_localization = nt_inst.GetFloatArrayTopic("uesim/pose").GetEntry({});
+	nt::RawEntry nt_grid = nt_inst.GetRawTopic("tmain/obstacle grid").GetEntry("Grid<U8>", {});
 
 	signal(SIGINT, _action);
 
@@ -144,17 +57,19 @@ int main(int argc, char** argv) {
 	ldrp::ObstacleGrid grid{};
 	for(;_program_running.load();) {
 
-		// std::vector<nt::TimestampedFloatArray> updates = nt_localization.ReadQueue();
+		std::vector<nt::TimestampedFloatArray> updates = nt_localization.ReadQueue();
 		// std::cout << "[Main Thread]: Localization recieved " << updates.size() << " pose updates" << std::endl;
-		// for(const nt::TimestampedFloatArray& u : updates) {
-		// 	ldrp::updateWorldPose(u.value.data(), u.value.data() + 3, u.time);
-		// }
+		for(const nt::TimestampedFloatArray& u : updates) {
+			ldrp::updateWorldPose(u.value.data(), u.value.data() + 3, u.time);
+		}
 
 		// s = ldrp::updateWorldPose(pose, pose + 3);
 		// pose[0] += 0.1;
-		// if(grid.grid) free(grid.grid);
+		if(grid.grid) free(grid.grid);
+		grid.grid = nullptr;
 		// high_resolution_clock::time_point a = high_resolution_clock::now();
 		s = ldrp::waitNextObstacleGrid(grid, &_grid_alloc, 10.0);
+		if(s == ldrp::STATUS_SUCCESS) grid.grid -= (sizeof(int64_t) * 2);
 		// double dur = duration<double>{high_resolution_clock::now() - a}.count();
 		// if(s & ldrp::STATUS_TIMED_OUT) {
 		// 	std::cout << "[Main Thread]: Obstacle export timed out after " << dur << " seconds." << std::endl;
@@ -166,6 +81,17 @@ int main(int argc, char** argv) {
 		// }
 		// free(grid.grid);
 		// grid.grid = nullptr;
+
+		// if(grid.grid) {
+		// 	reinterpret_cast<int64_t*>(grid.grid)[0] = grid.cells_x;
+		// 	reinterpret_cast<int64_t*>(grid.grid)[1] = grid.cells_y;
+		// 	nt_grid.Set(
+		// 		std::span<const uint8_t>{
+		// 			grid.grid,
+		// 			grid.grid + (grid.cells_x * grid.cells_y + (sizeof(int64_t) * 2))
+		// 		}
+		// 	);
+		// }
 
 		// std::this_thread::sleep_for(100ms);
 	}

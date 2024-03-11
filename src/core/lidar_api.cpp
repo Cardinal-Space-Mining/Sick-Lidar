@@ -1,7 +1,7 @@
 #include "lidar_api.h"
 
 #include "filtering.hpp"
-// #include "accumulator_grid2.hpp"
+#include "accumulator_grid2.hpp"
 #include "mem_utils.hpp"
 #include "pcd_streaming.h"
 
@@ -48,6 +48,7 @@
 #include <networktables/FloatArrayTopic.h>
 #include <networktables/DoubleArrayTopic.h>
 #include <networktables/RawTopic.h>
+#include <networktables/FloatTopic.h>
 #include <DataLogManager.h>
 #include <wpi/DataLog.h>
 #endif
@@ -277,11 +278,34 @@ namespace ldrp {
 			}
 			this->_nt.base = this->_nt.instance.GetTable("Perception");
 
-			this->_nt.last_parsed_seg_idx = this->_nt.base->GetIntegerTopic("last segment").GetEntry(-1);
-			this->_nt.aquisition_cycles = this->_nt.base->GetIntegerTopic("aquisition loop count").GetEntry(0);
-			this->_nt.aquisition_ftime = this->_nt.base->GetDoubleTopic("aquisition frame time").GetEntry(0.0);
-			this->_nt.raw_scan_points = this->_nt.base->GetRawTopic("raw scan points").GetEntry( "PointXYZ_[]", {} );
-			this->_nt.test_filtered_points = this->_nt.base->GetRawTopic("filtered points").GetEntry( "PointXYZ_[]", {} );
+			this->_nt.last_parsed_seg_idx	= this->_nt.base->GetIntegerTopic("last segment").GetEntry(-1);
+			this->_nt.aquisition_cycles		= this->_nt.base->GetIntegerTopic("aquisition loop count").GetEntry(0);
+			this->_nt.aquisition_ftime		= this->_nt.base->GetDoubleTopic("aquisition frame time").GetEntry(0.0);
+			this->_nt.raw_scan_points		= this->_nt.base->GetRawTopic("raw scan points").GetEntry( "PointXYZ_[]", {} );
+			this->_nt.test_filtered_points	= this->_nt.base->GetRawTopic("filtered points").GetEntry( "PointXYZ_[]", {} );
+
+#ifndef DISABLE_NT_TUNING
+			this->_nt.tuning.max_pmf_range			= this->_nt.base->GetFloatTopic("tuning/pmf/max range (cm)").GetEntry( this->_config.fpipeline.max_pmf_range_cm );
+			this->_nt.tuning.max_z_thresh			= this->_nt.base->GetFloatTopic("tuning/max z thresh (cm)").GetEntry( this->_config.fpipeline.max_z_thresh_cm );
+			this->_nt.tuning.min_z_thresh			= this->_nt.base->GetFloatTopic("tuning/min z thresh (cm)").GetEntry( this->_config.fpipeline.min_z_thresh_cm );
+			this->_nt.tuning.pmf_window_base		= this->_nt.base->GetFloatTopic("tuning/pmf/window base").GetEntry( this->_config.fpipeline.pmf_window_base );
+			this->_nt.tuning.pmf_max_window_size	= this->_nt.base->GetFloatTopic("tuning/pmf/max window (cm)").GetEntry( this->_config.fpipeline.pmf_max_window_size_cm );
+			this->_nt.tuning.pmf_cell_size			= this->_nt.base->GetFloatTopic("tuning/pmf/cell size (cm)").GetEntry( this->_config.fpipeline.pmf_cell_size_cm );
+			this->_nt.tuning.pmf_init_distance		= this->_nt.base->GetFloatTopic("tuning/pmf/init distance (cm)").GetEntry( this->_config.fpipeline.pmf_init_distance_cm );
+			this->_nt.tuning.pmf_max_distance		= this->_nt.base->GetFloatTopic("tuning/pmf/max distance (cm)").GetEntry( this->_config.fpipeline.pmf_max_distance_cm );
+			this->_nt.tuning.pmf_slope				= this->_nt.base->GetFloatTopic("tuning/pmf/slope (cm)").GetEntry( this->_config.fpipeline.pmf_slope );
+
+			this->_nt.tuning.max_pmf_range.Set( this->_config.fpipeline.max_pmf_range_cm );
+			this->_nt.tuning.max_z_thresh.Set( this->_config.fpipeline.max_z_thresh_cm );
+			this->_nt.tuning.min_z_thresh.Set( this->_config.fpipeline.min_z_thresh_cm );
+			this->_nt.tuning.pmf_window_base.Set( this->_config.fpipeline.pmf_window_base );
+			this->_nt.tuning.pmf_max_window_size.Set( this->_config.fpipeline.pmf_max_window_size_cm );
+			this->_nt.tuning.pmf_cell_size.Set( this->_config.fpipeline.pmf_cell_size_cm );
+			this->_nt.tuning.pmf_init_distance.Set( this->_config.fpipeline.pmf_init_distance_cm );
+			this->_nt.tuning.pmf_max_distance.Set( this->_config.fpipeline.pmf_max_distance_cm );
+			this->_nt.tuning.pmf_slope.Set( this->_config.fpipeline.pmf_slope );
+#endif
+
 		}
 		void shutdownNT() {
 			this->_nt.instance.Flush();
@@ -292,12 +316,12 @@ namespace ldrp {
 		/** add a world pose + linked timestamp */
 		status_t addWorldRef(const float* xyz, const float* qxyzw, const uint64_t ts_us);
 		/** export obstacles from the accumulator grid */
-		status_t exportObstacles(ObstacleGrid& grid, ObstacleGrid::Weight_T*(*grid_resize)(size_t));
+		status_t exportObstacles(ObstacleGrid& grid, ObstacleGrid::Quant_T*(*grid_resize)(size_t));
 		/** wait for the next accumulator update (or pull cached updates) and export obstacles */
-		status_t exportNextObstacles(ObstacleGrid& grid, ObstacleGrid::Weight_T*(*grid_resize)(size_t), double timeout_ms);
+		status_t exportNextObstacles(ObstacleGrid& grid, ObstacleGrid::Quant_T*(*grid_resize)(size_t), double timeout_ms);
 
 	protected:
-		status_t gridExportInternal(ObstacleGrid& grid, ObstacleGrid::Weight_T*(*grid_resize)(size_t), std::unique_lock<std::mutex>& lock);
+		status_t gridExportInternal(ObstacleGrid& grid, ObstacleGrid::Quant_T*(*grid_resize)(size_t), std::unique_lock<std::mutex>& lock);
 
 
 	public:	// global inst, constant values, configs, states
@@ -384,6 +408,22 @@ namespace ldrp {
 				raw_scan_points,
 				test_filtered_points;
 
+#ifndef DISABLE_NT_TUNING
+			struct {
+				nt::FloatEntry
+					max_pmf_range,
+					max_z_thresh,
+					min_z_thresh,
+					pmf_window_base,
+					pmf_max_window_size,
+					pmf_cell_size,
+					pmf_init_distance,
+					pmf_max_distance,
+					pmf_slope
+				;
+			} tuning;
+#endif
+
 		} _nt;
 
 		using SampleBuffer = std::vector< std::deque< sick_scansegment_xd::ScanSegmentParserOutput > >;
@@ -419,8 +459,8 @@ namespace ldrp {
 				units::time::second_t{ _config.pose_history_range },
 				&lerpClosest<const Eigen::Isometry3f&>
 			};
-		// QuantizedRatioGrid<ObstacleGrid::Weight_T, float>
-		// 	accumulator{};
+		QuantizedRatioGrid<ObstacleGrid::Quant_T, float>
+			accumulator{};
 		PCDTarWriter
 			pcd_writer{};
 
@@ -492,13 +532,13 @@ namespace ldrp {
 		return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
 	}
 
-	status_t getObstacleGrid(ObstacleGrid& grid, ObstacleGrid::Weight_T*(*grid_resize)(size_t)) {
+	status_t getObstacleGrid(ObstacleGrid& grid, ObstacleGrid::Quant_T*(*grid_resize)(size_t)) {
 		if(LidarImpl::_global) {
 			return LidarImpl::_global->exportObstacles(grid, grid_resize);
 		}
 		return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
 	}
-	status_t waitNextObstacleGrid(ObstacleGrid& grid, ObstacleGrid::Weight_T*(*grid_resize)(size_t), double timeout_ms) {
+	status_t waitNextObstacleGrid(ObstacleGrid& grid, ObstacleGrid::Quant_T*(*grid_resize)(size_t), double timeout_ms) {
 		if(LidarImpl::_global) {
 			return LidarImpl::_global->exportNextObstacles(grid, grid_resize, timeout_ms);
 		}
@@ -540,7 +580,7 @@ status_t LidarImpl::addWorldRef(const float* xyz, const float* qxyzw, const uint
 
 }
 
-status_t LidarImpl::exportObstacles(ObstacleGrid& grid, ObstacleGrid::Weight_T*(*grid_resize)(size_t)) {
+status_t LidarImpl::exportObstacles(ObstacleGrid& grid, ObstacleGrid::Quant_T*(*grid_resize)(size_t)) {
 
 	if(this->_state.enable_threads.load()) {
 		std::unique_lock<std::mutex> lock{ this->_state.accumulation_mutex };
@@ -549,7 +589,7 @@ status_t LidarImpl::exportObstacles(ObstacleGrid& grid, ObstacleGrid::Weight_T*(
 	return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
 
 }
-status_t LidarImpl::exportNextObstacles(ObstacleGrid& grid, ObstacleGrid::Weight_T*(*grid_resize)(size_t), double timeout_ms) {
+status_t LidarImpl::exportNextObstacles(ObstacleGrid& grid, ObstacleGrid::Quant_T*(*grid_resize)(size_t), double timeout_ms) {
 
 	if(this->_state.enable_threads.load()) {
 		crno::hrc::time_point _until = crno::hrc::now() + crno::nanoseconds{ static_cast<int64_t>(timeout_ms * 1e6) };
@@ -565,7 +605,7 @@ status_t LidarImpl::exportNextObstacles(ObstacleGrid& grid, ObstacleGrid::Weight
 
 }
 
-status_t LidarImpl::gridExportInternal(ObstacleGrid& grid, ObstacleGrid::Weight_T*(*grid_resize)(size_t), std::unique_lock<std::mutex>& lock) {
+status_t LidarImpl::gridExportInternal(ObstacleGrid& grid, ObstacleGrid::Quant_T*(*grid_resize)(size_t), std::unique_lock<std::mutex>& lock) {
 
 	if(lock.mutex() != &this->_state.accumulation_mutex) {
 		std::unique_lock<std::mutex> _temp{ this->_state.accumulation_mutex };
@@ -573,29 +613,29 @@ status_t LidarImpl::gridExportInternal(ObstacleGrid& grid, ObstacleGrid::Weight_
 	} else
 	if(!lock.owns_lock()) lock.lock();
 
-	// const size_t _area = static_cast<size_t>(this->accumulator.area());
-	// const Eigen::Vector2f& _origin = this->accumulator.origin();
-	// const Eigen::Vector2i& _grid_size = this->accumulator.size();
+	const size_t _area = static_cast<size_t>(this->accumulator.area());
+	const Eigen::Vector2f& _origin = this->accumulator.origin();
+	const Eigen::Vector2i& _grid_size = this->accumulator.size();
 
-	// grid.cell_resolution_m = this->accumulator.cellRes();
-	// grid.origin_x_m = _origin.x();
-	// grid.origin_y_m = _origin.y();
-	// grid.cells_x = _grid_size.x();
-	// grid.cells_y = _grid_size.y();
-	// grid.grid = grid_resize(_area);
+	grid.cell_resolution_m = this->accumulator.cellRes();
+	grid.origin_x_m = _origin.x();
+	grid.origin_y_m = _origin.y();
+	grid.cells_x = _grid_size.x();
+	grid.cells_y = _grid_size.y();
+	grid.grid = grid_resize(_area);
 
-	// memcpy(grid.grid, this->accumulator.buffData(), _area * sizeof(ObstacleGrid::Weight_T));
+	memcpy(grid.grid, this->accumulator.buffData(), _area * sizeof(ObstacleGrid::Quant_T));
 
-	grid.cell_resolution_m = 0.f;
-	grid.origin_x_m = 0.f;
-	grid.origin_y_m = 0.f;
-	grid.cells_x = 0;
-	grid.cells_y = 0;
-	grid.grid = nullptr;
+	// grid.cell_resolution_m = 0.f;
+	// grid.origin_x_m = 0.f;
+	// grid.origin_y_m = 0.f;
+	// grid.cells_x = 0;
+	// grid.cells_y = 0;
+	// grid.grid = nullptr;
 
 	this->_state.obstacle_updates = 0;
-	// return STATUS_SUCCESS;
-	return STATUS_FAIL;
+	return STATUS_SUCCESS;
+	// return STATUS_FAIL;
 
 }
 
@@ -654,7 +694,7 @@ void LidarImpl::lidarWorker() {
 			this->pcd_writer.setFile(this->_config.points_log_fname);
 		}
 
-		// this->accumulator.reset(this->_config.fpipeline.map_resolution_cm * 1e-2f);
+		this->accumulator.reset(this->_config.fpipeline.map_resolution_cm * 1e-2f);
 
 		// main loop!
 		LDRP_LOG( LOG_STANDARD, "LDRP Worker [Init]: Succesfully initialized all resources. Begining aquisition and filtering..." )
@@ -997,6 +1037,20 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 		// 2. run filtering on points
 		{
 
+#ifndef DISABLE_NT_TUNING
+			const float
+				_max_pmf_range			= this->_nt.tuning.max_pmf_range.Get() * 1e-2f,
+				_max_z_thresh			= this->_nt.tuning.max_z_thresh.Get() * 1e-2f,
+				_min_z_thresh			= this->_nt.tuning.min_z_thresh.Get() * 1e-2f,
+				_pmf_window_base		= this->_nt.tuning.pmf_window_base.Get(),
+				_pmf_max_window_size	= this->_nt.tuning.pmf_max_window_size.Get() * 1e-2f,
+				_pmf_cell_size			= this->_nt.tuning.pmf_cell_size.Get() * 1e-2f,
+				_pmf_init_distance		= this->_nt.tuning.pmf_init_distance.Get() * 1e-2f,
+				_pmf_max_distance		= this->_nt.tuning.pmf_max_distance.Get() * 1e-2f,
+				_pmf_slope				= this->_nt.tuning.pmf_slope.Get()
+			;
+#endif
+
 			voxelized_points.clear();
 			voxelized_ranges.clear();
 
@@ -1022,13 +1076,13 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 			carteZ_filter(
 				voxelized_points, DEFAULT_NO_SELECTION, z_high_filtered,
 				-std::numeric_limits<float>::infinity(),
-				this->_config.fpipeline.max_z_thresh_cm * 1e-2f
+				_max_z_thresh
 			);
 			// further filter points below "low cut" thresh
 			carteZ_filter(
 				voxelized_points, z_high_filtered, z_low_subset_filtered,
 				-std::numeric_limits<float>::infinity(),
-				this->_config.fpipeline.min_z_thresh_cm * 1e-2f
+				_min_z_thresh
 			);
 			// get the points inbetween high and low thresholds --> treated as wall obstacles
 			pc_negate_selection(
@@ -1042,19 +1096,19 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 				voxelized_points.points,
 				z_low_subset_filtered,
 				pre_pmf_range_filtered,
-				0.f, this->_config.fpipeline.max_pmf_range_cm * 1e-2f,
+				0.f, _max_pmf_range,
 				avg_origin
 			);
 
 			// apply pmf to selected points
 			progressive_morph_filter(
 				voxelized_points, pre_pmf_range_filtered, pmf_filtered_ground,
-				this->_config.fpipeline.pmf_window_base,
-				this->_config.fpipeline.pmf_max_window_size_cm * 1e-2f,
-				this->_config.fpipeline.pmf_cell_size_cm * 1e-2f,
-				this->_config.fpipeline.pmf_init_distance_cm * 1e-2f,
-				this->_config.fpipeline.pmf_max_distance_cm * 1e-2f,
-				this->_config.fpipeline.pmf_slope,
+				_pmf_window_base,
+				_pmf_max_window_size,
+				_pmf_cell_size,
+				_pmf_init_distance,
+				_pmf_max_distance,
+				_pmf_slope,
 				false
 			);
 			// obstacles = (base - ground)
@@ -1064,30 +1118,33 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 				pmf_filtered_obstacles
 			);
 
-			// combine all obstacle points into a single selection
-			pc_combine_sorted(
-				z_mid_filtered_obstacles,
-				pmf_filtered_obstacles,
-				combined_obstacles
-			);
-
 			// export filter results
-			write_interlaced_selection_bytes<4, 3>(
-				std::span<uint32_t>{
-					reinterpret_cast<uint32_t*>( voxelized_points.points.data() ),
-					reinterpret_cast<uint32_t*>( voxelized_points.points.data() + voxelized_points.points.size() ),
-				},
-				combined_obstacles,
-				this->_config.obstacle_point_color,
-				this->_config.standard_point_color
-			);
 			if(this->_config.points_logging_mode & (POINT_LOGGING_NT | POINT_LOGGING_INCLUDE_FILTERED)) {
+
+				// combine all obstacle points into a single selection
+				pc_combine_sorted(
+					z_mid_filtered_obstacles,
+					pmf_filtered_obstacles,
+					combined_obstacles
+				);
+
+				write_interlaced_selection_bytes<4, 3>(
+					std::span<uint32_t>{
+						reinterpret_cast<uint32_t*>( voxelized_points.points.data() ),
+						reinterpret_cast<uint32_t*>( voxelized_points.points.data() + voxelized_points.points.size() ),
+					},
+					combined_obstacles,
+					this->_config.obstacle_point_color,
+					this->_config.standard_point_color
+				);
+
 				this->_nt.test_filtered_points.Set(
 					std::span<const uint8_t>{
 						reinterpret_cast<uint8_t*>( voxelized_points.points.data() ),
 						reinterpret_cast<uint8_t*>( voxelized_points.points.data() + voxelized_points.points.size() )
 					}
 				);
+
 			}
 
 		}
@@ -1095,24 +1152,27 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 		// 3. update accumulator
 		{
 			this->_state.accumulation_mutex.lock();
-			// this->accumulator.incrementRatio(	// insert PMF obstacles
-			// 	voxelized_points,
-			// 	pre_pmf_range_filtered,		// base
-			// 	pmf_filtered_obstacles		// subset
-			// );
-			// this->accumulator.incrementRatio(	// insert z-thresh obstacles
-			// 	voxelized_points,
-			// 	z_mid_filtered_obstacles,	// base
-			// 	DEFAULT_NO_SELECTION		// use all of base
-			// );
-			// this->_state.obstacle_updates++;
+
+			this->accumulator.incrementRatio(	// insert PMF obstacles
+				voxelized_points,
+				pre_pmf_range_filtered,		// base
+				pmf_filtered_obstacles		// subset
+			);
+			this->accumulator.incrementRatio(	// insert z-thresh obstacles
+				voxelized_points,
+				z_mid_filtered_obstacles,	// base
+				DEFAULT_NO_SELECTION		// use all of base
+			);
+
+			this->_state.obstacle_updates++;
 			this->_state.obstacles_updated.notify_all();
-			// LDRP_LOG( LOG_DEBUG, "LDRP Filter Instance {} [Filter Loop]: Successfully added points to accumulator. Map size: {}x{}, origin: ({}, {}), max weight: {}",
-			// 	f_inst->index,
-			// 	this->accumulator.size().x(), this->accumulator.size().y(),
-			// 	this->accumulator.origin().x(), this->accumulator.origin().y(),
-			// 	this->accumulator.max()
-			// )
+
+			LDRP_LOG( LOG_DEBUG && LOG_VERBOSE, "LDRP Filter Instance {} [Filter Loop]: Successfully added points to accumulator. Map size: {}x{}, origin: ({}, {})",
+				f_inst->index,
+				this->accumulator.size().x(), this->accumulator.size().y(),
+				this->accumulator.origin().x(), this->accumulator.origin().y()
+			)
+
 			this->_state.accumulation_mutex.unlock();
 		}
 		// done!!!

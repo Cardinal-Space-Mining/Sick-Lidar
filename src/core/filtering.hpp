@@ -710,7 +710,8 @@ void pc_combine_sorted(
 	for(; _p2 < sel2.size(); _p2++) out.push_back( sel2[_p2] );
 }
 
-/**  */
+/** Write an element's bytes to a buffer every 'interlace_rep' number of element spans at an offset of 'interlace_off' in elments spans
+ * (an element span = sizeof(ElemT)) */
 template<
 	size_t interlace_rep = 4,
 	size_t interlace_off = 3,

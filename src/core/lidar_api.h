@@ -108,9 +108,9 @@ namespace ldrp {
 
 	};
 
-	template<typename Weight_t = uint8_t>
+	template<typename Quant_t = uint8_t>
 	struct ObstacleGrid_ {
-		using Weight_T = Weight_t;
+		using Quant_T = Quant_t;	// "quantization type"
 
 		int32_t
 			cells_x = 0,
@@ -119,7 +119,7 @@ namespace ldrp {
 			origin_x_m = 0.f,
 			origin_y_m = 0.f,
 			cell_resolution_m = 1.f;
-		Weight_T*
+		Quant_T*
 			grid = nullptr;
 
 	};
@@ -159,12 +159,12 @@ namespace ldrp {
 	/** Export the current obstacle grid.
 	 * @param grid - struct to which all grid data will be exported
 	 * @param grid_resize - function pointer which provides a buffer of at least the size passed in	*/
-	__API status_t getObstacleGrid(ObstacleGrid& grid, ObstacleGrid::Weight_T*(*grid_resize)(size_t));
+	__API status_t getObstacleGrid(ObstacleGrid& grid, ObstacleGrid::Quant_T*(*grid_resize)(size_t));
 	/** Wait until the internal accumulator gets updated (relative to last call of this function) and export the obstacle grid or unblock after the given timeout period.
 	 * @param grid - struct to which all grid data will be exported
 	 * @param grid_resize - function pointer which provides a buffer of at least the size passed in
 	 * @param timeout_ms - the timeout, in milliseconds, after which the function will unblock if no new data is available */
-	__API status_t waitNextObstacleGrid(ObstacleGrid& grid, ObstacleGrid::Weight_T*(*grid_resize)(size_t), double timeout_ms);
+	__API status_t waitNextObstacleGrid(ObstacleGrid& grid, ObstacleGrid::Quant_T*(*grid_resize)(size_t), double timeout_ms);
 
 
 };
