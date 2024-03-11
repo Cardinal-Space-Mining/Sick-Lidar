@@ -48,6 +48,7 @@
 #include <networktables/FloatArrayTopic.h>
 #include <networktables/DoubleArrayTopic.h>
 #include <networktables/RawTopic.h>
+#include <networktables/FloatTopic.h>
 #include <DataLogManager.h>
 #include <wpi/DataLog.h>
 #endif
@@ -277,11 +278,34 @@ namespace ldrp {
 			}
 			this->_nt.base = this->_nt.instance.GetTable("Perception");
 
-			this->_nt.last_parsed_seg_idx = this->_nt.base->GetIntegerTopic("last segment").GetEntry(-1);
-			this->_nt.aquisition_cycles = this->_nt.base->GetIntegerTopic("aquisition loop count").GetEntry(0);
-			this->_nt.aquisition_ftime = this->_nt.base->GetDoubleTopic("aquisition frame time").GetEntry(0.0);
-			this->_nt.raw_scan_points = this->_nt.base->GetRawTopic("raw scan points").GetEntry( "PointXYZ_[]", {} );
-			this->_nt.test_filtered_points = this->_nt.base->GetRawTopic("filtered points").GetEntry( "PointXYZ_[]", {} );
+			this->_nt.last_parsed_seg_idx	= this->_nt.base->GetIntegerTopic("last segment").GetEntry(-1);
+			this->_nt.aquisition_cycles		= this->_nt.base->GetIntegerTopic("aquisition loop count").GetEntry(0);
+			this->_nt.aquisition_ftime		= this->_nt.base->GetDoubleTopic("aquisition frame time").GetEntry(0.0);
+			this->_nt.raw_scan_points		= this->_nt.base->GetRawTopic("raw scan points").GetEntry( "PointXYZ_[]", {} );
+			this->_nt.test_filtered_points	= this->_nt.base->GetRawTopic("filtered points").GetEntry( "PointXYZ_[]", {} );
+
+#ifndef DISABLE_NT_TUNING
+			this->_nt.tuning.max_pmf_range			= this->_nt.base->GetFloatTopic("tuning/pmf/max range (cm)").GetEntry( this->_config.fpipeline.max_pmf_range_cm );
+			this->_nt.tuning.max_z_thresh			= this->_nt.base->GetFloatTopic("tuning/max z thresh (cm)").GetEntry( this->_config.fpipeline.max_z_thresh_cm );
+			this->_nt.tuning.min_z_thresh			= this->_nt.base->GetFloatTopic("tuning/min z thresh (cm)").GetEntry( this->_config.fpipeline.min_z_thresh_cm );
+			this->_nt.tuning.pmf_window_base		= this->_nt.base->GetFloatTopic("tuning/pmf/window base").GetEntry( this->_config.fpipeline.pmf_window_base );
+			this->_nt.tuning.pmf_max_window_size	= this->_nt.base->GetFloatTopic("tuning/pmf/max window (cm)").GetEntry( this->_config.fpipeline.pmf_max_window_size_cm );
+			this->_nt.tuning.pmf_cell_size			= this->_nt.base->GetFloatTopic("tuning/pmf/cell size (cm)").GetEntry( this->_config.fpipeline.pmf_cell_size_cm );
+			this->_nt.tuning.pmf_init_distance		= this->_nt.base->GetFloatTopic("tuning/pmf/init distance (cm)").GetEntry( this->_config.fpipeline.pmf_init_distance_cm );
+			this->_nt.tuning.pmf_max_distance		= this->_nt.base->GetFloatTopic("tuning/pmf/max distance (cm)").GetEntry( this->_config.fpipeline.pmf_max_distance_cm );
+			this->_nt.tuning.pmf_slope				= this->_nt.base->GetFloatTopic("tuning/pmf/slope (cm)").GetEntry( this->_config.fpipeline.pmf_slope );
+
+			this->_nt.tuning.max_pmf_range.Set( this->_config.fpipeline.max_pmf_range_cm );
+			this->_nt.tuning.max_z_thresh.Set( this->_config.fpipeline.max_z_thresh_cm );
+			this->_nt.tuning.min_z_thresh.Set( this->_config.fpipeline.min_z_thresh_cm );
+			this->_nt.tuning.pmf_window_base.Set( this->_config.fpipeline.pmf_window_base );
+			this->_nt.tuning.pmf_max_window_size.Set( this->_config.fpipeline.pmf_max_window_size_cm );
+			this->_nt.tuning.pmf_cell_size.Set( this->_config.fpipeline.pmf_cell_size_cm );
+			this->_nt.tuning.pmf_init_distance.Set( this->_config.fpipeline.pmf_init_distance_cm );
+			this->_nt.tuning.pmf_max_distance.Set( this->_config.fpipeline.pmf_max_distance_cm );
+			this->_nt.tuning.pmf_slope.Set( this->_config.fpipeline.pmf_slope );
+#endif
+
 		}
 		void shutdownNT() {
 			this->_nt.instance.Flush();
@@ -383,6 +407,22 @@ namespace ldrp {
 			nt::RawEntry
 				raw_scan_points,
 				test_filtered_points;
+
+#ifndef DISABLE_NT_TUNING
+			struct {
+				nt::FloatEntry
+					max_pmf_range,
+					max_z_thresh,
+					min_z_thresh,
+					pmf_window_base,
+					pmf_max_window_size,
+					pmf_cell_size,
+					pmf_init_distance,
+					pmf_max_distance,
+					pmf_slope
+				;
+			} tuning;
+#endif
 
 		} _nt;
 
@@ -997,6 +1037,20 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 		// 2. run filtering on points
 		{
 
+#ifndef DISABLE_NT_TUNING
+			const float
+				_max_pmf_range			= this->_nt.tuning.max_pmf_range.Get() * 1e-2f,
+				_max_z_thresh			= this->_nt.tuning.max_z_thresh.Get() * 1e-2f,
+				_min_z_thresh			= this->_nt.tuning.min_z_thresh.Get() * 1e-2f,
+				_pmf_window_base		= this->_nt.tuning.pmf_window_base.Get(),
+				_pmf_max_window_size	= this->_nt.tuning.pmf_max_window_size.Get() * 1e-2f,
+				_pmf_cell_size			= this->_nt.tuning.pmf_cell_size.Get() * 1e-2f,
+				_pmf_init_distance		= this->_nt.tuning.pmf_init_distance.Get() * 1e-2f,
+				_pmf_max_distance		= this->_nt.tuning.pmf_max_distance.Get() * 1e-2f,
+				_pmf_slope				= this->_nt.tuning.pmf_slope.Get()
+			;
+#endif
+
 			voxelized_points.clear();
 			voxelized_ranges.clear();
 
@@ -1022,13 +1076,13 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 			carteZ_filter(
 				voxelized_points, DEFAULT_NO_SELECTION, z_high_filtered,
 				-std::numeric_limits<float>::infinity(),
-				this->_config.fpipeline.max_z_thresh_cm * 1e-2f
+				_max_z_thresh
 			);
 			// further filter points below "low cut" thresh
 			carteZ_filter(
 				voxelized_points, z_high_filtered, z_low_subset_filtered,
 				-std::numeric_limits<float>::infinity(),
-				this->_config.fpipeline.min_z_thresh_cm * 1e-2f
+				_min_z_thresh
 			);
 			// get the points inbetween high and low thresholds --> treated as wall obstacles
 			pc_negate_selection(
@@ -1042,19 +1096,19 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 				voxelized_points.points,
 				z_low_subset_filtered,
 				pre_pmf_range_filtered,
-				0.f, this->_config.fpipeline.max_pmf_range_cm * 1e-2f,
+				0.f, _max_pmf_range,
 				avg_origin
 			);
 
 			// apply pmf to selected points
 			progressive_morph_filter(
 				voxelized_points, pre_pmf_range_filtered, pmf_filtered_ground,
-				this->_config.fpipeline.pmf_window_base,
-				this->_config.fpipeline.pmf_max_window_size_cm * 1e-2f,
-				this->_config.fpipeline.pmf_cell_size_cm * 1e-2f,
-				this->_config.fpipeline.pmf_init_distance_cm * 1e-2f,
-				this->_config.fpipeline.pmf_max_distance_cm * 1e-2f,
-				this->_config.fpipeline.pmf_slope,
+				_pmf_window_base,
+				_pmf_max_window_size,
+				_pmf_cell_size,
+				_pmf_init_distance,
+				_pmf_max_distance,
+				_pmf_slope,
 				false
 			);
 			// obstacles = (base - ground)

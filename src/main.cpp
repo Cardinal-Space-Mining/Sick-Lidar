@@ -82,16 +82,16 @@ int main(int argc, char** argv) {
 		// free(grid.grid);
 		// grid.grid = nullptr;
 
-		if(grid.grid) {
-			reinterpret_cast<int64_t*>(grid.grid)[0] = grid.cells_x;
-			reinterpret_cast<int64_t*>(grid.grid)[1] = grid.cells_y;
-			nt_grid.Set(
-				std::span<const uint8_t>{
-					grid.grid,
-					grid.grid + (grid.cells_x * grid.cells_y + (sizeof(int64_t) * 2))
-				}
-			);
-		}
+		// if(grid.grid) {
+		// 	reinterpret_cast<int64_t*>(grid.grid)[0] = grid.cells_x;
+		// 	reinterpret_cast<int64_t*>(grid.grid)[1] = grid.cells_y;
+		// 	nt_grid.Set(
+		// 		std::span<const uint8_t>{
+		// 			grid.grid,
+		// 			grid.grid + (grid.cells_x * grid.cells_y + (sizeof(int64_t) * 2))
+		// 		}
+		// 	);
+		// }
 
 		// std::this_thread::sleep_for(100ms);
 	}

@@ -71,10 +71,10 @@ public:
 		Cell_Size = sizeof(Cell_T),
 		Max_Alloc_NCells = Max_Alloc_Bytes / Cell_Size;
 
-	template<IntT v>
-	constexpr inline static const IntT literalI() { return v; }
-	template<FloatT v>
-	constexpr inline static const FloatT literalF() { return v; }
+	template<typename T>
+	constexpr inline static const IntT literalI(T v) { return static_cast<IntT>(v); }
+	template<typename T>
+	constexpr inline static const FloatT literalF(T v) { return static_cast<FloatT>(v); }
 
 public:
 	GridBase() = default;
@@ -83,13 +83,13 @@ public:
 	}
 
 
-	void reset(FloatT resolution = literalF<1>(), const Vec2f origin = Vec2f::Zero()) {
+	void reset(FloatT resolution = literalF(1), const Vec2f origin = Vec2f::Zero()) {
 		if (this->grid) {
 			delete[] this->grid;
 			this->grid = nullptr;
 		}
 		this->grid_size = Vec2i::Zero();
-		this->cell_res = resolution <= literalF<0>() ? literalF<1>() : resolution;
+		this->cell_res = resolution <= literalF(0) ? literalF(0) : resolution;
 		this->grid_origin = origin;
 	}
 
@@ -212,8 +212,8 @@ public:
 		FloatT		// use default fp type
 	>::type;
 
-	template<RatioT v>
-	constexpr inline static const RatioT literalR() { return v; }
+	template<typename T>
+	constexpr inline static const RatioT literalR(T v) { return static_cast<RatioT>(v); }
 
 public:
 	RatioGrid() = default;
@@ -318,13 +318,13 @@ protected:
 		if(selection.empty()) {
 			for(const PointT& pt : cloud.points) {
 				if(_cell = this->boundingCell(pt)) {
-					_cell->data[data_off] += literalR<1>();
+					_cell->data[data_off] += literalR(1);
 				}
 			}
 		} else {
 			for(const pcl::index_t idx : selection) {
 				if(_cell = this->boundingCell(cloud.points[idx])) {
-					_cell->data[data_off] += literalR<1>();
+					_cell->data[data_off] += literalR(1);
 				}
 			}
 		}
@@ -339,15 +339,15 @@ protected:
 		if(selection.empty()) {
 			for(const PointT& pt : cloud.points) {
 				if((_cell = this->boundingCell(pt))) {
-					_cell->accum += literalR<1>();
-					_cell->base += literalR<1>();
+					_cell->accum += literalR(1);
+					_cell->base += literalR(1);
 				}
 			}
 		} else {
 			for(const pcl::index_t idx : selection) {
 				if((_cell = this->boundingCell(cloud.points[idx]))) {
-					_cell->accum += literalR<1>();
-					_cell->base += literalR<1>();
+					_cell->accum += literalR(1);
+					_cell->base += literalR(1);
 				}
 			}
 		}
@@ -504,8 +504,8 @@ public:
 #endif
 					{
 						Cell_T* _cell = this->grid + i;
-						_cell->accum += Super_T::template literalR<1>();
-						_cell->base += Super_T::template literalR<1>();
+						_cell->accum += Super_T::template literalR(1);
+						_cell->base += Super_T::template literalR(1);
 						this->buffer[i] = static_cast<Buff_T>( This_T::Buff_Norm_Val * (static_cast<PreciseFloatT>(_cell->accum) / _cell->base) );
 					}
 				}
@@ -524,10 +524,10 @@ public:
 					{
 						Cell_T* _cell = this->grid + i;
 						if(_sel < accum_selection.size() && accum_selection[_sel] == _pt) {
-							_cell->accum += Super_T::template literalR<1>();
+							_cell->accum += Super_T::template literalR(1);
 							_sel++;
 						}
-						_cell->base += Super_T::template literalR<1>();
+						_cell->base += Super_T::template literalR(1);
 						this->buffer[i] = static_cast<Buff_T>( This_T::Buff_Norm_Val * (static_cast<PreciseFloatT>(_cell->accum) / _cell->base) );
 					}
 				}
@@ -544,8 +544,8 @@ public:
 #endif
 					{
 						Cell_T* _cell = this->grid + i;
-						_cell->accum += Super_T::template literalR<1>();
-						_cell->base += Super_T::template literalR<1>();
+						_cell->accum += Super_T::template literalR(1);
+						_cell->base += Super_T::template literalR(1);
 						this->buffer[i] = static_cast<Buff_T>( This_T::Buff_Norm_Val * (static_cast<PreciseFloatT>(_cell->accum) / _cell->base) );
 					}
 				}
@@ -562,10 +562,10 @@ public:
 					{
 						Cell_T* _cell = this->grid + i;
 						if(_accum < accum_selection.size() && accum_selection[_accum] == _pt) {
-							_cell->accum += Super_T::template literalR<1>();
+							_cell->accum += Super_T::template literalR(1);
 							_accum++;
 						}
-						_cell->base += Super_T::template literalR<1>();
+						_cell->base += Super_T::template literalR(1);
 						this->buffer[i] = static_cast<Buff_T>( This_T::Buff_Norm_Val * (static_cast<PreciseFloatT>(_cell->accum) / _cell->base) );
 					}
 				}
