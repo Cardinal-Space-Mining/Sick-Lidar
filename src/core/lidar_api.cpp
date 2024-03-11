@@ -1064,30 +1064,33 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 				pmf_filtered_obstacles
 			);
 
-			// combine all obstacle points into a single selection
-			pc_combine_sorted(
-				z_mid_filtered_obstacles,
-				pmf_filtered_obstacles,
-				combined_obstacles
-			);
-
 			// export filter results
-			write_interlaced_selection_bytes<4, 3>(
-				std::span<uint32_t>{
-					reinterpret_cast<uint32_t*>( voxelized_points.points.data() ),
-					reinterpret_cast<uint32_t*>( voxelized_points.points.data() + voxelized_points.points.size() ),
-				},
-				combined_obstacles,
-				this->_config.obstacle_point_color,
-				this->_config.standard_point_color
-			);
 			if(this->_config.points_logging_mode & (POINT_LOGGING_NT | POINT_LOGGING_INCLUDE_FILTERED)) {
+
+				// combine all obstacle points into a single selection
+				pc_combine_sorted(
+					z_mid_filtered_obstacles,
+					pmf_filtered_obstacles,
+					combined_obstacles
+				);
+
+				write_interlaced_selection_bytes<4, 3>(
+					std::span<uint32_t>{
+						reinterpret_cast<uint32_t*>( voxelized_points.points.data() ),
+						reinterpret_cast<uint32_t*>( voxelized_points.points.data() + voxelized_points.points.size() ),
+					},
+					combined_obstacles,
+					this->_config.obstacle_point_color,
+					this->_config.standard_point_color
+				);
+
 				this->_nt.test_filtered_points.Set(
 					std::span<const uint8_t>{
 						reinterpret_cast<uint8_t*>( voxelized_points.points.data() ),
 						reinterpret_cast<uint8_t*>( voxelized_points.points.data() + voxelized_points.points.size() )
 					}
 				);
+
 			}
 
 		}
@@ -1095,6 +1098,7 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 		// 3. update accumulator
 		{
 			this->_state.accumulation_mutex.lock();
+
 			this->accumulator.incrementRatio(	// insert PMF obstacles
 				voxelized_points,
 				pre_pmf_range_filtered,		// base
@@ -1105,14 +1109,16 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 				z_mid_filtered_obstacles,	// base
 				DEFAULT_NO_SELECTION		// use all of base
 			);
+
 			this->_state.obstacle_updates++;
 			this->_state.obstacles_updated.notify_all();
-			// LDRP_LOG( LOG_DEBUG, "LDRP Filter Instance {} [Filter Loop]: Successfully added points to accumulator. Map size: {}x{}, origin: ({}, {}), max weight: {}",
-			// 	f_inst->index,
-			// 	this->accumulator.size().x(), this->accumulator.size().y(),
-			// 	this->accumulator.origin().x(), this->accumulator.origin().y(),
-			// 	this->accumulator.max()
-			// )
+
+			LDRP_LOG( LOG_DEBUG && LOG_VERBOSE, "LDRP Filter Instance {} [Filter Loop]: Successfully added points to accumulator. Map size: {}x{}, origin: ({}, {})",
+				f_inst->index,
+				this->accumulator.size().x(), this->accumulator.size().y(),
+				this->accumulator.origin().x(), this->accumulator.origin().y()
+			)
+
 			this->_state.accumulation_mutex.unlock();
 		}
 		// done!!!

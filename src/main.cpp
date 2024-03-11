@@ -36,7 +36,7 @@ int main(int argc, char** argv) {
 	_config.max_scan_theta_degrees = 180.f;
 	// _config.nt_client_team = 1111;
 	_config.pose_history_period_s = 1.0;
-	_config.map_resolution_cm = 20.f;
+	_config.map_resolution_cm = 3.f;
 
 	s = ldrp::apiInit(_config);
 	s = ldrp::lidarInit();

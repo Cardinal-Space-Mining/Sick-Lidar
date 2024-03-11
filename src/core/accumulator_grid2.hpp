@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <limits>
 #include <type_traits>
-#include <iostream>
+// #include <iostream>
 
 #include <Eigen/Core>
 #include <pcl/point_cloud.h>
@@ -444,7 +444,7 @@ public:
 
 			Cell_T* _grid = new Cell_T[_area];
 			Buff_T* _buffer = new Buff_T[_area];
-			std::cout << "[QRG]: Allocated new buffers of area " << _area << " -- diff: " << (_area - this->area()) << std::endl;
+			// std::cout << "[QRG]: Allocated new buffers of area " << _area << " -- diff: " << (_area - this->area()) << std::endl;
 			memset(_grid, 0x00, _area * Base_T::Cell_Size);	// :O don't forget this otherwise the map will start with all garbage data
 			memset(_buffer, 0x00, _area * This_T::Buff_Cell_Size);
 
@@ -458,7 +458,7 @@ public:
 					);
 				}
 				delete[] this->grid;
-				std::cout << "[QRG]: Deleted old grid data with area " << this->area() << std::endl;
+				// std::cout << "[QRG]: Deleted old grid data with area " << this->area() << std::endl;
 			}
 			if(this->buffer) {
 				for (IntT r = 0; r < this->grid_size.x(); r++) {		// for each row in existing...
@@ -469,13 +469,13 @@ public:
 					);
 				}
 				delete[] this->buffer;
-				std::cout << "[QRG]: Deleted old buffer data with area " << this->area() << std::endl;
+				// std::cout << "[QRG]: Deleted old buffer data with area " << this->area() << std::endl;
 			}
 			this->grid_origin -= (_diff.template cast<FloatT>() * this->cell_res);
 			this->grid_size = _size;
 			this->grid = _grid;
 			this->buffer = _buffer;
-			std::cout << "[QRG]: Assigned new buffers with area " << this->area() << std::endl;
+			// std::cout << "[QRG]: Assigned new buffers with area " << this->area() << std::endl;
 		}
 		return true;
 
