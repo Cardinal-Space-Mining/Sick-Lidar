@@ -402,7 +402,7 @@ void progressive_morph_filter(
 		ground_shared_ref{ &ground, [](const pcl::Indices*) {} };
 
 	// reused buffers
-	std::vector<pcl::Indices> pt_window_indices{};
+	std::vector<pcl::Indices> pt_window_indices{};	// issue?
 	std::vector<float>
 		zp_temp{}, zp_final{}, zn_temp{}, zn_final{};
 	zp_temp.resize(cloud_.size());
@@ -466,7 +466,8 @@ void progressive_morph_filter(
 			const pcl::Indices& pt_indices = pt_window_indices[p_idx];
 			float& _zp_final = zp_final[ground[p_idx]];
 			float& _zn_final = zn_final[ground[p_idx]];
-			_zp_final = _zn_final = zp_temp[ground[p_idx]];
+			_zp_final = zp_temp[ground[p_idx]];
+			_zn_final = zn_temp[ground[p_idx]];
 
 			for (const pcl::index_t window_idx : pt_indices) {
 				const float
@@ -491,13 +492,27 @@ void progressive_morph_filter(
 				diff_p = cloud_[ground[p_idx]].z - zp_final[ground[p_idx]],
 				diff_n = zn_final[ground[p_idx]] - cloud_[ground[p_idx]].z;
 
-			if(diff_p >= height_thresholds[i] || diff_n >= height_thresholds[i]) {
+			if(diff_p >= height_thresholds[i] || diff_n >= height_thresholds[i]) {	// opposite of normal qualifier since this is the case where we remove the index
 				ground[p_idx] = ground[_end];	// we no longer care about the current index so replace it with the current last index and shorten the range
 				_end--;
+				p_idx--;
 			}
 
 		}
 		ground.resize(_end + 1);
+
+		// pcl::Indices pt_indices;
+		// for (std::size_t p_idx = 0; p_idx < ground.size(); ++p_idx)
+		// {
+		// 	float diff_p = cloud_[ground[p_idx]].z - zp_final[ground[p_idx]];
+		// 	float diff_n = zn_final[ground[p_idx]] - cloud_[ground[p_idx]].z;
+		// 	if (diff_p < height_thresholds[i] && diff_n < height_thresholds[i])
+		// 		pt_indices.push_back(ground[p_idx]);
+		// 	//if (diff_O < height_thresholds[i]) pt_indices.push_back(ground[p_idx]);
+		// }
+
+		// // Ground is now limited to pt_indices
+		// ground.swap(pt_indices);
 
 	}
 

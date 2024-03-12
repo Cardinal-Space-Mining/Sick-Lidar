@@ -91,12 +91,12 @@ namespace ldrp {
 			min_z_thresh_cm			= 25.f,
 			voxel_size_cm			= 3.f,
 			map_resolution_cm		= 5.f,
-			pmf_window_base			= 1.f,
-			pmf_max_window_size_cm	= 40.f,
-			pmf_cell_size_cm		= 5.f,
-			pmf_init_distance_cm	= 5.f,
+			pmf_window_base			= 2.f,
+			pmf_max_window_size_cm	= 45.f,
+			pmf_cell_size_cm		= 4.f,
+			pmf_init_distance_cm	= 4.f,
 			pmf_max_distance_cm		= 12.f,
-			pmf_slope				= 0.2f;
+			pmf_slope				= 0.7f;
 
 		float
 			lidar_offset_xyz[3]		= { 0.f, 0.f, 0.f },
