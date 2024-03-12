@@ -322,7 +322,7 @@ namespace ldrp {
 		status_t exportNextObstacles(ObstacleGrid& grid, ObstacleGrid::Quant_T*(*grid_resize)(size_t), double timeout_ms);
 
 	protected:
-		status_t gridExportInternal(ObstacleGrid& grid, ObstacleGrid::Quant_T*(*grid_resize)(size_t), std::unique_lock<std::mutex>& lock);
+		status_t gridExportInternal(ObstacleGrid& grid, ObstacleGrid::Quant_T*(*grid_resize)(size_t), std::unique_lock<std::timed_mutex>& lock);
 
 
 	public:	// global inst, constant values, configs, states
@@ -387,11 +387,12 @@ namespace ldrp {
 			size_t obstacle_updates{ 0U };
 
 			std::mutex
-				finished_queue_mutex{},
+				finished_queue_mutex{};
+			std::timed_mutex
 				accumulation_mutex{};
 			std::shared_mutex
 				localization_mutex{};
-			std::condition_variable
+			std::condition_variable_any
 				obstacles_updated{};
 
 		} _state;
@@ -585,7 +586,7 @@ status_t LidarImpl::addWorldRef(const float* xyz, const float* qxyzw, const uint
 status_t LidarImpl::exportObstacles(ObstacleGrid& grid, ObstacleGrid::Quant_T*(*grid_resize)(size_t)) {
 
 	if(this->_state.enable_threads.load()) {
-		std::unique_lock<std::mutex> lock{ this->_state.accumulation_mutex };
+		std::unique_lock<std::timed_mutex> lock{ this->_state.accumulation_mutex };
 		return this->gridExportInternal(grid, grid_resize, lock);
 	}
 	return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
@@ -595,11 +596,19 @@ status_t LidarImpl::exportNextObstacles(ObstacleGrid& grid, ObstacleGrid::Quant_
 
 	if(this->_state.enable_threads.load()) {
 		crno::hrc::time_point _until = crno::hrc::now() + crno::nanoseconds{ static_cast<int64_t>(timeout_ms * 1e6) };
-		std::unique_lock<std::mutex> lock{ this->_state.accumulation_mutex, std::try_to_lock };
+		std::unique_lock<std::timed_mutex> lock{ this->_state.accumulation_mutex, std::defer_lock };
+		if (!lock.try_lock_until(_until)) {		// cv::wait_until requires the lock to start out locked, thus we cannot "try_lock()" above -- this code accomplishes the same goal of not blocking past the specified time
+			return STATUS_TIMED_OUT | STATUS_FAIL;
+		}
 		for(;this->_state.enable_threads.load() && this->_state.obstacle_updates < 1;) {
-			if(this->_state.obstacles_updated.wait_until(lock, _until) == std::cv_status::timeout) {
+			//try {
+				if(this->_state.obstacles_updated.wait_until(lock, _until) == std::cv_status::timeout) {
+					return STATUS_TIMED_OUT | STATUS_FAIL;
+				}
+			/*} catch(const std::exception& e) {
+				LDRP_LOG( LOG_DEBUG, "exportNextObstacles() ~ wait_until() threw an exception! -- {}", e.what() )
 				return STATUS_TIMED_OUT | STATUS_FAIL;
-			}
+			}*/
 		}
 		return this->gridExportInternal(grid, grid_resize, lock);
 	}
@@ -607,10 +616,10 @@ status_t LidarImpl::exportNextObstacles(ObstacleGrid& grid, ObstacleGrid::Quant_
 
 }
 
-status_t LidarImpl::gridExportInternal(ObstacleGrid& grid, ObstacleGrid::Quant_T*(*grid_resize)(size_t), std::unique_lock<std::mutex>& lock) {
+status_t LidarImpl::gridExportInternal(ObstacleGrid& grid, ObstacleGrid::Quant_T*(*grid_resize)(size_t), std::unique_lock<std::timed_mutex>& lock) {
 
 	if(lock.mutex() != &this->_state.accumulation_mutex) {
-		std::unique_lock<std::mutex> _temp{ this->_state.accumulation_mutex };
+		std::unique_lock<std::timed_mutex> _temp{ this->_state.accumulation_mutex };
 		lock.swap(_temp);
 	}
 	if(!lock.owns_lock()) lock.lock();
