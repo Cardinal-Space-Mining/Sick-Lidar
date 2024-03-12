@@ -30,7 +30,7 @@ int main(int argc, char** argv) {
 	status_t s{0};
 	ldrp::LidarConfig _config{};
 	_config.points_logging_mode = (ldrp::POINT_LOGGING_INCLUDE_FILTERED | ldrp::POINT_LOGGING_NT);
-	_config.nt_use_client = true;
+	_config.nt_use_client = false;
 	// _config.lidar_offset_xyz[2] = 7.5f;
 	_config.min_scan_theta_degrees = -180.f;
 	_config.max_scan_theta_degrees = 180.f;
@@ -65,8 +65,10 @@ int main(int argc, char** argv) {
 
 		// s = ldrp::updateWorldPose(pose, pose + 3);
 		// pose[0] += 0.1;
-		if(grid.grid) free(grid.grid);
-		grid.grid = nullptr;
+		if (grid.grid) {
+			free(grid.grid);
+			grid.grid = nullptr;
+		}
 		// high_resolution_clock::time_point a = high_resolution_clock::now();
 		s = ldrp::waitNextObstacleGrid(grid, &_grid_alloc, 10.0);
 		if(s == ldrp::STATUS_SUCCESS) grid.grid -= (sizeof(int64_t) * 2);
@@ -79,21 +81,19 @@ int main(int argc, char** argv) {
 		// } else {
 		// 	std::cout << "[Main Thread]: Obstacle export failed after " << dur << " seconds." << std::endl;
 		// }
-		// free(grid.grid);
-		// grid.grid = nullptr;
 
-		// if(grid.grid) {
-		// 	reinterpret_cast<int64_t*>(grid.grid)[0] = grid.cells_x;
-		// 	reinterpret_cast<int64_t*>(grid.grid)[1] = grid.cells_y;
-		// 	nt_grid.Set(
-		// 		std::span<const uint8_t>{
-		// 			grid.grid,
-		// 			grid.grid + (grid.cells_x * grid.cells_y + (sizeof(int64_t) * 2))
-		// 		}
-		// 	);
-		// }
+		if(grid.grid) {
+			reinterpret_cast<int64_t*>(grid.grid)[0] = grid.cells_x;
+			reinterpret_cast<int64_t*>(grid.grid)[1] = grid.cells_y;
+			nt_grid.Set(
+				std::span<const uint8_t>{
+					grid.grid,
+					grid.grid + (grid.cells_x * grid.cells_y + (sizeof(int64_t) * 2))
+				}
+			);
+		}
 
-		// std::this_thread::sleep_for(100ms);
+		std::this_thread::sleep_for(10ms);
 	}
 
 	// bmp::generateBitmapImage(grid.grid, grid.cells_x, grid.cells_y, (char*)"./logs/out.bmp");
@@ -112,6 +112,6 @@ int main(int argc, char** argv) {
 	std::cout << "[Main Thread]: Shutting down lidar resources...?" << std::endl;
 	s = ldrp::lidarShutdown();
 	s = ldrp::apiDestroy();
-	std::cout << "[Main Thread]: Exitting..." << std::endl;
+	std::cout << "[Main Thread]: Exiting..." << std::endl;
 
 }
