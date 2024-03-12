@@ -310,6 +310,7 @@ namespace ldrp {
 		void shutdownNT() {
 			this->_nt.instance.Flush();
 			this->_nt.instance.StopServer();
+			this->_nt.instance.StopClient();
 		}
 
 	public:
@@ -442,6 +443,7 @@ namespace ldrp {
 
 			struct {
 				nt::BooleanEntry is_active;
+				nt::IntegerEntry proc_step;
 			} nt;
 		};
 
@@ -610,7 +612,7 @@ status_t LidarImpl::gridExportInternal(ObstacleGrid& grid, ObstacleGrid::Quant_T
 	if(lock.mutex() != &this->_state.accumulation_mutex) {
 		std::unique_lock<std::mutex> _temp{ this->_state.accumulation_mutex };
 		lock.swap(_temp);
-	} else
+	}
 	if(!lock.owns_lock()) lock.lock();
 
 	const size_t _area = static_cast<size_t>(this->accumulator.area());
@@ -920,8 +922,13 @@ void LidarImpl::lidarWorker() {
 void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 	// this function represents the alternative thread that filters the newest collection of points
 
-	f_inst->nt.is_active = this->_nt.base->GetSubTable("Filter Theads")->GetBooleanTopic( fmt::format("inst {} activity", f_inst->index) ).GetEntry(false);
+	std::shared_ptr<nt::NetworkTable> nt_inst = this->_nt.base->GetSubTable( fmt::format("Filter Threads/inst {}", f_inst->index) );
+	f_inst->nt.is_active = nt_inst->GetBooleanTopic("activity").GetEntry(false);
+	f_inst->nt.proc_step = nt_inst->GetIntegerTopic("state").GetEntry(0);
 
+	f_inst->nt.is_active.Set(false);
+	f_inst->nt.proc_step.Set(0);	// 0 = init (pre looping)
+	
 	// precalulcate values
 	const size_t max_points{ 
 		(MS100_POINTS_PER_SEGMENT_ECHO * MS100_MAX_ECHOS_PER_POINT)
@@ -956,6 +963,7 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 	for(;this->_state.enable_threads.load();) {
 
 		f_inst->nt.is_active.Set(true);
+		f_inst->nt.proc_step.Set(10);	// 1 = step 1 (combine points)
 
 		point_cloud.clear();	// clear the vector and set w,h to 0
 		// point_ranges.clear();	// << MEMORY LEAK!!! (it was)
@@ -1021,6 +1029,7 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 		point_cloud.is_dense = true;
 
 		if(this->_config.points_logging_mode & POINT_LOGGING_INCLUDE_RAW) {
+			f_inst->nt.proc_step.Set(11);	// 11 = export raw cloud
 			if(this->_config.points_logging_mode & POINT_LOGGING_TAR) {
 				this->pcd_writer.addCloud(point_cloud);
 			}
@@ -1036,6 +1045,8 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 
 		// 2. run filtering on points
 		{
+
+			f_inst->nt.proc_step.Set(20);	// 20 = filtering (init)
 
 #ifndef DISABLE_NT_TUNING
 			const float
@@ -1065,6 +1076,7 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 			if(origin_samples > 1) avg_origin /= origin_samples;
 
 			// voxelize points
+			f_inst->nt.proc_step.Set(21);	// 21 = filtering (voxelize)
 			voxel_filter(
 				point_cloud, DEFAULT_NO_SELECTION, voxelized_points,
 				this->_config.fpipeline.voxel_size_cm * 1e-2f,
@@ -1073,18 +1085,21 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 			);
 
 			// filter points under "high cut" thresh
+			f_inst->nt.proc_step.Set(22);	// 22 = filtering (z-high)
 			carteZ_filter(
 				voxelized_points, DEFAULT_NO_SELECTION, z_high_filtered,
 				-std::numeric_limits<float>::infinity(),
 				_max_z_thresh
 			);
 			// further filter points below "low cut" thresh
+			f_inst->nt.proc_step.Set(23);	// 23 = filtering (z-low)
 			carteZ_filter(
 				voxelized_points, z_high_filtered, z_low_subset_filtered,
 				-std::numeric_limits<float>::infinity(),
 				_min_z_thresh
 			);
 			// get the points inbetween high and low thresholds --> treated as wall obstacles
+			f_inst->nt.proc_step.Set(24);	// 24 = filtering (z-mid)
 			pc_negate_selection(
 				z_high_filtered,
 				z_low_subset_filtered,
@@ -1092,6 +1107,7 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 			);
 
 			// filter close enough points for PMF
+			f_inst->nt.proc_step.Set(25);	// 25 = filtering (pmf-pre)
 			pc_filter_distance(
 				voxelized_points.points,
 				z_low_subset_filtered,
@@ -1101,6 +1117,7 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 			);
 
 			// apply pmf to selected points
+			f_inst->nt.proc_step.Set(26);	// 26 = filtering (pmf)
 			progressive_morph_filter(
 				voxelized_points, pre_pmf_range_filtered, pmf_filtered_ground,
 				_pmf_window_base,
@@ -1112,6 +1129,7 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 				false
 			);
 			// obstacles = (base - ground)
+			f_inst->nt.proc_step.Set(27);	// 27 = filtering (obstacles)
 			pc_negate_selection(
 				pre_pmf_range_filtered,
 				pmf_filtered_ground,
@@ -1120,6 +1138,8 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 
 			// export filter results
 			if(this->_config.points_logging_mode & (POINT_LOGGING_NT | POINT_LOGGING_INCLUDE_FILTERED)) {
+
+				f_inst->nt.proc_step.Set(28);	// 28 = filtering (export)
 
 				// combine all obstacle points into a single selection
 				pc_combine_sorted(
@@ -1151,19 +1171,24 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 
 		// 3. update accumulator
 		{
+			f_inst->nt.proc_step.Set(30);	// 30 = update grid (locking)
+
 			this->_state.accumulation_mutex.lock();
 
+			f_inst->nt.proc_step.Set(31);	// 31 = update grid (pmf insert)
 			this->accumulator.incrementRatio(	// insert PMF obstacles
 				voxelized_points,
 				pre_pmf_range_filtered,		// base
 				pmf_filtered_obstacles		// subset
 			);
+			f_inst->nt.proc_step.Set(32);	// 32 = update grid (z-insert)
 			this->accumulator.incrementRatio(	// insert z-thresh obstacles
 				voxelized_points,
 				z_mid_filtered_obstacles,	// base
 				DEFAULT_NO_SELECTION		// use all of base
 			);
 
+			f_inst->nt.proc_step.Set(33);	// 33 = update grid (cleanup)
 			this->_state.obstacle_updates++;
 			this->_state.obstacles_updated.notify_all();
 
@@ -1179,10 +1204,12 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 
 		// processing finished, push instance idx to queue
 		f_inst->nt.is_active.Set(false);
+		f_inst->nt.proc_step.Set(40);	// 40 = finished
 		f_inst->link_state = false;
 		std::unique_lock<std::mutex> lock{ this->_state.finished_queue_mutex };
 		this->finished_queue.push_back(f_inst->index);
 		// wait for signal to continue...
+		f_inst->nt.proc_step.Set(41);	// 41 = waiting for update
 		for(;this->_state.enable_threads.load() && !f_inst->link_state;) {
 			f_inst->link_condition.wait(lock);
 		}
