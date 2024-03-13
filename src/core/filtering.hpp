@@ -485,34 +485,35 @@ void progressive_morph_filter(
 
 		// Find indices of the points whose difference between the source and
 		// filtered point clouds is less than the current height threshold.
-		int64_t _end = static_cast<int64_t>(ground.size()) - 1;
-		for(int64_t p_idx = 0; p_idx <= _end; p_idx++) {
+		// int64_t _end = static_cast<int64_t>(ground.size()) - 1;
+		// for(int64_t p_idx = 0; p_idx <= _end; p_idx++) {
 
-			const float
-				diff_p = cloud_[ground[p_idx]].z - zp_final[ground[p_idx]],
-				diff_n = zn_final[ground[p_idx]] - cloud_[ground[p_idx]].z;
+		// 	const float
+		// 		diff_p = cloud_[ground[p_idx]].z - zp_final[ground[p_idx]],
+		// 		diff_n = zn_final[ground[p_idx]] - cloud_[ground[p_idx]].z;
 
-			if(diff_p >= height_thresholds[i] || diff_n >= height_thresholds[i]) {	// opposite of normal qualifier since this is the case where we remove the index
-				ground[p_idx] = ground[_end];	// we no longer care about the current index so replace it with the current last index and shorten the range
-				_end--;
-				p_idx--;
-			}
+		// 	if(diff_p >= height_thresholds[i] || diff_n >= height_thresholds[i]) {	// opposite of normal qualifier since this is the case where we remove the index
+		// 		ground[p_idx] = ground[_end];	// we no longer care about the current index so replace it with the current last index and shorten the range
+		// 		_end--;
+		// 		p_idx--;
+		// 	}
 
-		}
-		ground.resize(_end + 1);
-
-		// pcl::Indices pt_indices;
-		// for (std::size_t p_idx = 0; p_idx < ground.size(); ++p_idx)
-		// {
-		// 	float diff_p = cloud_[ground[p_idx]].z - zp_final[ground[p_idx]];
-		// 	float diff_n = zn_final[ground[p_idx]] - cloud_[ground[p_idx]].z;
-		// 	if (diff_p < height_thresholds[i] && diff_n < height_thresholds[i])
-		// 		pt_indices.push_back(ground[p_idx]);
-		// 	//if (diff_O < height_thresholds[i]) pt_indices.push_back(ground[p_idx]);
 		// }
+		// ground.resize(_end + 1);
 
-		// // Ground is now limited to pt_indices
-		// ground.swap(pt_indices);
+		pcl::Indices pt_indices;
+		pt_indices.reserve(ground.size());
+		for (std::size_t p_idx = 0; p_idx < ground.size(); ++p_idx)
+		{
+			float diff_p = cloud_[ground[p_idx]].z - zp_final[ground[p_idx]];
+			float diff_n = zn_final[ground[p_idx]] - cloud_[ground[p_idx]].z;
+			if (diff_p < height_thresholds[i] && diff_n < height_thresholds[i])
+				pt_indices.push_back(ground[p_idx]);
+			//if (diff_O < height_thresholds[i]) pt_indices.push_back(ground[p_idx]);
+		}
+
+		// Ground is now limited to pt_indices
+		ground.swap(pt_indices);
 
 	}
 
