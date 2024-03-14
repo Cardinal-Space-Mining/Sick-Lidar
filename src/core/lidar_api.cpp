@@ -116,7 +116,7 @@ static inline const uint32_t convertNumThreads(const int32_t input_num, const in
 	const int32_t _max = (int32_t)std::thread::hardware_concurrency() - reserved;
 	return input_num < 1 ?
 		(uint32_t)std::max(_max + input_num, 1) :
-		(uint32_t)std::max(_max, input_num)
+		(uint32_t)std::min(_max, input_num)
 	;
 }
 

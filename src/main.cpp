@@ -37,6 +37,7 @@ int main(int argc, char** argv) {
 	// _config.nt_client_team = 1111;
 	_config.pose_history_period_s = 1.0;
 	_config.map_resolution_cm = 3.f;
+	_config.max_filter_threads = 1;
 
 	s = ldrp::apiInit(_config);
 	s = ldrp::lidarInit();
