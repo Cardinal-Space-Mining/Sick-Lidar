@@ -16,7 +16,7 @@
 
 
 
-/** Get the min/max of first N dimensions for a selection of points. Does not properly handle non-dense clouds */
+/** Get the min/max of first N dimensions for a selection of points. Does not properly handle non-dense clouds. */
 template<
 	int Ndims = 3,
 	typename PointT = pcl::PointXYZ,
@@ -54,20 +54,38 @@ template<
 	typename PointT = pcl::PointXYZ,
 	typename IntT = pcl::index_t,
 	typename FloatT = float>
-constexpr void(*minMaxXY)(
-	const pcl::PointCloud<PointT>&, const std::vector<IntT>&,
-	Eigen::Vector2<FloatT>&, Eigen::Vector2<FloatT>&
-) = &minMaxND<2, PointT, IntT, FloatT>;
+inline void minMaxXY(
+	const pcl::PointCloud<PointT>& cloud,
+	const std::vector<IntT>& selection,
+	Eigen::Vector2<FloatT>& min,
+	Eigen::Vector2<FloatT>& max
+) {
+	return minMaxND<2, PointT, IntT, FloatT>(
+		cloud,
+		selection,
+		min,
+		max
+	);
+}
 
 /** minMaxND<>() alias for getting min/max for x, y, and z */
 template<
 	typename PointT = pcl::PointXYZ,
 	typename IntT = pcl::index_t,
 	typename FloatT = float>
-constexpr void(*minMaxXYZ)(
-	const pcl::PointCloud<PointT>&, const std::vector<IntT>&,
-	Eigen::Vector3<FloatT>&, Eigen::Vector3<FloatT>&
-) = &minMaxND<3, PointT, IntT, FloatT>;
+inline void minMaxXYZ(
+	const pcl::PointCloud<PointT>& cloud,
+	const std::vector<IntT>& selection,
+	Eigen::Vector3<FloatT>& min,
+	Eigen::Vector3<FloatT>& max
+) {
+	return minMaxND<3, PointT, IntT, FloatT>(
+		cloud,
+		selection,
+		min,
+		max
+	);
+}
 
 
 
@@ -353,39 +371,38 @@ void progressive_morph_filter(
 	const float slope_,
 	const bool exponential_
 ) {
+
 	// Compute the series of window sizes and height thresholds
 	std::vector<float> height_thresholds;
 	std::vector<float> window_sizes;
-	int iteration = 0;
+
 	float window_size = 0.0f;
 	float height_threshold = 0.0f;
+	for(size_t itr = 0; window_size < max_window_size_; itr++) {
 
-	while (window_size < max_window_size_)
-	{
 		// Determine the initial window size.
-		if (exponential_)
-			window_size = cell_size_ * (2.0f * std::pow(base_, iteration) + 1.0f);		// << this becomes an issue when base_ is less than 0 since the loop never exits! :O
-		else
-			window_size = cell_size_ * (2.0f * (iteration + 1) * base_ + 1.0f);
+		if(exponential_ && base_ >= 1.f) {
+			window_size = cell_size_ * (2.0f * std::pow(base_, itr) + 1.0f);	// << this becomes an issue when base_ is less than 0 since the loop never exits! :O
+		} else {
+			window_size = cell_size_ * (2.0f * (itr + 1) * base_ + 1.0f);
+		}
 
 		// Calculate the height threshold to be used in the next iteration.
-		if (iteration == 0)
+		if(itr == 0) {
 			height_threshold = initial_distance_;
-		else
-			height_threshold = slope_ * (window_size - window_sizes[iteration - 1]) * cell_size_ + initial_distance_;
+		} else {
+			height_threshold = slope_ * (window_size - window_sizes[itr - 1]) * cell_size_ + initial_distance_;
+		}
 
 		// Enforce max distance on height threshold
-		if (height_threshold > max_distance_)
-			height_threshold = max_distance_;
+		if(height_threshold > max_distance_) height_threshold = max_distance_;
 
 		window_sizes.push_back(window_size);
 		height_thresholds.push_back(height_threshold);
 
-		iteration++;
 	}
 
-	// Ground indices are initially limited to those points in the input cloud we
-	// wish to process
+	// Ground indices are initially limited to those points in the input cloud we wish to process
 	if (selection.size() > 0 && selection.size() <= cloud_.size()) {
 		ground = selection;
 	} else {
@@ -397,12 +414,12 @@ void progressive_morph_filter(
 
 	pcl::octree::OctreePointCloudSearch<PointT> tree{ 1.f };
 	const std::shared_ptr< const pcl::PointCloud<PointT> >
-		cloud_shared_ref{ &cloud_, [](const pcl::PointCloud<PointT>*) {} };
+		cloud_shared_ref{ &cloud_, [](const pcl::PointCloud<PointT>*){} };
 	const std::shared_ptr< const pcl::Indices >
-		ground_shared_ref{ &ground, [](const pcl::Indices*) {} };
+		ground_shared_ref{ &ground, [](const pcl::Indices*){} };
 
 	// reused buffers
-	std::vector<pcl::Indices> pt_window_indices{};	// issue?
+	std::vector<pcl::Indices> pt_window_indices{};
 	std::vector<float>
 		zp_temp{}, zp_final{}, zn_temp{}, zn_final{};
 	zp_temp.resize(cloud_.size());
@@ -485,165 +502,28 @@ void progressive_morph_filter(
 
 		// Find indices of the points whose difference between the source and
 		// filtered point clouds is less than the current height threshold.
-		// int64_t _end = static_cast<int64_t>(ground.size()) - 1;
-		// for(int64_t p_idx = 0; p_idx <= _end; p_idx++) {
+		size_t _slot = 0;
+		for (size_t p_idx = 0; p_idx < ground.size(); p_idx++) {
 
-		// 	const float
-		// 		diff_p = cloud_[ground[p_idx]].z - zp_final[ground[p_idx]],
-		// 		diff_n = zn_final[ground[p_idx]] - cloud_[ground[p_idx]].z;
+			const float
+				diff_p = cloud_[ground[p_idx]].z - zp_final[ground[p_idx]],
+				diff_n = zn_final[ground[p_idx]] - cloud_[ground[p_idx]].z;
 
-		// 	if(diff_p >= height_thresholds[i] || diff_n >= height_thresholds[i]) {	// opposite of normal qualifier since this is the case where we remove the index
-		// 		ground[p_idx] = ground[_end];	// we no longer care about the current index so replace it with the current last index and shorten the range
-		// 		_end--;
-		// 		p_idx--;
-		// 	}
-
-		// }
-		// ground.resize(_end + 1);
-
-		pcl::Indices pt_indices;
-		pt_indices.reserve(ground.size());
-		for (std::size_t p_idx = 0; p_idx < ground.size(); ++p_idx)
-		{
-			float diff_p = cloud_[ground[p_idx]].z - zp_final[ground[p_idx]];
-			float diff_n = zn_final[ground[p_idx]] - cloud_[ground[p_idx]].z;
-			if (diff_p < height_thresholds[i] && diff_n < height_thresholds[i])
-				pt_indices.push_back(ground[p_idx]);
-			//if (diff_O < height_thresholds[i]) pt_indices.push_back(ground[p_idx]);
-		}
-
-		// Ground is now limited to pt_indices
-		ground.swap(pt_indices);
-
-	}
-
-}
-
-
-
-
-
-/** Generate a set of ranges for each point in the provided cloud */
-template<
-	typename PointT = pcl::PointXYZ,
-	typename AllocT = typename pcl::PointCloud<PointT>::VectorType::allocator_type,
-	typename IntT = pcl::index_t,
-	typename FloatT = float>
-void pc_generate_ranges(
-	const std::vector<PointT, AllocT>& points,
-	const std::vector<IntT>& selection,
-	std::vector<FloatT>& out_ranges,
-	const Eigen::Vector3<FloatT> origin = Eigen::Vector3<FloatT>::Zero()
-) {
-	if (!selection.empty()) {
-		out_ranges.resize(selection.size());
-		for (int i = 0; i < selection.size(); i++) {
-			out_ranges[i] = (origin - *reinterpret_cast<const Eigen::Vector3<FloatT>*>(&points[selection[i]])).norm();
-		}
-	}
-	else {
-		out_ranges.resize(points.size());
-		for (int i = 0; i < points.size(); i++) {
-			out_ranges[i] = (origin - *reinterpret_cast<const Eigen::Vector3<FloatT>*>(&points[i])).norm();
-		}
-	}
-}
-
-/** Remove the points at the each index in the provided set. Prereq: selection indices must be sorted in non-descending order! */
-template<
-	typename PointT = pcl::PointXYZ,
-	typename AllocT = typename pcl::PointCloud<PointT>::VectorType::allocator_type,
-	typename IntT = pcl::index_t>
-void pc_remove_selection(
-	std::vector<PointT, AllocT>& points,
-	const std::vector<IntT>& selection
-) {
-	// assert sizes
-	size_t last = points.size() - 1;
-	for(size_t i = 0; i < selection.size(); i++) {
-		memcpy(&points[selection[i]], &points[last], sizeof(PointT));
-		last--;
-	}
-	points.resize(last + 1);
-}
-/** Normalize the set of points to only include the selected indices. Prereq: selection indices must be sorted in non-descending order! */
-template<
-	typename PointT = pcl::PointXYZ,
-	typename AllocT = typename pcl::PointCloud<PointT>::VectorType::allocator_type,
-	typename IntT = pcl::index_t>
-inline void pc_normalize_selection(
-	std::vector<PointT, AllocT>& points,
-	const std::vector<IntT>& selection
-) {
-	for(size_t i = 0; i < selection.size(); i++) {
-		memcpy(&points[i], &points[selection[i]], sizeof(PointT));
-	}
-	points.resize(selection.size());
-}
-
-/** Filter a set of ranges to an inclusive set of indices */
-template<
-	typename FloatT = float,
-	typename IntT = pcl::index_t>
-void pc_filter_ranges(
-	const std::vector<FloatT>& ranges,
-	const std::vector<IntT>& selection,
-	std::vector<IntT>& filtered,
-	const FloatT min, const FloatT max
-) {
-	filtered.clear();
-	if(!selection.empty()) {
-		filtered.reserve(selection.size());
-		for(size_t i = 0; i < selection.size(); i++) {
-			const IntT idx = selection[i];
-			const FloatT r = ranges[idx];
-			if(r <= max && r >= min) {
-				filtered.push_back(idx);
+			if (diff_p < height_thresholds[i] && diff_n < height_thresholds[i]) {	// pt is part of ground
+				ground[_slot] = ground[p_idx];
+				_slot++;
 			}
+
 		}
-	} else {
-		filtered.reserve(ranges.size());
-		for(size_t i = 0; i < ranges.size(); i++) {
-			const FloatT r = ranges[i];
-			if(r <= max && r >= min) {
-				filtered.push_back(i);
-			}
-		}
+		ground.resize(_slot);
+
 	}
+
 }
-/** Filter a set of points by their distance from a specified origin point (<0, 0, 0> by default) */
-template<
-	typename PointT = pcl::PointXYZ,
-	typename AllocT = typename pcl::PointCloud<PointT>::VectorType::allocator_type,
-	typename IntT = pcl::index_t,
-	typename FloatT = float>
-void pc_filter_distance(
-	const std::vector<PointT, AllocT>& points,
-	const std::vector<IntT>& selection,
-	std::vector<IntT>& filtered,
-	const FloatT min, const FloatT max,
-	const Eigen::Vector3<FloatT> origin = Eigen::Vector3<FloatT>::Zero()
-) {
-	filtered.clear();
-	if(!selection.empty()) {
-		filtered.reserve(selection.size());
-		for(size_t i = 0; i < selection.size(); i++) {
-			const IntT idx = selection[i];
-			const FloatT r = (origin - *reinterpret_cast<const Eigen::Vector3<FloatT>*>(&points[idx])).norm();
-			if(r <= max && r >= min) {
-				filtered.push_back(idx);
-			}
-		}
-	} else {
-		filtered.reserve(points.size());
-		for(size_t i = 0; i < points.size(); i++) {
-			const FloatT r = (origin - *reinterpret_cast<const Eigen::Vector3<FloatT>*>(&points[i])).norm();
-			if(r <= max && r >= min) {
-				filtered.push_back(i);
-			}
-		}
-	}
-}
+
+
+
+
 
 /** Given a base set of indices A and a subset of indices B, get (A - B).
  * prereq: selection indices must be in ascending order */
@@ -724,6 +604,130 @@ void pc_combine_sorted(
 	}
 	for(; _p1 < sel1.size(); _p1++) out.push_back( sel1[_p1] );
 	for(; _p2 < sel2.size(); _p2++) out.push_back( sel2[_p2] );
+}
+
+/** Remove the points at the each index in the provided set. Prereq: selection indices must be sorted in non-descending order! */
+template<
+	typename PointT = pcl::PointXYZ,
+	typename AllocT = typename pcl::PointCloud<PointT>::VectorType::allocator_type,
+	typename IntT = pcl::index_t>
+void pc_remove_selection(
+	std::vector<PointT, AllocT>& points,
+	const std::vector<IntT>& selection
+) {
+	// assert sizes
+	size_t last = points.size() - 1;
+	for(size_t i = 0; i < selection.size(); i++) {
+		memcpy(&points[selection[i]], &points[last], sizeof(PointT));
+		last--;
+	}
+	points.resize(last + 1);
+}
+
+/** Normalize the set of points to only include the selected indices. Prereq: selection indices must be sorted in non-descending order! */
+template<
+	typename PointT = pcl::PointXYZ,
+	typename AllocT = typename pcl::PointCloud<PointT>::VectorType::allocator_type,
+	typename IntT = pcl::index_t>
+inline void pc_normalize_selection(
+	std::vector<PointT, AllocT>& points,
+	const std::vector<IntT>& selection
+) {
+	for(size_t i = 0; i < selection.size(); i++) {
+		memcpy(&points[i], &points[selection[i]], sizeof(PointT));
+	}
+	points.resize(selection.size());
+}
+
+/** Generate a set of ranges for each point in the provided cloud */
+template<
+	typename PointT = pcl::PointXYZ,
+	typename AllocT = typename pcl::PointCloud<PointT>::VectorType::allocator_type,
+	typename IntT = pcl::index_t,
+	typename FloatT = float>
+void pc_generate_ranges(
+	const std::vector<PointT, AllocT>& points,
+	const std::vector<IntT>& selection,
+	std::vector<FloatT>& out_ranges,
+	const Eigen::Vector3<FloatT> origin = Eigen::Vector3<FloatT>::Zero()
+) {
+	if (!selection.empty()) {
+		out_ranges.resize(selection.size());
+		for (int i = 0; i < selection.size(); i++) {
+			out_ranges[i] = (origin - *reinterpret_cast<const Eigen::Vector3<FloatT>*>(&points[selection[i]])).norm();
+		}
+	}
+	else {
+		out_ranges.resize(points.size());
+		for (int i = 0; i < points.size(); i++) {
+			out_ranges[i] = (origin - *reinterpret_cast<const Eigen::Vector3<FloatT>*>(&points[i])).norm();
+		}
+	}
+}
+
+/** Filter a set of ranges to an inclusive set of indices */
+template<
+	typename FloatT = float,
+	typename IntT = pcl::index_t>
+void pc_filter_ranges(
+	const std::vector<FloatT>& ranges,
+	const std::vector<IntT>& selection,
+	std::vector<IntT>& filtered,
+	const FloatT min, const FloatT max
+) {
+	filtered.clear();
+	if(!selection.empty()) {
+		filtered.reserve(selection.size());
+		for(size_t i = 0; i < selection.size(); i++) {
+			const IntT idx = selection[i];
+			const FloatT r = ranges[idx];
+			if(r <= max && r >= min) {
+				filtered.push_back(idx);
+			}
+		}
+	} else {
+		filtered.reserve(ranges.size());
+		for(size_t i = 0; i < ranges.size(); i++) {
+			const FloatT r = ranges[i];
+			if(r <= max && r >= min) {
+				filtered.push_back(i);
+			}
+		}
+	}
+}
+
+/** Filter a set of points by their distance from a specified origin point (<0, 0, 0> by default) */
+template<
+	typename PointT = pcl::PointXYZ,
+	typename AllocT = typename pcl::PointCloud<PointT>::VectorType::allocator_type,
+	typename IntT = pcl::index_t,
+	typename FloatT = float>
+void pc_filter_distance(
+	const std::vector<PointT, AllocT>& points,
+	const std::vector<IntT>& selection,
+	std::vector<IntT>& filtered,
+	const FloatT min, const FloatT max,
+	const Eigen::Vector3<FloatT> origin = Eigen::Vector3<FloatT>::Zero()
+) {
+	filtered.clear();
+	if(!selection.empty()) {
+		filtered.reserve(selection.size());
+		for(size_t i = 0; i < selection.size(); i++) {
+			const IntT idx = selection[i];
+			const FloatT r = (origin - *reinterpret_cast<const Eigen::Vector3<FloatT>*>(&points[idx])).norm();
+			if(r <= max && r >= min) {
+				filtered.push_back(idx);
+			}
+		}
+	} else {
+		filtered.reserve(points.size());
+		for(size_t i = 0; i < points.size(); i++) {
+			const FloatT r = (origin - *reinterpret_cast<const Eigen::Vector3<FloatT>*>(&points[i])).norm();
+			if(r <= max && r >= min) {
+				filtered.push_back(i);
+			}
+		}
+	}
 }
 
 /** Write an element's bytes to a buffer every 'interlace_rep' number of element spans at an offset of 'interlace_off' in elments spans

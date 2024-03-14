@@ -87,16 +87,16 @@ namespace ldrp {
 			max_scan_theta_degrees	= 90.f,
 			min_scan_range_cm		= 10.f,
 			max_pmf_range_cm		= 200.f,
-			max_z_thresh_cm			= 75.f,
+			max_z_thresh_cm			= 150.f,
 			min_z_thresh_cm			= 25.f,
 			voxel_size_cm			= 3.f,
 			map_resolution_cm		= 5.f,
 			pmf_window_base			= 2.f,
 			pmf_max_window_size_cm	= 45.f,
-			pmf_cell_size_cm		= 4.f,
-			pmf_init_distance_cm	= 4.f,
+			pmf_cell_size_cm		= 5.f,
+			pmf_init_distance_cm	= 5.f,
 			pmf_max_distance_cm		= 12.f,
-			pmf_slope				= 0.7f;
+			pmf_slope				= 2.f;
 
 		float
 			lidar_offset_xyz[3]		= { 0.f, 0.f, 0.f },
