@@ -33,7 +33,7 @@
 #include <pcl/sample_consensus/method_types.h>
 #include <pcl/sample_consensus/model_types.h>
 
-#ifndef USING_WPILIB
+#ifndef USING_WPILIB		// TODO: change to LDRP_USING_WPILIB (update cmake)
   #define USING_WPILIB false
 #endif
 
@@ -137,7 +137,7 @@ namespace ldrp {
   #define LDRP_SAFETY_CHECKS true
 #endif
 
-#ifndef _LDRP_DISABLE_LOG
+#ifndef _LDRP_DISABLE_LOG	// TODO: make sure all public macro options are formatted the same, and change to be boolean valued (with defaults)
   #if USING_WPILIB
     #define LDRP_LOG(__condition, ...)		if(__condition) { wpi::DataLogManager::Log( fmt::format(__VA_ARGS__) ); }
   #else
@@ -285,25 +285,33 @@ namespace ldrp {
 			this->_nt.test_filtered_points	= this->_nt.base->GetRawTopic("filtered points").GetEntry( "PointXYZ_[]", {} );
 
 #ifndef DISABLE_NT_TUNING
-			this->_nt.tuning.max_pmf_range			= this->_nt.base->GetFloatTopic("tuning/pmf/max range (cm)").GetEntry( this->_config.fpipeline.max_pmf_range_cm );
-			this->_nt.tuning.max_z_thresh			= this->_nt.base->GetFloatTopic("tuning/max z thresh (cm)").GetEntry( this->_config.fpipeline.max_z_thresh_cm );
-			this->_nt.tuning.min_z_thresh			= this->_nt.base->GetFloatTopic("tuning/min z thresh (cm)").GetEntry( this->_config.fpipeline.min_z_thresh_cm );
-			this->_nt.tuning.pmf_window_base		= this->_nt.base->GetFloatTopic("tuning/pmf/window base").GetEntry( this->_config.fpipeline.pmf_window_base );
-			this->_nt.tuning.pmf_max_window_size	= this->_nt.base->GetFloatTopic("tuning/pmf/max window (cm)").GetEntry( this->_config.fpipeline.pmf_max_window_size_cm );
-			this->_nt.tuning.pmf_cell_size			= this->_nt.base->GetFloatTopic("tuning/pmf/cell size (cm)").GetEntry( this->_config.fpipeline.pmf_cell_size_cm );
-			this->_nt.tuning.pmf_init_distance		= this->_nt.base->GetFloatTopic("tuning/pmf/init distance (cm)").GetEntry( this->_config.fpipeline.pmf_init_distance_cm );
-			this->_nt.tuning.pmf_max_distance		= this->_nt.base->GetFloatTopic("tuning/pmf/max distance (cm)").GetEntry( this->_config.fpipeline.pmf_max_distance_cm );
-			this->_nt.tuning.pmf_slope				= this->_nt.base->GetFloatTopic("tuning/pmf/slope (cm)").GetEntry( this->_config.fpipeline.pmf_slope );
+			this->_nt.tuning.max_scan_theta			= this->_nt.base->GetFloatTopic("tuning/max scan theta (deg)")		.GetEntry( this->_config.fpipeline.max_scan_theta_deg );
+			this->_nt.tuning.min_scan_theta			= this->_nt.base->GetFloatTopic("tuning/min scan theta (deg)")		.GetEntry( this->_config.fpipeline.min_scan_theta_deg );
+			this->_nt.tuning.min_scan_range			= this->_nt.base->GetFloatTopic("tuning/min scan range (cm)")		.GetEntry( this->_config.fpipeline.min_scan_range_cm );
+			this->_nt.tuning.voxel_size				= this->_nt.base->GetFloatTopic("tuning/voxel size (cm)")			.GetEntry( this->_config.fpipeline.voxel_size_cm );
+			this->_nt.tuning.max_pmf_range			= this->_nt.base->GetFloatTopic("tuning/pmf/max range (cm)")		.GetEntry( this->_config.fpipeline.max_pmf_range_cm );
+			this->_nt.tuning.max_z_thresh			= this->_nt.base->GetFloatTopic("tuning/max z thresh (cm)")			.GetEntry( this->_config.fpipeline.max_z_thresh_cm );
+			this->_nt.tuning.min_z_thresh			= this->_nt.base->GetFloatTopic("tuning/min z thresh (cm)")			.GetEntry( this->_config.fpipeline.min_z_thresh_cm );
+			this->_nt.tuning.pmf_window_base		= this->_nt.base->GetFloatTopic("tuning/pmf/window base")			.GetEntry( this->_config.fpipeline.pmf_window_base );
+			this->_nt.tuning.pmf_max_window_size	= this->_nt.base->GetFloatTopic("tuning/pmf/max window (cm)")		.GetEntry( this->_config.fpipeline.pmf_max_window_size_cm );
+			this->_nt.tuning.pmf_cell_size			= this->_nt.base->GetFloatTopic("tuning/pmf/cell size (cm)")		.GetEntry( this->_config.fpipeline.pmf_cell_size_cm );
+			this->_nt.tuning.pmf_init_distance		= this->_nt.base->GetFloatTopic("tuning/pmf/init distance (cm)")	.GetEntry( this->_config.fpipeline.pmf_init_distance_cm );
+			this->_nt.tuning.pmf_max_distance		= this->_nt.base->GetFloatTopic("tuning/pmf/max distance (cm)")		.GetEntry( this->_config.fpipeline.pmf_max_distance_cm );
+			this->_nt.tuning.pmf_slope				= this->_nt.base->GetFloatTopic("tuning/pmf/slope (cm)")			.GetEntry( this->_config.fpipeline.pmf_slope );
 
-			this->_nt.tuning.max_pmf_range.Set( this->_config.fpipeline.max_pmf_range_cm );
-			this->_nt.tuning.max_z_thresh.Set( this->_config.fpipeline.max_z_thresh_cm );
-			this->_nt.tuning.min_z_thresh.Set( this->_config.fpipeline.min_z_thresh_cm );
-			this->_nt.tuning.pmf_window_base.Set( this->_config.fpipeline.pmf_window_base );
-			this->_nt.tuning.pmf_max_window_size.Set( this->_config.fpipeline.pmf_max_window_size_cm );
-			this->_nt.tuning.pmf_cell_size.Set( this->_config.fpipeline.pmf_cell_size_cm );
-			this->_nt.tuning.pmf_init_distance.Set( this->_config.fpipeline.pmf_init_distance_cm );
-			this->_nt.tuning.pmf_max_distance.Set( this->_config.fpipeline.pmf_max_distance_cm );
-			this->_nt.tuning.pmf_slope.Set( this->_config.fpipeline.pmf_slope );
+			this->_nt.tuning.max_scan_theta			.Set( this->_config.fpipeline.max_scan_theta_deg );
+			this->_nt.tuning.min_scan_theta			.Set( this->_config.fpipeline.min_scan_theta_deg );
+			this->_nt.tuning.min_scan_range			.Set( this->_config.fpipeline.min_scan_range_cm );
+			this->_nt.tuning.voxel_size				.Set( this->_config.fpipeline.voxel_size_cm );
+			this->_nt.tuning.max_pmf_range			.Set( this->_config.fpipeline.max_pmf_range_cm );
+			this->_nt.tuning.max_z_thresh			.Set( this->_config.fpipeline.max_z_thresh_cm );
+			this->_nt.tuning.min_z_thresh			.Set( this->_config.fpipeline.min_z_thresh_cm );
+			this->_nt.tuning.pmf_window_base		.Set( this->_config.fpipeline.pmf_window_base );
+			this->_nt.tuning.pmf_max_window_size	.Set( this->_config.fpipeline.pmf_max_window_size_cm );
+			this->_nt.tuning.pmf_cell_size			.Set( this->_config.fpipeline.pmf_cell_size_cm );
+			this->_nt.tuning.pmf_init_distance		.Set( this->_config.fpipeline.pmf_init_distance_cm );
+			this->_nt.tuning.pmf_max_distance		.Set( this->_config.fpipeline.pmf_max_distance_cm );
+			this->_nt.tuning.pmf_slope				.Set( this->_config.fpipeline.pmf_slope );
 #endif
 
 		}
@@ -413,6 +421,10 @@ namespace ldrp {
 #ifndef DISABLE_NT_TUNING
 			struct {
 				nt::FloatEntry
+					max_scan_theta,
+					min_scan_theta,
+					min_scan_range,
+					voxel_size,
 					max_pmf_range,
 					max_z_thresh,
 					min_z_thresh,
@@ -933,10 +945,50 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 
 	std::shared_ptr<nt::NetworkTable> nt_inst = this->_nt.base->GetSubTable( fmt::format("Filter Threads/inst {}", f_inst->index) );
 	f_inst->nt.is_active = nt_inst->GetBooleanTopic("activity").GetEntry(false);
+#ifndef DISABLE_NT_PROFILING
 	f_inst->nt.proc_step = nt_inst->GetIntegerTopic("state").GetEntry(0);
 
+	#define NT_PROFILE_STAGE(n)		f_inst->nt.proc_step.Set((n));
+#else
+	#define NT_PROFILE_STAGE(...)
+#endif
+
 	f_inst->nt.is_active.Set(false);
-	f_inst->nt.proc_step.Set(0);	// 0 = init (pre looping)
+	NT_PROFILE_STAGE(0);	// 0 = init (pre looping)
+
+#ifndef DISABLE_NT_TUNING
+	const float		// all "unitted" parameters are normalized to be in meters and radians!
+		_max_scan_theta			= this->_nt.tuning.max_scan_theta.Get(),
+		_min_scan_theta			= this->_nt.tuning.min_scan_theta.Get(),
+		_min_scan_range			= this->_nt.tuning.min_scan_range.Get(),
+		_voxel_size				= this->_nt.tuning.voxel_size.Get(),
+		_max_pmf_range			= this->_nt.tuning.max_pmf_range.Get() * 1e-2f,
+		_max_z_thresh			= this->_nt.tuning.max_z_thresh.Get() * 1e-2f,
+		_min_z_thresh			= this->_nt.tuning.min_z_thresh.Get() * 1e-2f,
+		_pmf_window_base		= this->_nt.tuning.pmf_window_base.Get(),
+		_pmf_max_window_size	= this->_nt.tuning.pmf_max_window_size.Get() * 1e-2f,
+		_pmf_cell_size			= this->_nt.tuning.pmf_cell_size.Get() * 1e-2f,
+		_pmf_init_distance		= this->_nt.tuning.pmf_init_distance.Get() * 1e-2f,
+		_pmf_max_distance		= this->_nt.tuning.pmf_max_distance.Get() * 1e-2f,
+		_pmf_slope				= this->_nt.tuning.pmf_slope.Get()
+	;
+#else
+	const float		// all "unitted" parameters are normalized to be in meters and radians!
+		_max_scan_theta			= this->_config.fpipeline.max_scan_theta_deg * (std::numbers::pi_v<float> / 180.f),
+		_min_scan_theta			= this->_config.fpipeline.min_scan_theta_deg * (std::numbers::pi_v<float> / 180.f),
+		_min_scan_range			= this->_config.fpipeline.min_scan_range_cm * 1e-2f,
+		_voxel_size				= this->_config.fpipeline.voxel_size_cm * 1e-2f,
+		_max_pmf_range			= this->_config.fpipeline.max_pmf_range_cm * 1e-2f,
+		_max_z_thresh			= this->_config.fpipeline.max_z_thresh_cm * 1e-2f,
+		_min_z_thresh			= this->_config.fpipeline.min_z_thresh_cm * 1e-2f,
+		_pmf_window_base		= this->_config.fpipeline.pmf_window_base,
+		_pmf_max_window_size	= this->_config.fpipeline.pmf_max_window_size_cm * 1e-2f,
+		_pmf_cell_size			= this->_config.fpipeline.pmf_cell_size_cm * 1e-2f,
+		_pmf_init_distance		= this->_config.fpipeline.pmf_init_distance_cm * 1e-2f,
+		_pmf_max_distance		= this->_config.fpipeline.pmf_max_distance_cm * 1e-2f,
+		_pmf_slope				= this->_config.fpipeline.pmf_slope
+	;
+#endif
 	
 	// precalulcate values
 	const size_t max_points{ 
@@ -972,7 +1024,7 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 	for(;this->_state.enable_threads.load();) {
 
 		f_inst->nt.is_active.Set(true);
-		f_inst->nt.proc_step.Set(10);	// 1 = step 1 (combine points)
+		NT_PROFILE_STAGE(10);	// 1 = step 1 (combine points)
 
 		point_cloud.clear();	// clear the vector and set w,h to 0
 		// point_ranges.clear();	// << MEMORY LEAK!!! (it was)
@@ -1008,10 +1060,8 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 
 // #define DISABLE_PRELIM_POINT_FILTERING	// option for this as well
 #ifndef DISABLE_PRELIM_POINT_FILTERING
-							const float azimuth_deg = lidar_point.azimuth * 180.f / std::numbers::pi_v<float>;
-							if(
-								(azimuth_deg <= this->_config.fpipeline.max_scan_theta_deg && azimuth_deg >= this->_config.fpipeline.min_scan_theta_deg)
-									&& (lidar_point.range * 1e2f > this->_config.fpipeline.min_scan_range_cm)
+							if(								// if angle in range...									// and distance greater than minimum
+								lidar_point.azimuth <= _max_scan_theta && lidar_point.azimuth >= _min_scan_theta && lidar_point.range > _min_scan_range
 								// ...apply any other filters that benefit from points in lidar scan coord space as well
 							) {
 #else
@@ -1038,7 +1088,7 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 		point_cloud.is_dense = true;
 
 		if(this->_config.points_logging_mode & POINT_LOGGING_INCLUDE_RAW) {
-			f_inst->nt.proc_step.Set(11);	// 11 = export raw cloud
+			NT_PROFILE_STAGE(11);	// 11 = export raw cloud
 			if(this->_config.points_logging_mode & POINT_LOGGING_TAR) {
 				this->pcd_writer.addCloud(point_cloud);
 			}
@@ -1055,21 +1105,7 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 		// 2. run filtering on points
 		{
 
-			f_inst->nt.proc_step.Set(20);	// 20 = filtering (init)
-
-#ifndef DISABLE_NT_TUNING
-			const float
-				_max_pmf_range			= this->_nt.tuning.max_pmf_range.Get() * 1e-2f,
-				_max_z_thresh			= this->_nt.tuning.max_z_thresh.Get() * 1e-2f,
-				_min_z_thresh			= this->_nt.tuning.min_z_thresh.Get() * 1e-2f,
-				_pmf_window_base		= this->_nt.tuning.pmf_window_base.Get(),
-				_pmf_max_window_size	= this->_nt.tuning.pmf_max_window_size.Get() * 1e-2f,
-				_pmf_cell_size			= this->_nt.tuning.pmf_cell_size.Get() * 1e-2f,
-				_pmf_init_distance		= this->_nt.tuning.pmf_init_distance.Get() * 1e-2f,
-				_pmf_max_distance		= this->_nt.tuning.pmf_max_distance.Get() * 1e-2f,
-				_pmf_slope				= this->_nt.tuning.pmf_slope.Get()
-			;
-#endif
+			NT_PROFILE_STAGE(20);	// 20 = filtering (init)
 
 			voxelized_points.clear();
 			voxelized_ranges.clear();
@@ -1085,30 +1121,28 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 			if(origin_samples > 1) avg_origin /= origin_samples;
 
 			// voxelize points
-			f_inst->nt.proc_step.Set(21);	// 21 = filtering (voxelize)
+			NT_PROFILE_STAGE(21);	// 21 = filtering (voxelize)
 			voxel_filter(
 				point_cloud, DEFAULT_NO_SELECTION, voxelized_points,
-				this->_config.fpipeline.voxel_size_cm * 1e-2f,
-				this->_config.fpipeline.voxel_size_cm * 1e-2f,
-				this->_config.fpipeline.voxel_size_cm * 1e-2f
+				_voxel_size, _voxel_size, _voxel_size
 			);
 
 			// filter points under "high cut" thresh
-			f_inst->nt.proc_step.Set(22);	// 22 = filtering (z-high)
+			NT_PROFILE_STAGE(22);	// 22 = filtering (z-high)
 			carteZ_filter(
 				voxelized_points, DEFAULT_NO_SELECTION, z_high_filtered,
 				-std::numeric_limits<float>::infinity(),
 				_max_z_thresh
 			);
 			// further filter points below "low cut" thresh
-			f_inst->nt.proc_step.Set(23);	// 23 = filtering (z-low)
+			NT_PROFILE_STAGE(23);	// 23 = filtering (z-low)
 			carteZ_filter(
 				voxelized_points, z_high_filtered, z_low_subset_filtered,
 				-std::numeric_limits<float>::infinity(),
 				_min_z_thresh
 			);
 			// get the points inbetween high and low thresholds --> treated as wall obstacles
-			f_inst->nt.proc_step.Set(24);	// 24 = filtering (z-mid)
+			NT_PROFILE_STAGE(24);	// 24 = filtering (z-mid)
 			pc_negate_selection(
 				z_high_filtered,
 				z_low_subset_filtered,
@@ -1116,7 +1150,7 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 			);
 
 			// filter close enough points for PMF
-			f_inst->nt.proc_step.Set(25);	// 25 = filtering (pmf-pre)
+			NT_PROFILE_STAGE(25);	// 25 = filtering (pmf-pre)
 			pc_filter_distance(
 				voxelized_points.points,
 				z_low_subset_filtered,
@@ -1126,7 +1160,7 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 			);
 
 			// apply pmf to selected points
-			f_inst->nt.proc_step.Set(26);	// 26 = filtering (pmf)
+			NT_PROFILE_STAGE(26);	// 26 = filtering (pmf)
 			progressive_morph_filter(
 				voxelized_points, pre_pmf_range_filtered, pmf_filtered_ground,
 				_pmf_window_base,
@@ -1138,7 +1172,7 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 				false
 			);
 			// obstacles = (base - ground)
-			f_inst->nt.proc_step.Set(27);	// 27 = filtering (obstacles)
+			NT_PROFILE_STAGE(27);	// 27 = filtering (obstacles)
 			pc_negate_selection(
 				pre_pmf_range_filtered,
 				pmf_filtered_ground,
@@ -1148,7 +1182,7 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 			// export filter results
 			if(this->_config.points_logging_mode & (POINT_LOGGING_NT | POINT_LOGGING_INCLUDE_FILTERED)) {
 
-				f_inst->nt.proc_step.Set(28);	// 28 = filtering (export)
+				NT_PROFILE_STAGE(28);	// 28 = filtering (export)
 
 				// combine all obstacle points into a single selection
 				pc_combine_sorted(
@@ -1180,24 +1214,24 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 
 		// 3. update accumulator
 		{
-			f_inst->nt.proc_step.Set(30);	// 30 = update grid (locking)
+			NT_PROFILE_STAGE(30);	// 30 = update grid (locking)
 
 			this->_state.accumulation_mutex.lock();
 
-			f_inst->nt.proc_step.Set(31);	// 31 = update grid (pmf insert)
+			NT_PROFILE_STAGE(31);	// 31 = update grid (pmf insert)
 			this->accumulator.incrementRatio(	// insert PMF obstacles
 				voxelized_points,
 				pre_pmf_range_filtered,		// base
 				pmf_filtered_obstacles		// subset
 			);
-			f_inst->nt.proc_step.Set(32);	// 32 = update grid (z-insert)
+			NT_PROFILE_STAGE(32);	// 32 = update grid (z-insert)
 			this->accumulator.incrementRatio(	// insert z-thresh obstacles
 				voxelized_points,
 				z_mid_filtered_obstacles,	// base
 				DEFAULT_NO_SELECTION		// use all of base
 			);
 
-			f_inst->nt.proc_step.Set(33);	// 33 = update grid (cleanup)
+			NT_PROFILE_STAGE(33);	// 33 = update grid (cleanup)
 			this->_state.obstacle_updates++;
 			this->_state.obstacles_updated.notify_all();
 
@@ -1213,12 +1247,12 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 
 		// processing finished, push instance idx to queue
 		f_inst->nt.is_active.Set(false);
-		f_inst->nt.proc_step.Set(40);	// 40 = finished
+		NT_PROFILE_STAGE(40);	// 40 = finished
 		f_inst->link_state = false;
 		std::unique_lock<std::mutex> lock{ this->_state.finished_queue_mutex };
 		this->finished_queue.push_back(f_inst->index);
 		// wait for signal to continue...
-		f_inst->nt.proc_step.Set(41);	// 41 = waiting for update
+		NT_PROFILE_STAGE(41);	// 41 = waiting for update
 		for(;this->_state.enable_threads.load() && !f_inst->link_state;) {
 			f_inst->link_condition.wait(lock);
 		}
