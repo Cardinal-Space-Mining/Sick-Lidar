@@ -1,7 +1,41 @@
-#include "lidar_api.h"
+/** Copyright (c) Cardinal Space Mining 2024 */
 
+/** Default macro definitions -- configurable via CMake */
+#ifndef LDRP_ENABLE_LOGGING		// enable/disable all logging output
+  #define LDRP_ENABLE_LOGGING					true
+#endif
+#ifndef LDRP_DEBUG_LOGGING		// enable/disable debug level logging
+  #define LDRP_DEBUG_LOGGING					false
+#endif
+#ifndef LDRP_SAFETY_CHECKS		// enable/disable additional safety checking (ex. bound checking)
+  #define LDRP_SAFETY_CHECKS					true
+#endif
+#ifndef LDRP_USE_WPILIB			// whether or not WPILib is being compiled into the library - for build system internal use only
+  #define LDRP_USE_WPILIB						false
+#endif
+#ifndef LDRP_USE_SIM_MODE		// enable/disable using simulation as the source of points, and set which simulation source to use (1 = internal, 2 = UE simulator)
+  #define LDRP_USE_SIM_MODE						false
+#endif
+#ifndef LDRP_USE_ALL_ECHOS			// whether or not to use all echo points from the live scanner
+  #define LDRP_USE_ALL_ECHOS					false
+#endif
+#ifndef LDRP_DISABLE_PRELIM_POINT_FILTERING		// enable/disable preliminary filtering of points (azimuth angle and minimum range)
+  #define LDRP_DISABLE_PRELIM_POINT_FILTERING	false
+#endif
+#ifndef LDRP_ENABLE_NT_TUNING	// enable/disable live tuning using networktables (requires WPILib)
+  #define LDRP_ENABLE_NT_TUNING					false
+#endif
+#ifndef LDRP_ENABLE_NT_PROFILING	// enable/disable live and logged filter pipeline profiling over networktables
+  #define LDRP_ENABLE_NT_PROFILING				false
+#endif
+
+
+#include "lidar_api.h"
+#if !LDRP_SAFETY_CHECKS
+  #define GRID_IMPL_SKIP_BOUND_CHECKING		// disables array bound checking within QRG
+#endif
 #include "filtering.hpp"
-#include "accumulator_grid2.hpp"
+#include "grid.hpp"
 #include "mem_utils.hpp"
 #include "pcd_streaming.h"
 
@@ -33,11 +67,7 @@
 #include <pcl/sample_consensus/method_types.h>
 #include <pcl/sample_consensus/model_types.h>
 
-#ifndef USING_WPILIB		// TODO: change to LDRP_USING_WPILIB (update cmake)
-  #define USING_WPILIB false
-#endif
-
-#if USING_WPILIB
+#if LDRP_USE_WPILIB		// TODO: actually enforce this macro in code when disabled?
 #include <frc/geometry/Pose3d.h>
 #include <frc/interpolation/TimeInterpolatableBuffer.h>
 #include <networktables/NetworkTableInstance.h>
@@ -81,7 +111,7 @@ template<typename T>
 static T&& lerpClosest(T&& a, T&& b, double t) {	// t is nominally in [0, 1]
 	return (abs(t) < abs(1.0 - t)) ? std::forward<T>(a) : std::forward<T>(b);
 }
-#if USING_WPILIB
+#if LDRP_USE_WPILIB
 static frc::Pose3d lerpPose3d(const frc::Pose3d& a, const frc::Pose3d& b, double t) {	// t is nominally in [0, 1]
 	return a.Exp(a.Log(b) * t);
 }
@@ -130,15 +160,8 @@ static inline const uint32_t convertNumThreads(const int32_t input_num, const in
 
 namespace ldrp {
 
-#ifndef LOG_DEBUG
-  #define LOG_DEBUG true
-#endif
-#ifndef LDRP_SAFETY_CHECKS
-  #define LDRP_SAFETY_CHECKS true
-#endif
-
-#ifndef _LDRP_DISABLE_LOG	// TODO: make sure all public macro options are formatted the same, and change to be boolean valued (with defaults)
-  #if USING_WPILIB
+#if LDRP_ENABLE_LOGGING
+  #if LDRP_USE_WPILIB
     #define LDRP_LOG(__condition, ...)		if(__condition) { wpi::DataLogManager::Log( fmt::format(__VA_ARGS__) ); }
   #else
     #define LDRP_LOG(__condition, ...)		if(__condition) { std::printf("%s\n", fmt::format(__VA_ARGS__) ); }		// DLM automatically appends newlines automatically
@@ -148,6 +171,7 @@ namespace ldrp {
   #define LOG_ALWAYS			true
   #define LOG_STANDARD			LOG_LEVEL(1)
   #define LOG_VERBOSE			LOG_LEVEL(2)
+  #define LOG_DEBUG				LDRP_DEBUG_LOGGING
 #else
   #define LDRP_LOG_GLOBAL(...)
   #define LDRP_LOG_S_GLOBAL(...)
@@ -158,334 +182,335 @@ namespace ldrp {
   #define LOG_ALWAYS
   #define LOG_STANDARD
   #define LOG_VERBOSE
+  #define LOG_DEBUG
 #endif
 
 
-	const LidarConfig LidarConfig::STATIC_DEFAULT{};
+const LidarConfig LidarConfig::STATIC_DEFAULT{};
 
-	/** Interfacing and Filtering Implementation (singleton usage) */
-	struct LidarImpl {
-	public:
-		LidarImpl(const LidarConfig& config = LidarConfig::STATIC_DEFAULT) :
-			_state{ .log_level				= config.log_level },
-			_config{
+/** Interfacing and Filtering Implementation (singleton usage) */
+struct LidarImpl {
+public:
+	LidarImpl(const LidarConfig& config = LidarConfig::STATIC_DEFAULT) :
+		_state{ .log_level				= config.log_level },
+		_config{
 
-				.lidar_hostname				= config.lidar_hostname,
-				.lidar_udp_port				= config.lidar_udp_port,
-				.use_msgpack				= config.use_msgpack,
-				.enabled_segments			= config.enabled_segments_bits,
-				.buffered_frames			= config.buffered_scan_frames,
-				.max_filter_threads			= ldru::convertNumThreads(config.max_filter_threads, 1),
-				.points_logging_mode		= config.points_logging_mode,
-				.points_log_fname			= config.points_tar_fname,
-				.pose_history_range			= config.pose_history_period_s,
-				.skip_invalid_transform_ts	= config.skip_invalid_transform_ts,
+			.lidar_hostname				= config.lidar_hostname,
+			.lidar_udp_port				= config.lidar_udp_port,
+			.use_msgpack				= config.use_msgpack,
+			.enabled_segments			= config.enabled_segments_bits,
+			.buffered_frames			= config.buffered_scan_frames,
+			.max_filter_threads			= ldru::convertNumThreads(config.max_filter_threads, 1),
+			.points_logging_mode		= config.points_logging_mode,
+			.points_log_fname			= config.points_tar_fname,
+			.pose_history_range			= config.pose_history_period_s,
+			.skip_invalid_transform_ts	= config.skip_invalid_transform_ts,
 
-				.obstacle_point_color		= config.obstacle_point_color,
-				.standard_point_color		= config.standard_point_color,
+			.obstacle_point_color		= config.obstacle_point_color,
+			.standard_point_color		= config.standard_point_color,
 
-				.lidar_offset_xyz			= Eigen::Vector3f{ config.lidar_offset_xyz },
-				.lidar_offset_quat			= Eigen::Quaternionf{ config.lidar_offset_quat },	// I no longer trust reinterpret_cast<> with Eigen::Quaternionf :|
+			.lidar_offset_xyz			= Eigen::Vector3f{ config.lidar_offset_xyz },
+			.lidar_offset_quat			= Eigen::Quaternionf{ config.lidar_offset_quat },	// I no longer trust reinterpret_cast<> with Eigen::Quaternionf :|
 
-				.fpipeline{
-					.min_scan_theta_deg		= config.min_scan_theta_degrees,
-					.max_scan_theta_deg		= config.max_scan_theta_degrees,
-					.min_scan_range_cm		= config.min_scan_range_cm,
-					.max_pmf_range_cm		= config.max_pmf_range_cm,
-					.max_z_thresh_cm		= config.max_z_thresh_cm,
-					.min_z_thresh_cm		= config.min_z_thresh_cm,
-					.voxel_size_cm			= config.voxel_size_cm,
-					.map_resolution_cm		= config.map_resolution_cm,
-					.pmf_window_base		= config.pmf_window_base,
-					.pmf_max_window_size_cm	= config.pmf_max_window_size_cm,
-					.pmf_cell_size_cm		= config.pmf_cell_size_cm,
-					.pmf_init_distance_cm	= config.pmf_init_distance_cm,
-					.pmf_slope				= config.pmf_slope
-				},
+			.fpipeline{
+				.min_scan_theta_deg		= config.min_scan_theta_degrees,
+				.max_scan_theta_deg		= config.max_scan_theta_degrees,
+				.min_scan_range_cm		= config.min_scan_range_cm,
+				.max_pmf_range_cm		= config.max_pmf_range_cm,
+				.max_z_thresh_cm		= config.max_z_thresh_cm,
+				.min_z_thresh_cm		= config.min_z_thresh_cm,
+				.voxel_size_cm			= config.voxel_size_cm,
+				.map_resolution_cm		= config.map_resolution_cm,
+				.pmf_window_base		= config.pmf_window_base,
+				.pmf_max_window_size_cm	= config.pmf_max_window_size_cm,
+				.pmf_cell_size_cm		= config.pmf_cell_size_cm,
+				.pmf_init_distance_cm	= config.pmf_init_distance_cm,
+				.pmf_slope				= config.pmf_slope
+			},
 
-			}
-		{
-			wpi::DataLogManager::Start(
-				config.datalog_subdirectory,
-				config.datalog_fname,
-				config.datalog_flush_period_s
+		}
+	{
+		wpi::DataLogManager::Start(
+			config.datalog_subdirectory,
+			config.datalog_fname,
+			config.datalog_flush_period_s
+		);
+		this->initNT(config);
+
+		LDRP_LOG( LOG_ALWAYS, "LDRP global instance initialized." )
+	}
+	~LidarImpl() {
+		this->closeLidar();
+		this->shutdownNT();
+
+		LDRP_LOG( LOG_ALWAYS, "LDRP global instance destroyed." )
+		wpi::DataLogManager::Stop();
+	}
+
+	LidarImpl(const LidarImpl&) = delete;
+	LidarImpl(LidarImpl&&) = delete;
+
+
+	/** launch the lidar processing thread */
+	status_t startLidar() {
+		if(!this->lidar_thread || !this->lidar_thread->joinable()) {
+			this->_state.enable_threads.store(true);
+			this->lidar_thread.reset(
+				new std::thread{ &LidarImpl::lidarWorker, this }
 			);
-			this->initNT(config);
-
-			LDRP_LOG( LOG_ALWAYS, "LDRP global instance initialized." )
+			return STATUS_SUCCESS;
 		}
-		~LidarImpl() {
-			this->closeLidar();
-			this->shutdownNT();
-
-			LDRP_LOG( LOG_ALWAYS, "LDRP global instance destroyed." )
-			wpi::DataLogManager::Stop();
+		return STATUS_ALREADY_SATISFIED;
+	}
+	/** join the lidar thread and release resources */
+	status_t closeLidar() {
+		status_t s = STATUS_ALREADY_SATISFIED;
+		this->_state.enable_threads.store(false);
+		if(this->lidar_thread && this->lidar_thread->joinable()) {
+			if(this->udp_fifo) this->udp_fifo->Shutdown();		// break out of a possible infinite block when the scanner isn't connected
+			this->lidar_thread->join();
+			s = STATUS_SUCCESS;
 		}
+		this->lidar_thread.reset(nullptr);		// don't need to do this but probably good to explicitly signify the thread isn't valid
+		return s;
+	}
 
-		LidarImpl(const LidarImpl&) = delete;
-		LidarImpl(LidarImpl&&) = delete;
+protected:
+	void initNT(const LidarConfig& config) {
+		this->_nt.instance = nt::NetworkTableInstance::GetDefault();
 
-
-		/** launch the lidar processing thread */
-		status_t startLidar() {
-			if(!this->lidar_thread || !this->lidar_thread->joinable()) {
-				this->_state.enable_threads.store(true);
-				this->lidar_thread.reset(
-					new std::thread{ &LidarImpl::lidarWorker, this }
+		bool started_client = false;
+		if(config.nt_use_client) {
+			if(config.nt_client_server != nullptr) {
+				this->_nt.instance.StartClient4("perception");
+				this->_nt.instance.SetServer(
+					config.nt_client_server,
+					config.nt_client_port
 				);
-				return STATUS_SUCCESS;
+				started_client = true;
 			}
-			return STATUS_ALREADY_SATISFIED;
+			if(config.nt_client_team >= 0) {
+				this->_nt.instance.StartClient4("perception");
+				this->_nt.instance.SetServerTeam(
+					static_cast<unsigned int>(config.nt_client_team),
+					config.nt_client_port
+				);
+				started_client = true;
+			}
 		}
-		/** join the lidar thread and release resources */
-		status_t closeLidar() {
-			status_t s = STATUS_ALREADY_SATISFIED;
-			this->_state.enable_threads.store(false);
-			if(this->lidar_thread && this->lidar_thread->joinable()) {
-				if(this->udp_fifo) this->udp_fifo->Shutdown();		// break out of a possible infinite block when the scanner isn't connected
-				this->lidar_thread->join();
-				s = STATUS_SUCCESS;
-			}
-			this->lidar_thread.reset(nullptr);		// don't need to do this but probably good to explicitly signify the thread isn't valid
-			return s;
+		if(!started_client) {
+			this->_nt.instance.StartServer();	// config or auto-detect for server/client
 		}
+		this->_nt.base = this->_nt.instance.GetTable("Perception");
 
-	protected:
-		void initNT(const LidarConfig& config) {
-			this->_nt.instance = nt::NetworkTableInstance::GetDefault();
+		this->_nt.last_parsed_seg_idx	= this->_nt.base->GetIntegerTopic( "last segment" )				.GetEntry( -1 );
+		this->_nt.aquisition_cycles		= this->_nt.base->GetIntegerTopic( "aquisition loop count" )	.GetEntry( 0 );
+		this->_nt.aquisition_ftime		= this->_nt.base->GetDoubleTopic( "aquisition frame time" )		.GetEntry( 0.0 );
+		this->_nt.raw_scan_points		= this->_nt.base->GetRawTopic( "raw scan points" )				.GetEntry( "PointXYZ_[]", {} );
+		this->_nt.test_filtered_points	= this->_nt.base->GetRawTopic( "filtered points" )				.GetEntry( "PointXYZ_[]", {} );
 
-			bool started_client = false;
-			if(config.nt_use_client) {
-				if(config.nt_client_server != nullptr) {
-					this->_nt.instance.StartClient4("perception");
-					this->_nt.instance.SetServer(
-						config.nt_client_server,
-						config.nt_client_port
-					);
-					started_client = true;
-				}
-				if(config.nt_client_team >= 0) {
-					this->_nt.instance.StartClient4("perception");
-					this->_nt.instance.SetServerTeam(
-						static_cast<unsigned int>(config.nt_client_team),
-						config.nt_client_port
-					);
-					started_client = true;
-				}
-			}
-			if(!started_client) {
-				this->_nt.instance.StartServer();	// config or auto-detect for server/client
-			}
-			this->_nt.base = this->_nt.instance.GetTable("Perception");
+#if LDRP_ENABLE_NT_TUNING
+		this->_nt.tuning.max_scan_theta			= this->_nt.base->GetFloatTopic( "tuning/max scan theta (deg)" )	.GetEntry( this->_config.fpipeline.max_scan_theta_deg );
+		this->_nt.tuning.min_scan_theta			= this->_nt.base->GetFloatTopic( "tuning/min scan theta (deg)" )	.GetEntry( this->_config.fpipeline.min_scan_theta_deg );
+		this->_nt.tuning.min_scan_range			= this->_nt.base->GetFloatTopic( "tuning/min scan range (cm)" )		.GetEntry( this->_config.fpipeline.min_scan_range_cm );
+		this->_nt.tuning.voxel_size				= this->_nt.base->GetFloatTopic( "tuning/voxel size (cm)" )			.GetEntry( this->_config.fpipeline.voxel_size_cm );
+		this->_nt.tuning.max_pmf_range			= this->_nt.base->GetFloatTopic( "tuning/pmf/max range (cm)" )		.GetEntry( this->_config.fpipeline.max_pmf_range_cm );
+		this->_nt.tuning.max_z_thresh			= this->_nt.base->GetFloatTopic( "tuning/max z thresh (cm)" )		.GetEntry( this->_config.fpipeline.max_z_thresh_cm );
+		this->_nt.tuning.min_z_thresh			= this->_nt.base->GetFloatTopic( "tuning/min z thresh (cm)" )		.GetEntry( this->_config.fpipeline.min_z_thresh_cm );
+		this->_nt.tuning.pmf_window_base		= this->_nt.base->GetFloatTopic( "tuning/pmf/window base" )			.GetEntry( this->_config.fpipeline.pmf_window_base );
+		this->_nt.tuning.pmf_max_window_size	= this->_nt.base->GetFloatTopic( "tuning/pmf/max window (cm)" )		.GetEntry( this->_config.fpipeline.pmf_max_window_size_cm );
+		this->_nt.tuning.pmf_cell_size			= this->_nt.base->GetFloatTopic( "tuning/pmf/cell size (cm)" )		.GetEntry( this->_config.fpipeline.pmf_cell_size_cm );
+		this->_nt.tuning.pmf_init_distance		= this->_nt.base->GetFloatTopic( "tuning/pmf/init distance (cm)" )	.GetEntry( this->_config.fpipeline.pmf_init_distance_cm );
+		this->_nt.tuning.pmf_max_distance		= this->_nt.base->GetFloatTopic( "tuning/pmf/max distance (cm)" )	.GetEntry( this->_config.fpipeline.pmf_max_distance_cm );
+		this->_nt.tuning.pmf_slope				= this->_nt.base->GetFloatTopic( "tuning/pmf/slope (cm)" )			.GetEntry( this->_config.fpipeline.pmf_slope );
 
-			this->_nt.last_parsed_seg_idx	= this->_nt.base->GetIntegerTopic("last segment").GetEntry(-1);
-			this->_nt.aquisition_cycles		= this->_nt.base->GetIntegerTopic("aquisition loop count").GetEntry(0);
-			this->_nt.aquisition_ftime		= this->_nt.base->GetDoubleTopic("aquisition frame time").GetEntry(0.0);
-			this->_nt.raw_scan_points		= this->_nt.base->GetRawTopic("raw scan points").GetEntry( "PointXYZ_[]", {} );
-			this->_nt.test_filtered_points	= this->_nt.base->GetRawTopic("filtered points").GetEntry( "PointXYZ_[]", {} );
-
-#ifndef DISABLE_NT_TUNING
-			this->_nt.tuning.max_scan_theta			= this->_nt.base->GetFloatTopic("tuning/max scan theta (deg)")		.GetEntry( this->_config.fpipeline.max_scan_theta_deg );
-			this->_nt.tuning.min_scan_theta			= this->_nt.base->GetFloatTopic("tuning/min scan theta (deg)")		.GetEntry( this->_config.fpipeline.min_scan_theta_deg );
-			this->_nt.tuning.min_scan_range			= this->_nt.base->GetFloatTopic("tuning/min scan range (cm)")		.GetEntry( this->_config.fpipeline.min_scan_range_cm );
-			this->_nt.tuning.voxel_size				= this->_nt.base->GetFloatTopic("tuning/voxel size (cm)")			.GetEntry( this->_config.fpipeline.voxel_size_cm );
-			this->_nt.tuning.max_pmf_range			= this->_nt.base->GetFloatTopic("tuning/pmf/max range (cm)")		.GetEntry( this->_config.fpipeline.max_pmf_range_cm );
-			this->_nt.tuning.max_z_thresh			= this->_nt.base->GetFloatTopic("tuning/max z thresh (cm)")			.GetEntry( this->_config.fpipeline.max_z_thresh_cm );
-			this->_nt.tuning.min_z_thresh			= this->_nt.base->GetFloatTopic("tuning/min z thresh (cm)")			.GetEntry( this->_config.fpipeline.min_z_thresh_cm );
-			this->_nt.tuning.pmf_window_base		= this->_nt.base->GetFloatTopic("tuning/pmf/window base")			.GetEntry( this->_config.fpipeline.pmf_window_base );
-			this->_nt.tuning.pmf_max_window_size	= this->_nt.base->GetFloatTopic("tuning/pmf/max window (cm)")		.GetEntry( this->_config.fpipeline.pmf_max_window_size_cm );
-			this->_nt.tuning.pmf_cell_size			= this->_nt.base->GetFloatTopic("tuning/pmf/cell size (cm)")		.GetEntry( this->_config.fpipeline.pmf_cell_size_cm );
-			this->_nt.tuning.pmf_init_distance		= this->_nt.base->GetFloatTopic("tuning/pmf/init distance (cm)")	.GetEntry( this->_config.fpipeline.pmf_init_distance_cm );
-			this->_nt.tuning.pmf_max_distance		= this->_nt.base->GetFloatTopic("tuning/pmf/max distance (cm)")		.GetEntry( this->_config.fpipeline.pmf_max_distance_cm );
-			this->_nt.tuning.pmf_slope				= this->_nt.base->GetFloatTopic("tuning/pmf/slope (cm)")			.GetEntry( this->_config.fpipeline.pmf_slope );
-
-			this->_nt.tuning.max_scan_theta			.Set( this->_config.fpipeline.max_scan_theta_deg );
-			this->_nt.tuning.min_scan_theta			.Set( this->_config.fpipeline.min_scan_theta_deg );
-			this->_nt.tuning.min_scan_range			.Set( this->_config.fpipeline.min_scan_range_cm );
-			this->_nt.tuning.voxel_size				.Set( this->_config.fpipeline.voxel_size_cm );
-			this->_nt.tuning.max_pmf_range			.Set( this->_config.fpipeline.max_pmf_range_cm );
-			this->_nt.tuning.max_z_thresh			.Set( this->_config.fpipeline.max_z_thresh_cm );
-			this->_nt.tuning.min_z_thresh			.Set( this->_config.fpipeline.min_z_thresh_cm );
-			this->_nt.tuning.pmf_window_base		.Set( this->_config.fpipeline.pmf_window_base );
-			this->_nt.tuning.pmf_max_window_size	.Set( this->_config.fpipeline.pmf_max_window_size_cm );
-			this->_nt.tuning.pmf_cell_size			.Set( this->_config.fpipeline.pmf_cell_size_cm );
-			this->_nt.tuning.pmf_init_distance		.Set( this->_config.fpipeline.pmf_init_distance_cm );
-			this->_nt.tuning.pmf_max_distance		.Set( this->_config.fpipeline.pmf_max_distance_cm );
-			this->_nt.tuning.pmf_slope				.Set( this->_config.fpipeline.pmf_slope );
+		this->_nt.tuning.max_scan_theta			.Set( this->_config.fpipeline.max_scan_theta_deg );
+		this->_nt.tuning.min_scan_theta			.Set( this->_config.fpipeline.min_scan_theta_deg );
+		this->_nt.tuning.min_scan_range			.Set( this->_config.fpipeline.min_scan_range_cm );
+		this->_nt.tuning.voxel_size				.Set( this->_config.fpipeline.voxel_size_cm );
+		this->_nt.tuning.max_pmf_range			.Set( this->_config.fpipeline.max_pmf_range_cm );
+		this->_nt.tuning.max_z_thresh			.Set( this->_config.fpipeline.max_z_thresh_cm );
+		this->_nt.tuning.min_z_thresh			.Set( this->_config.fpipeline.min_z_thresh_cm );
+		this->_nt.tuning.pmf_window_base		.Set( this->_config.fpipeline.pmf_window_base );
+		this->_nt.tuning.pmf_max_window_size	.Set( this->_config.fpipeline.pmf_max_window_size_cm );
+		this->_nt.tuning.pmf_cell_size			.Set( this->_config.fpipeline.pmf_cell_size_cm );
+		this->_nt.tuning.pmf_init_distance		.Set( this->_config.fpipeline.pmf_init_distance_cm );
+		this->_nt.tuning.pmf_max_distance		.Set( this->_config.fpipeline.pmf_max_distance_cm );
+		this->_nt.tuning.pmf_slope				.Set( this->_config.fpipeline.pmf_slope );
 #endif
 
-		}
-		void shutdownNT() {
-			this->_nt.instance.Flush();
-			this->_nt.instance.StopServer();
-			this->_nt.instance.StopClient();
-		}
+	}
+	void shutdownNT() {
+		this->_nt.instance.Flush();
+		this->_nt.instance.StopServer();
+		this->_nt.instance.StopClient();
+	}
 
-	public:
-		/** add a world pose + linked timestamp */
-		status_t addWorldRef(const float* xyz, const float* qxyzw, const uint64_t ts_us);
-		/** export obstacles from the accumulator grid */
-		status_t exportObstacles(ObstacleGrid& grid, ObstacleGrid::Quant_T*(*grid_resize)(size_t));
-		/** wait for the next accumulator update (or pull cached updates) and export obstacles */
-		status_t exportNextObstacles(ObstacleGrid& grid, ObstacleGrid::Quant_T*(*grid_resize)(size_t), double timeout_ms);
+public:
+	/** add a world pose + linked timestamp */
+	status_t addWorldRef(const float* xyz, const float* qxyzw, const uint64_t ts_us);
+	/** export obstacles from the accumulator grid */
+	status_t exportObstacles(ObstacleGrid& grid, ObstacleGrid::Quant_T*(*grid_resize)(size_t));
+	/** wait for the next accumulator update (or pull cached updates) and export obstacles */
+	status_t exportNextObstacles(ObstacleGrid& grid, ObstacleGrid::Quant_T*(*grid_resize)(size_t), double timeout_ms);
 
-	protected:
-		status_t gridExportInternal(ObstacleGrid& grid, ObstacleGrid::Quant_T*(*grid_resize)(size_t), std::unique_lock<std::timed_mutex>& lock);
+protected:
+	status_t gridExportInternal(ObstacleGrid& grid, ObstacleGrid::Quant_T*(*grid_resize)(size_t), std::unique_lock<std::timed_mutex>& lock);
 
 
-	public:	// global inst, constant values, configs, states
-		inline static std::unique_ptr<LidarImpl> _global{ nullptr };
+public:	// global inst, constant values, configs, states
+	inline static std::unique_ptr<LidarImpl> _global{ nullptr };
 
-		static constexpr size_t
-			MS100_SEGMENTS_PER_FRAME = 12U,
-			MS100_POINTS_PER_SEGMENT_ECHO = 900U,	// points per segment * segments per frame = 10800 points per frame (with 1 echo)
-			MS100_MAX_ECHOS_PER_POINT = 3U;			// echos get filterd when we apply different settings in the web dashboard
+	static constexpr size_t
+		MS100_SEGMENTS_PER_FRAME = 12U,
+		MS100_POINTS_PER_SEGMENT_ECHO = 900U,	// points per segment * segments per frame = 10800 points per frame (with 1 echo)
+		MS100_MAX_ECHOS_PER_POINT = 3U;			// echos get filterd when we apply different settings in the web dashboard
 
-		struct {	// configured constants/parameters
-			const std::string lidar_hostname		= LidarConfig::STATIC_DEFAULT.lidar_hostname;	// always fails when we give a specific hostname?
-			const int lidar_udp_port				= LidarConfig::STATIC_DEFAULT.lidar_udp_port;
-			/* "While MSGPACK can be integrated easily using existing
-			 * libraries and is easy to parse, it requires more computing power and bandwidth than
-			 * the compact data format due to the descriptive names. Compact is significantly more
-			 * efficient and has a lower bandwidth." */
-			const bool use_msgpack					= LidarConfig::STATIC_DEFAULT.use_msgpack;
+	struct {	// configured constants/parameters
+		const std::string lidar_hostname		= LidarConfig::STATIC_DEFAULT.lidar_hostname;	// always fails when we give a specific hostname?
+		const int lidar_udp_port				= LidarConfig::STATIC_DEFAULT.lidar_udp_port;
+		/* "While MSGPACK can be integrated easily using existing
+			* libraries and is easy to parse, it requires more computing power and bandwidth than
+			* the compact data format due to the descriptive names. Compact is significantly more
+			* efficient and has a lower bandwidth." */
+		const bool use_msgpack					= LidarConfig::STATIC_DEFAULT.use_msgpack;
 
-			// NOTE: points within the same segment are not 'rotationally' aligned! (only temporally aligned)
-			const uint64_t enabled_segments			= LidarConfig::STATIC_DEFAULT.enabled_segments_bits;	// 12 sections --> first 12 bits enabled (enable all section)
-			const uint32_t buffered_frames			= LidarConfig::STATIC_DEFAULT.buffered_scan_frames;		// how many samples of each segment we require per aquisition
-			const uint32_t max_filter_threads		= ldru::convertNumThreads(LidarConfig::STATIC_DEFAULT.max_filter_threads, 1);	// minimum of 1 thread, otherwise reserve the main thread and some extra margin for other processes
-			const uint64_t points_logging_mode		= LidarConfig::STATIC_DEFAULT.points_logging_mode;
-			const char* points_log_fname			= LidarConfig::STATIC_DEFAULT.points_tar_fname;
-			const double pose_history_range			= LidarConfig::STATIC_DEFAULT.pose_history_period_s;		// seconds --> the window only gets applied when we add new poses so this just needs account for the greatest difference between new poses getting added and points getting transformed in a thread
-			const bool skip_invalid_transform_ts	= LidarConfig::STATIC_DEFAULT.skip_invalid_transform_ts;	// skip points for which we don't have a pose from localization (don't use the default pose of nothing!)
+		// NOTE: points within the same segment are not 'rotationally' aligned! (only temporally aligned)
+		const uint64_t enabled_segments			= LidarConfig::STATIC_DEFAULT.enabled_segments_bits;	// 12 sections --> first 12 bits enabled (enable all section)
+		const uint32_t buffered_frames			= LidarConfig::STATIC_DEFAULT.buffered_scan_frames;		// how many samples of each segment we require per aquisition
+		const uint32_t max_filter_threads		= ldru::convertNumThreads(LidarConfig::STATIC_DEFAULT.max_filter_threads, 1);	// minimum of 1 thread, otherwise reserve the main thread and some extra margin for other processes
+		const uint64_t points_logging_mode		= LidarConfig::STATIC_DEFAULT.points_logging_mode;
+		const char* points_log_fname			= LidarConfig::STATIC_DEFAULT.points_tar_fname;
+		const double pose_history_range			= LidarConfig::STATIC_DEFAULT.pose_history_period_s;		// seconds --> the window only gets applied when we add new poses so this just needs account for the greatest difference between new poses getting added and points getting transformed in a thread
+		const bool skip_invalid_transform_ts	= LidarConfig::STATIC_DEFAULT.skip_invalid_transform_ts;	// skip points for which we don't have a pose from localization (don't use the default pose of nothing!)
 
-			const uint32_t obstacle_point_color		= LidarConfig::STATIC_DEFAULT.obstacle_point_color;
-			const uint32_t standard_point_color		= LidarConfig::STATIC_DEFAULT.standard_point_color;
+		const uint32_t obstacle_point_color		= LidarConfig::STATIC_DEFAULT.obstacle_point_color;
+		const uint32_t standard_point_color		= LidarConfig::STATIC_DEFAULT.standard_point_color;
 
-			const Eigen::Vector3f lidar_offset_xyz{ LidarConfig::STATIC_DEFAULT.lidar_offset_xyz };			// TODO: actual lidar offset!
-			const Eigen::Quaternionf lidar_offset_quat{ LidarConfig::STATIC_DEFAULT.lidar_offset_quat };	// identity quat for now
+		const Eigen::Vector3f lidar_offset_xyz{ LidarConfig::STATIC_DEFAULT.lidar_offset_xyz };			// TODO: actual lidar offset!
+		const Eigen::Quaternionf lidar_offset_quat{ LidarConfig::STATIC_DEFAULT.lidar_offset_quat };	// identity quat for now
 
-			struct {
-				float
-					min_scan_theta_deg		= LidarConfig::STATIC_DEFAULT.min_scan_theta_degrees,		// max scan theta angle used for cutoff -- see ms100 operating manual for coordinate system
-					max_scan_theta_deg		= LidarConfig::STATIC_DEFAULT.max_scan_theta_degrees,		// min scan theta angle used for cutoff
-					min_scan_range_cm		= LidarConfig::STATIC_DEFAULT.min_scan_range_cm,		// the minimum scan range
-					max_pmf_range_cm		= LidarConfig::STATIC_DEFAULT.max_pmf_range_cm,		// max range for points used in PMF
-					max_z_thresh_cm			= LidarConfig::STATIC_DEFAULT.max_z_thresh_cm,		// for the "mid cut" z-coord filter
-					min_z_thresh_cm			= LidarConfig::STATIC_DEFAULT.min_z_thresh_cm,
-					// filter by intensity? (test this)
+		struct {
+			float
+				min_scan_theta_deg		= LidarConfig::STATIC_DEFAULT.min_scan_theta_degrees,		// max scan theta angle used for cutoff -- see ms100 operating manual for coordinate system
+				max_scan_theta_deg		= LidarConfig::STATIC_DEFAULT.max_scan_theta_degrees,		// min scan theta angle used for cutoff
+				min_scan_range_cm		= LidarConfig::STATIC_DEFAULT.min_scan_range_cm,		// the minimum scan range
+				max_pmf_range_cm		= LidarConfig::STATIC_DEFAULT.max_pmf_range_cm,		// max range for points used in PMF
+				max_z_thresh_cm			= LidarConfig::STATIC_DEFAULT.max_z_thresh_cm,		// for the "mid cut" z-coord filter
+				min_z_thresh_cm			= LidarConfig::STATIC_DEFAULT.min_z_thresh_cm,
+				// filter by intensity? (test this)
 
-					voxel_size_cm			= LidarConfig::STATIC_DEFAULT.voxel_size_cm,		// voxel cell size used during voxelization filter
-					map_resolution_cm		= LidarConfig::STATIC_DEFAULT.map_resolution_cm,		// the resolution of each grid cell
-					pmf_window_base			= LidarConfig::STATIC_DEFAULT.pmf_window_base,
-					pmf_max_window_size_cm	= LidarConfig::STATIC_DEFAULT.pmf_max_window_size_cm,
-					pmf_cell_size_cm		= LidarConfig::STATIC_DEFAULT.pmf_cell_size_cm,
-					pmf_init_distance_cm	= LidarConfig::STATIC_DEFAULT.pmf_init_distance_cm,
-					pmf_max_distance_cm		= LidarConfig::STATIC_DEFAULT.pmf_max_distance_cm,
-					pmf_slope				= LidarConfig::STATIC_DEFAULT.pmf_slope;
+				voxel_size_cm			= LidarConfig::STATIC_DEFAULT.voxel_size_cm,		// voxel cell size used during voxelization filter
+				map_resolution_cm		= LidarConfig::STATIC_DEFAULT.map_resolution_cm,		// the resolution of each grid cell
+				pmf_window_base			= LidarConfig::STATIC_DEFAULT.pmf_window_base,
+				pmf_max_window_size_cm	= LidarConfig::STATIC_DEFAULT.pmf_max_window_size_cm,
+				pmf_cell_size_cm		= LidarConfig::STATIC_DEFAULT.pmf_cell_size_cm,
+				pmf_init_distance_cm	= LidarConfig::STATIC_DEFAULT.pmf_init_distance_cm,
+				pmf_max_distance_cm		= LidarConfig::STATIC_DEFAULT.pmf_max_distance_cm,
+				pmf_slope				= LidarConfig::STATIC_DEFAULT.pmf_slope;
 
-			} fpipeline;
+		} fpipeline;
 
-		} _config;
+	} _config;
 
-		struct {	// states to be communicated across threads
-			int32_t log_level = LidarConfig::STATIC_DEFAULT.log_level;
+	struct {	// states to be communicated across threads
+		int32_t log_level = LidarConfig::STATIC_DEFAULT.log_level;
 
-			std::atomic<bool> enable_threads{ false };
-			size_t obstacle_updates{ 0U };
+		std::atomic<bool> enable_threads{ false };
+		size_t obstacle_updates{ 0U };
 
-			std::mutex
-				finished_queue_mutex{};
-			std::timed_mutex
-				accumulation_mutex{};
-			std::shared_mutex
-				localization_mutex{};
-			std::condition_variable_any
-				obstacles_updated{};
+		std::mutex
+			finished_queue_mutex{};
+		std::timed_mutex
+			accumulation_mutex{};
+		std::shared_mutex
+			localization_mutex{};
+		std::condition_variable_any
+			obstacles_updated{};
 
-		} _state;
+	} _state;
 
-	protected:	// nt pointers and filter instance struct
-		struct {	// networktables
-			nt::NetworkTableInstance instance;	// = nt::NetworkTableInstance::GetDefault()
-			std::shared_ptr<nt::NetworkTable> base;
+protected:	// nt pointers and filter instance struct
+	struct {	// networktables
+		nt::NetworkTableInstance instance;	// = nt::NetworkTableInstance::GetDefault()
+		std::shared_ptr<nt::NetworkTable> base;
 
-			nt::IntegerEntry
-				last_parsed_seg_idx,
-				aquisition_cycles;
-			nt::DoubleEntry aquisition_ftime;
-			nt::RawEntry
-				raw_scan_points,
-				test_filtered_points;
+		nt::IntegerEntry
+			last_parsed_seg_idx,
+			aquisition_cycles;
+		nt::DoubleEntry aquisition_ftime;
+		nt::RawEntry
+			raw_scan_points,
+			test_filtered_points;
 
-#ifndef DISABLE_NT_TUNING
-			struct {
-				nt::FloatEntry
-					max_scan_theta,
-					min_scan_theta,
-					min_scan_range,
-					voxel_size,
-					max_pmf_range,
-					max_z_thresh,
-					min_z_thresh,
-					pmf_window_base,
-					pmf_max_window_size,
-					pmf_cell_size,
-					pmf_init_distance,
-					pmf_max_distance,
-					pmf_slope
-				;
-			} tuning;
+#if LDRP_ENABLE_NT_TUNING
+		struct {
+			nt::FloatEntry
+				max_scan_theta,
+				min_scan_theta,
+				min_scan_range,
+				voxel_size,
+				max_pmf_range,
+				max_z_thresh,
+				min_z_thresh,
+				pmf_window_base,
+				pmf_max_window_size,
+				pmf_cell_size,
+				pmf_init_distance,
+				pmf_max_distance,
+				pmf_slope
+			;
+		} tuning;
 #endif
 
-		} _nt;
+	} _nt;
 
-		using SampleBuffer = std::vector< std::deque< sick_scansegment_xd::ScanSegmentParserOutput > >;
-		struct FilterInstance {	// storage for each filter instance that needs to be synced between threads
-			FilterInstance(const uint32_t f_idx) : index{f_idx} {}
-			FilterInstance(const FilterInstance&) = delete;
-			FilterInstance(FilterInstance&&) = default;
+	using SampleBuffer = std::vector< std::deque< sick_scansegment_xd::ScanSegmentParserOutput > >;
+	struct FilterInstance {	// storage for each filter instance that needs to be synced between threads
+		FilterInstance(const uint32_t f_idx) : index{f_idx} {}
+		FilterInstance(const FilterInstance&) = delete;
+		FilterInstance(FilterInstance&&) = default;
 
-			const uint32_t index{ 0 };
-			SampleBuffer samples{};
+		const uint32_t index{ 0 };
+		SampleBuffer samples{};
 
-			std::unique_ptr<std::thread> thread{ nullptr };
-			// std::mutex link_mutex;
-			std::condition_variable link_condition{};
-			std::atomic<uint32_t> link_state{ 0 };
+		std::unique_ptr<std::thread> thread{ nullptr };
+		// std::mutex link_mutex;
+		std::condition_variable link_condition{};
+		std::atomic<uint32_t> link_state{ 0 };
 
-			struct {
-				nt::BooleanEntry is_active;
-				nt::IntegerEntry proc_step;
-			} nt;
+		struct {
+			nt::BooleanEntry is_active;
+			nt::IntegerEntry proc_step;
+		} nt;
+	};
+
+protected:	// main internal entities
+	std::unique_ptr<std::thread>
+		lidar_thread{ nullptr };
+	sick_scansegment_xd::PayloadFifo*
+		udp_fifo{ nullptr };
+	std::vector<std::unique_ptr<FilterInstance> >
+		filter_threads{};	// need pointers since filter instance doesn't like to be copied (vector issue)
+	std::deque<uint32_t>
+		finished_queue{};
+	frc::TimeInterpolatableBuffer<Eigen::Isometry3f>
+		transform_map{
+			units::time::second_t{ _config.pose_history_range },
+			&lerpClosest<const Eigen::Isometry3f&>
 		};
+	QuantizedRatioGrid<ObstacleGrid::Quant_T, float>
+		accumulator{};
+	PCDTarWriter
+		pcd_writer{};
 
-	protected:	// main internal entities
-		std::unique_ptr<std::thread>
-			lidar_thread{ nullptr };
-		sick_scansegment_xd::PayloadFifo*
-			udp_fifo{ nullptr };
-		std::vector<std::unique_ptr<FilterInstance> >
-			filter_threads{};	// need pointers since filter instance doesn't like to be copied (vector issue)
-		std::deque<uint32_t>
-			finished_queue{};
-		frc::TimeInterpolatableBuffer<Eigen::Isometry3f>
-			transform_map{
-				units::time::second_t{ _config.pose_history_range },
-				&lerpClosest<const Eigen::Isometry3f&>
-			};
-		QuantizedRatioGrid<ObstacleGrid::Quant_T, float>
-			accumulator{};
-		PCDTarWriter
-			pcd_writer{};
-
-		/** The main lidar I/O worker */
-		void lidarWorker();
-		/** The filter instance worker */
-		void filterWorker(FilterInstance* f_inst);
+	/** The main lidar I/O worker */
+	void lidarWorker();
+	/** The filter instance worker */
+	void filterWorker(FilterInstance* f_inst);
 
 
-	};	// LidarImpl
+};	// LidarImpl
 
 
 
@@ -493,72 +518,72 @@ namespace ldrp {
 
 /** Static API */
 
-	// const char* pclVer() {	// these are dumb
-	// 	return PCL_VERSION_PRETTY;
-	// }
-	// bool hasWpilib() {
-	// 	return USING_WPILIB;
-	// }
+// const char* pclVer() {	// these are dumb
+// 	return PCL_VERSION_PRETTY;
+// }
+// bool hasWpilib() {
+// 	return LDRP_USE_WPILIB;
+// }
 
 
-	status_t apiInit(const LidarConfig& config) {
-		if(!LidarImpl::_global) {
-			LidarImpl::_global = std::make_unique<LidarImpl>(config);
-		}
-		return STATUS_ALREADY_SATISFIED;
+status_t apiInit(const LidarConfig& config) {
+	if(!LidarImpl::_global) {
+		LidarImpl::_global = std::make_unique<LidarImpl>(config);
 	}
-	status_t apiDestroy() {
-		if(LidarImpl::_global) {
-			LidarImpl::_global.reset(nullptr);
-			return STATUS_SUCCESS;
-		}
-		return STATUS_PREREQ_UNINITIALIZED | STATUS_ALREADY_SATISFIED;
+	return STATUS_ALREADY_SATISFIED;
+}
+status_t apiDestroy() {
+	if(LidarImpl::_global) {
+		LidarImpl::_global.reset(nullptr);
+		return STATUS_SUCCESS;
 	}
+	return STATUS_PREREQ_UNINITIALIZED | STATUS_ALREADY_SATISFIED;
+}
 
-	status_t lidarInit() {
-		if(LidarImpl::_global) {
-			return LidarImpl::_global->startLidar();
-		}
-		return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
+status_t lidarInit() {
+	if(LidarImpl::_global) {
+		return LidarImpl::_global->startLidar();
 	}
-	status_t lidarShutdown() {
-		if(LidarImpl::_global) {
-			return LidarImpl::_global->closeLidar();
-		}
-		return STATUS_PREREQ_UNINITIALIZED | STATUS_ALREADY_SATISFIED;
+	return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
+}
+status_t lidarShutdown() {
+	if(LidarImpl::_global) {
+		return LidarImpl::_global->closeLidar();
 	}
-	status_t lidarSetState(const bool enabled) {
-		return enabled ? lidarInit() : lidarShutdown();
-	}
+	return STATUS_PREREQ_UNINITIALIZED | STATUS_ALREADY_SATISFIED;
+}
+status_t lidarSetState(const bool enabled) {
+	return enabled ? lidarInit() : lidarShutdown();
+}
 
-	status_t setLogLevel(const int32_t lvl) {
-		if(lvl < 0 || lvl > 3) return STATUS_BAD_PARAM | STATUS_FAIL;
-		if(LidarImpl::_global) {
-			LidarImpl::_global->_state.log_level = lvl;
-			return STATUS_SUCCESS;
-		}
-		return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
+status_t setLogLevel(const int32_t lvl) {
+	if(lvl < 0 || lvl > 3) return STATUS_BAD_PARAM | STATUS_FAIL;
+	if(LidarImpl::_global) {
+		LidarImpl::_global->_state.log_level = lvl;
+		return STATUS_SUCCESS;
 	}
+	return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
+}
 
-	status_t updateWorldPose(const float* xyz, const float* qxyzw, const uint64_t ts_us) {
-		if(LidarImpl::_global) {
-			return LidarImpl::_global->addWorldRef(xyz, qxyzw, ts_us);
-		}
-		return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
+status_t updateWorldPose(const float* xyz, const float* qxyzw, const uint64_t ts_us) {
+	if(LidarImpl::_global) {
+		return LidarImpl::_global->addWorldRef(xyz, qxyzw, ts_us);
 	}
+	return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
+}
 
-	status_t getObstacleGrid(ObstacleGrid& grid, ObstacleGrid::Quant_T*(*grid_resize)(size_t)) {
-		if(LidarImpl::_global) {
-			return LidarImpl::_global->exportObstacles(grid, grid_resize);
-		}
-		return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
+status_t getObstacleGrid(ObstacleGrid& grid, ObstacleGrid::Quant_T*(*grid_resize)(size_t)) {
+	if(LidarImpl::_global) {
+		return LidarImpl::_global->exportObstacles(grid, grid_resize);
 	}
-	status_t waitNextObstacleGrid(ObstacleGrid& grid, ObstacleGrid::Quant_T*(*grid_resize)(size_t), double timeout_ms) {
-		if(LidarImpl::_global) {
-			return LidarImpl::_global->exportNextObstacles(grid, grid_resize, timeout_ms);
-		}
-		return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
+	return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
+}
+status_t waitNextObstacleGrid(ObstacleGrid& grid, ObstacleGrid::Quant_T*(*grid_resize)(size_t), double timeout_ms) {
+	if(LidarImpl::_global) {
+		return LidarImpl::_global->exportNextObstacles(grid, grid_resize, timeout_ms);
 	}
+	return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
+}
 
 
 
@@ -649,16 +674,8 @@ status_t LidarImpl::gridExportInternal(ObstacleGrid& grid, ObstacleGrid::Quant_T
 
 	memcpy(grid.grid, this->accumulator.buffData(), _area * sizeof(ObstacleGrid::Quant_T));
 
-	// grid.cell_resolution_m = 0.f;
-	// grid.origin_x_m = 0.f;
-	// grid.origin_y_m = 0.f;
-	// grid.cells_x = 0;
-	// grid.cells_y = 0;
-	// grid.grid = nullptr;
-
 	this->_state.obstacle_updates = 0;
 	return STATUS_SUCCESS;
-	// return STATUS_FAIL;
 
 }
 
@@ -666,8 +683,15 @@ status_t LidarImpl::gridExportInternal(ObstacleGrid& grid, ObstacleGrid::Quant_T
 
 
 
+
+
+
+
+
+
 /** LidarImpl threads implementation */
 
+// main thread
 void LidarImpl::lidarWorker() {
 
 	wpi::DataLogManager::SignalNewDSDataOccur();
@@ -764,8 +788,7 @@ void LidarImpl::lidarWorker() {
 						}
 					}
 				}	// insufficient samples or no thread available... (keep updating the current framebuff)
-#define POINT_SOURCE_MODE 2
-#if POINT_SOURCE_MODE == 0	// live sensor operation
+#if !LDRP_USE_SIM_MODE	// live sensor operation
 				if(this->udp_fifo->Pop(udp_payload_bytes, scan_timestamp, scan_count)) {	// blocks until packet is received
 
 					if(this->_config.use_msgpack ?	// parse based on format
@@ -778,7 +801,7 @@ void LidarImpl::lidarWorker() {
 							udp_payload_bytes, scan_timestamp, no_transform, parsed_segment,
 							true, LOG_VERBOSE)
 					) {	// if successful parse
-#elif POINT_SOURCE_MODE == 1	// internal simulation
+#elif LDRP_USE_SIM_MODE == 1	// internal simulation
 				{
 					static constexpr float const
 						phi_angles_deg[] = { -22.2, -17.2, -12.3, -7.3, -2.5, 2.2, 7.0, 12.9, 17.2, 21.8, 26.6, 31.5, 36.7, 42.2 },
@@ -843,7 +866,7 @@ void LidarImpl::lidarWorker() {
 					parsed_segment.segmentIndex = aquisition_loop_count;
 					std::this_thread::sleep_until(s + 4900us);
 					if constexpr(true) {
-#elif POINT_SOURCE_MODE == 2	// pull data from nt (uesim)
+#elif LDRP_USE_SIM_MODE == 2	// pull data from nt (uesim)
 				{
 					crno::hrc::time_point s = crno::hrc::now();
 					
@@ -879,9 +902,7 @@ void LidarImpl::lidarWorker() {
 					std::this_thread::sleep_until(s + 4900us);
 					if(valid) {
 #else
-				{
-					std::this_thread::sleep_for(5ms);
-					if constexpr(false) {
+				static_assert(false, "LDRP_USE_SIM_MODE macro must be in range [0, 2]! or true/false")
 #endif
 						LDRP_LOG( LOG_DEBUG && LOG_VERBOSE, "LDRP Worker [Aquisition Loop]: Successfully parsed scan segment idx {}!", parsed_segment.segmentIndex )
 
@@ -940,28 +961,33 @@ void LidarImpl::lidarWorker() {
 
 }	// LidarImpl::lidarWorker()
 
+
+
+
+
+// filter thread(s)
 void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 	// this function represents the alternative thread that filters the newest collection of points
 
 	std::shared_ptr<nt::NetworkTable> nt_inst = this->_nt.base->GetSubTable( fmt::format("Filter Threads/inst {}", f_inst->index) );
 	f_inst->nt.is_active = nt_inst->GetBooleanTopic("activity").GetEntry(false);
-#ifndef DISABLE_NT_PROFILING
+#if LDRP_ENABLE_NT_PROFILING
 	f_inst->nt.proc_step = nt_inst->GetIntegerTopic("state").GetEntry(0);
 
-	#define NT_PROFILE_STAGE(n)		f_inst->nt.proc_step.Set((n));
+	#define _NT_PROFILE_STAGE(n)		f_inst->nt.proc_step.Set((n));
 #else
-	#define NT_PROFILE_STAGE(...)
+	#define _NT_PROFILE_STAGE(...)
 #endif
 
 	f_inst->nt.is_active.Set(false);
-	NT_PROFILE_STAGE(0);	// 0 = init (pre looping)
+	_NT_PROFILE_STAGE(0);	// 0 = init (pre looping)
 
-#ifndef DISABLE_NT_TUNING
+#if LDRP_ENABLE_NT_TUNING
 	const float		// all "unitted" parameters are normalized to be in meters and radians!
-		_max_scan_theta			= this->_nt.tuning.max_scan_theta.Get(),
-		_min_scan_theta			= this->_nt.tuning.min_scan_theta.Get(),
-		_min_scan_range			= this->_nt.tuning.min_scan_range.Get(),
-		_voxel_size				= this->_nt.tuning.voxel_size.Get(),
+		_max_scan_theta			= this->_nt.tuning.max_scan_theta.Get() * (std::numbers::pi_v<float> / 180.f),
+		_min_scan_theta			= this->_nt.tuning.min_scan_theta.Get() * (std::numbers::pi_v<float> / 180.f),
+		_min_scan_range			= this->_nt.tuning.min_scan_range.Get() * 1e-2f,
+		_voxel_size				= this->_nt.tuning.voxel_size.Get() * 1e-2f,
 		_max_pmf_range			= this->_nt.tuning.max_pmf_range.Get() * 1e-2f,
 		_max_z_thresh			= this->_nt.tuning.max_z_thresh.Get() * 1e-2f,
 		_min_z_thresh			= this->_nt.tuning.min_z_thresh.Get() * 1e-2f,
@@ -1024,7 +1050,7 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 	for(;this->_state.enable_threads.load();) {
 
 		f_inst->nt.is_active.Set(true);
-		NT_PROFILE_STAGE(10);	// 1 = step 1 (combine points)
+		_NT_PROFILE_STAGE(10);	// 1 = step 1 (combine points)
 
 		point_cloud.clear();	// clear the vector and set w,h to 0
 		// point_ranges.clear();	// << MEMORY LEAK!!! (it was)
@@ -1049,30 +1075,27 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 				origin_samples++;
 
 				for(const sick_scansegment_xd::ScanSegmentParserOutput::Scangroup& scan_group : segment.scandata) {		// "ms100 transmits 16 groups"
-#define USE_FIRST_ECHO_ONLY		// make a config option or grouping for this instead
-#ifndef USE_FIRST_ECHO_ONLY
+#if LDRP_USE_ALL_ECHOS
 					for(const sick_scansegment_xd::ScanSegmentParserOutput::Scanline& scan_line: scan_group.scanlines) {	// "each group has up to 3 echos"
 #else
 					if(scan_group.scanlines.size() > 0) {
 						const sick_scansegment_xd::ScanSegmentParserOutput::Scanline& scan_line = scan_group.scanlines[0];
 #endif
 						for(const sick_scansegment_xd::ScanSegmentParserOutput::LidarPoint& lidar_point : scan_line.points) {
-
-// #define DISABLE_PRELIM_POINT_FILTERING	// option for this as well
-#ifndef DISABLE_PRELIM_POINT_FILTERING
+#if LDRP_DISABLE_PRELIM_POINT_FILTERING
+							{
+#else
 							if(								// if angle in range...									// and distance greater than minimum
 								lidar_point.azimuth <= _max_scan_theta && lidar_point.azimuth >= _min_scan_theta && lidar_point.range > _min_scan_range
 								// ...apply any other filters that benefit from points in lidar scan coord space as well
 							) {
-#else
-							{
 #endif
 								point_cloud.points.emplace_back();
 								reinterpret_cast<Eigen::Vector4f&>(point_cloud.points.back()) = transform * Eigen::Vector4f{lidar_point.x, lidar_point.y, lidar_point.z, 1.f};	// EEEEEE :O
 								// point_ranges.push_back(lidar_point.range);
-							}
-						}
-					}
+							}	// prelim filtering (or blank scope)
+						}	// loop points
+					}	// loop echos (or use first)
 				} // loop points per segment
 
 			}
@@ -1088,7 +1111,7 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 		point_cloud.is_dense = true;
 
 		if(this->_config.points_logging_mode & POINT_LOGGING_INCLUDE_RAW) {
-			NT_PROFILE_STAGE(11);	// 11 = export raw cloud
+			_NT_PROFILE_STAGE(11);	// 11 = export raw cloud
 			if(this->_config.points_logging_mode & POINT_LOGGING_TAR) {
 				this->pcd_writer.addCloud(point_cloud);
 			}
@@ -1105,7 +1128,7 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 		// 2. run filtering on points
 		{
 
-			NT_PROFILE_STAGE(20);	// 20 = filtering (init)
+			_NT_PROFILE_STAGE(20);	// 20 = filtering (init)
 
 			voxelized_points.clear();
 			voxelized_ranges.clear();
@@ -1121,28 +1144,28 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 			if(origin_samples > 1) avg_origin /= origin_samples;
 
 			// voxelize points
-			NT_PROFILE_STAGE(21);	// 21 = filtering (voxelize)
+			_NT_PROFILE_STAGE(21);	// 21 = filtering (voxelize)
 			voxel_filter(
 				point_cloud, DEFAULT_NO_SELECTION, voxelized_points,
 				_voxel_size, _voxel_size, _voxel_size
 			);
 
 			// filter points under "high cut" thresh
-			NT_PROFILE_STAGE(22);	// 22 = filtering (z-high)
+			_NT_PROFILE_STAGE(22);	// 22 = filtering (z-high)
 			carteZ_filter(
 				voxelized_points, DEFAULT_NO_SELECTION, z_high_filtered,
 				-std::numeric_limits<float>::infinity(),
 				_max_z_thresh
 			);
 			// further filter points below "low cut" thresh
-			NT_PROFILE_STAGE(23);	// 23 = filtering (z-low)
+			_NT_PROFILE_STAGE(23);	// 23 = filtering (z-low)
 			carteZ_filter(
 				voxelized_points, z_high_filtered, z_low_subset_filtered,
 				-std::numeric_limits<float>::infinity(),
 				_min_z_thresh
 			);
 			// get the points inbetween high and low thresholds --> treated as wall obstacles
-			NT_PROFILE_STAGE(24);	// 24 = filtering (z-mid)
+			_NT_PROFILE_STAGE(24);	// 24 = filtering (z-mid)
 			pc_negate_selection(
 				z_high_filtered,
 				z_low_subset_filtered,
@@ -1150,7 +1173,7 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 			);
 
 			// filter close enough points for PMF
-			NT_PROFILE_STAGE(25);	// 25 = filtering (pmf-pre)
+			_NT_PROFILE_STAGE(25);	// 25 = filtering (pmf-pre)
 			pc_filter_distance(
 				voxelized_points.points,
 				z_low_subset_filtered,
@@ -1160,7 +1183,7 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 			);
 
 			// apply pmf to selected points
-			NT_PROFILE_STAGE(26);	// 26 = filtering (pmf)
+			_NT_PROFILE_STAGE(26);	// 26 = filtering (pmf)
 			progressive_morph_filter(
 				voxelized_points, pre_pmf_range_filtered, pmf_filtered_ground,
 				_pmf_window_base,
@@ -1172,7 +1195,7 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 				false
 			);
 			// obstacles = (base - ground)
-			NT_PROFILE_STAGE(27);	// 27 = filtering (obstacles)
+			_NT_PROFILE_STAGE(27);	// 27 = filtering (obstacles)
 			pc_negate_selection(
 				pre_pmf_range_filtered,
 				pmf_filtered_ground,
@@ -1182,7 +1205,7 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 			// export filter results
 			if(this->_config.points_logging_mode & (POINT_LOGGING_NT | POINT_LOGGING_INCLUDE_FILTERED)) {
 
-				NT_PROFILE_STAGE(28);	// 28 = filtering (export)
+				_NT_PROFILE_STAGE(28);	// 28 = filtering (export)
 
 				// combine all obstacle points into a single selection
 				pc_combine_sorted(
@@ -1214,24 +1237,24 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 
 		// 3. update accumulator
 		{
-			NT_PROFILE_STAGE(30);	// 30 = update grid (locking)
+			_NT_PROFILE_STAGE(30);	// 30 = update grid (locking)
 
 			this->_state.accumulation_mutex.lock();
 
-			NT_PROFILE_STAGE(31);	// 31 = update grid (pmf insert)
+			_NT_PROFILE_STAGE(31);	// 31 = update grid (pmf insert)
 			this->accumulator.incrementRatio(	// insert PMF obstacles
 				voxelized_points,
 				pre_pmf_range_filtered,		// base
 				pmf_filtered_obstacles		// subset
 			);
-			NT_PROFILE_STAGE(32);	// 32 = update grid (z-insert)
+			_NT_PROFILE_STAGE(32);	// 32 = update grid (z-insert)
 			this->accumulator.incrementRatio(	// insert z-thresh obstacles
 				voxelized_points,
 				z_mid_filtered_obstacles,	// base
 				DEFAULT_NO_SELECTION		// use all of base
 			);
 
-			NT_PROFILE_STAGE(33);	// 33 = update grid (cleanup)
+			_NT_PROFILE_STAGE(33);	// 33 = update grid (cleanup)
 			this->_state.obstacle_updates++;
 			this->_state.obstacles_updated.notify_all();
 
@@ -1247,17 +1270,19 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 
 		// processing finished, push instance idx to queue
 		f_inst->nt.is_active.Set(false);
-		NT_PROFILE_STAGE(40);	// 40 = finished
+		_NT_PROFILE_STAGE(40);	// 40 = finished
 		f_inst->link_state = false;
 		std::unique_lock<std::mutex> lock{ this->_state.finished_queue_mutex };
 		this->finished_queue.push_back(f_inst->index);
 		// wait for signal to continue...
-		NT_PROFILE_STAGE(41);	// 41 = waiting for update
+		_NT_PROFILE_STAGE(41);	// 41 = waiting for update
 		for(;this->_state.enable_threads.load() && !f_inst->link_state;) {
 			f_inst->link_condition.wait(lock);
 		}
 
 	}	// thread loop
+
+#undef _NT_PROFILE_STAGE
 
 }	// LidarImpl::filterWorker()
 
