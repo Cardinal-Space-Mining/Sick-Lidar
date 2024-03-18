@@ -19,8 +19,8 @@
 #ifndef LDRP_USE_ALL_ECHOS			// whether or not to use all echo points from the live scanner
   #define LDRP_USE_ALL_ECHOS					false
 #endif
-#ifndef LDRP_DISABLE_PRELIM_POINT_FILTERING		// enable/disable preliminary filtering of points (azimuth angle and minimum range)
-  #define LDRP_DISABLE_PRELIM_POINT_FILTERING	false
+#ifndef LDRP_ENABLE_PRELIM_POINT_FILTERING		// enable/disable preliminary filtering of points (azimuth angle and minimum range)
+  #define LDRP_ENABLE_PRELIM_POINT_FILTERING	true
 #endif
 #ifndef LDRP_ENABLE_NT_TUNING	// enable/disable live tuning using networktables (requires WPILib)
   #define LDRP_ENABLE_NT_TUNING					false
@@ -982,40 +982,6 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 	f_inst->nt.is_active.Set(false);
 	_NT_PROFILE_STAGE(0);	// 0 = init (pre looping)
 
-#if LDRP_ENABLE_NT_TUNING
-	const float		// all "unitted" parameters are normalized to be in meters and radians!
-		_max_scan_theta			= this->_nt.tuning.max_scan_theta.Get() * (std::numbers::pi_v<float> / 180.f),
-		_min_scan_theta			= this->_nt.tuning.min_scan_theta.Get() * (std::numbers::pi_v<float> / 180.f),
-		_min_scan_range			= this->_nt.tuning.min_scan_range.Get() * 1e-2f,
-		_voxel_size				= this->_nt.tuning.voxel_size.Get() * 1e-2f,
-		_max_pmf_range			= this->_nt.tuning.max_pmf_range.Get() * 1e-2f,
-		_max_z_thresh			= this->_nt.tuning.max_z_thresh.Get() * 1e-2f,
-		_min_z_thresh			= this->_nt.tuning.min_z_thresh.Get() * 1e-2f,
-		_pmf_window_base		= this->_nt.tuning.pmf_window_base.Get(),
-		_pmf_max_window_size	= this->_nt.tuning.pmf_max_window_size.Get() * 1e-2f,
-		_pmf_cell_size			= this->_nt.tuning.pmf_cell_size.Get() * 1e-2f,
-		_pmf_init_distance		= this->_nt.tuning.pmf_init_distance.Get() * 1e-2f,
-		_pmf_max_distance		= this->_nt.tuning.pmf_max_distance.Get() * 1e-2f,
-		_pmf_slope				= this->_nt.tuning.pmf_slope.Get()
-	;
-#else
-	const float		// all "unitted" parameters are normalized to be in meters and radians!
-		_max_scan_theta			= this->_config.fpipeline.max_scan_theta_deg * (std::numbers::pi_v<float> / 180.f),
-		_min_scan_theta			= this->_config.fpipeline.min_scan_theta_deg * (std::numbers::pi_v<float> / 180.f),
-		_min_scan_range			= this->_config.fpipeline.min_scan_range_cm * 1e-2f,
-		_voxel_size				= this->_config.fpipeline.voxel_size_cm * 1e-2f,
-		_max_pmf_range			= this->_config.fpipeline.max_pmf_range_cm * 1e-2f,
-		_max_z_thresh			= this->_config.fpipeline.max_z_thresh_cm * 1e-2f,
-		_min_z_thresh			= this->_config.fpipeline.min_z_thresh_cm * 1e-2f,
-		_pmf_window_base		= this->_config.fpipeline.pmf_window_base,
-		_pmf_max_window_size	= this->_config.fpipeline.pmf_max_window_size_cm * 1e-2f,
-		_pmf_cell_size			= this->_config.fpipeline.pmf_cell_size_cm * 1e-2f,
-		_pmf_init_distance		= this->_config.fpipeline.pmf_init_distance_cm * 1e-2f,
-		_pmf_max_distance		= this->_config.fpipeline.pmf_max_distance_cm * 1e-2f,
-		_pmf_slope				= this->_config.fpipeline.pmf_slope
-	;
-#endif
-	
 	// precalulcate values
 	const size_t max_points{ 
 		(MS100_POINTS_PER_SEGMENT_ECHO * MS100_MAX_ECHOS_PER_POINT)
@@ -1050,13 +1016,49 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 	for(;this->_state.enable_threads.load();) {
 
 		f_inst->nt.is_active.Set(true);
-		_NT_PROFILE_STAGE(10);	// 1 = step 1 (combine points)
+		_NT_PROFILE_STAGE(10);	// 10 = step 1 init
 
 		point_cloud.clear();	// clear the vector and set w,h to 0
 		// point_ranges.clear();	// << MEMORY LEAK!!! (it was)
 
 		Eigen::Vector3f avg_origin{ 0.f, 0.f, 0.f };
 		size_t origin_samples = 0;
+
+#if LDRP_ENABLE_NT_TUNING
+		const float		// all "unitted" parameters are normalized to be in meters and radians!
+			_max_scan_theta			= this->_nt.tuning.max_scan_theta.Get() * (std::numbers::pi_v<float> / 180.f),
+			_min_scan_theta			= this->_nt.tuning.min_scan_theta.Get() * (std::numbers::pi_v<float> / 180.f),
+			_min_scan_range			= this->_nt.tuning.min_scan_range.Get() * 1e-2f,
+			_voxel_size				= this->_nt.tuning.voxel_size.Get() * 1e-2f,
+			_max_pmf_range			= this->_nt.tuning.max_pmf_range.Get() * 1e-2f,
+			_max_z_thresh			= this->_nt.tuning.max_z_thresh.Get() * 1e-2f,
+			_min_z_thresh			= this->_nt.tuning.min_z_thresh.Get() * 1e-2f,
+			_pmf_window_base		= this->_nt.tuning.pmf_window_base.Get(),
+			_pmf_max_window_size	= this->_nt.tuning.pmf_max_window_size.Get() * 1e-2f,
+			_pmf_cell_size			= this->_nt.tuning.pmf_cell_size.Get() * 1e-2f,
+			_pmf_init_distance		= this->_nt.tuning.pmf_init_distance.Get() * 1e-2f,
+			_pmf_max_distance		= this->_nt.tuning.pmf_max_distance.Get() * 1e-2f,
+			_pmf_slope				= this->_nt.tuning.pmf_slope.Get()
+		;
+#else
+		const float		// all "unitted" parameters are normalized to be in meters and radians!
+			_max_scan_theta			= this->_config.fpipeline.max_scan_theta_deg * (std::numbers::pi_v<float> / 180.f),
+			_min_scan_theta			= this->_config.fpipeline.min_scan_theta_deg * (std::numbers::pi_v<float> / 180.f),
+			_min_scan_range			= this->_config.fpipeline.min_scan_range_cm * 1e-2f,
+			_voxel_size				= this->_config.fpipeline.voxel_size_cm * 1e-2f,
+			_max_pmf_range			= this->_config.fpipeline.max_pmf_range_cm * 1e-2f,
+			_max_z_thresh			= this->_config.fpipeline.max_z_thresh_cm * 1e-2f,
+			_min_z_thresh			= this->_config.fpipeline.min_z_thresh_cm * 1e-2f,
+			_pmf_window_base		= this->_config.fpipeline.pmf_window_base,
+			_pmf_max_window_size	= this->_config.fpipeline.pmf_max_window_size_cm * 1e-2f,
+			_pmf_cell_size			= this->_config.fpipeline.pmf_cell_size_cm * 1e-2f,
+			_pmf_init_distance		= this->_config.fpipeline.pmf_init_distance_cm * 1e-2f,
+			_pmf_max_distance		= this->_config.fpipeline.pmf_max_distance_cm * 1e-2f,
+			_pmf_slope				= this->_config.fpipeline.pmf_slope
+		;
+#endif
+
+		_NT_PROFILE_STAGE(11);	// 11 = step 1 loop
 
 		// 1. transform points based on timestamp
 		for(size_t i = 0; i < f_inst->samples.size(); i++) {			// we could theoretically multithread this part -- just use a mutex for inserting points into the master collection
@@ -1082,13 +1084,13 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 						const sick_scansegment_xd::ScanSegmentParserOutput::Scanline& scan_line = scan_group.scanlines[0];
 #endif
 						for(const sick_scansegment_xd::ScanSegmentParserOutput::LidarPoint& lidar_point : scan_line.points) {
-#if LDRP_DISABLE_PRELIM_POINT_FILTERING
-							{
-#else
+#if LDRP_ENABLE_PRELIM_POINT_FILTERING
 							if(								// if angle in range...									// and distance greater than minimum
 								lidar_point.azimuth <= _max_scan_theta && lidar_point.azimuth >= _min_scan_theta && lidar_point.range > _min_scan_range
 								// ...apply any other filters that benefit from points in lidar scan coord space as well
 							) {
+#else
+							{
 #endif
 								point_cloud.points.emplace_back();
 								reinterpret_cast<Eigen::Vector4f&>(point_cloud.points.back()) = transform * Eigen::Vector4f{lidar_point.x, lidar_point.y, lidar_point.z, 1.f};	// EEEEEE :O
