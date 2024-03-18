@@ -1,3 +1,5 @@
+/** Copyright (c) Cardinal Space Mining 2024 */
+
 #pragma once
 
 #include <cstdint>
