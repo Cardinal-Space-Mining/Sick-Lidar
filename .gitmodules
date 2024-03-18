@@ -1,6 +1,6 @@
 [submodule "submodule-deps/allwpilib"]
 	path = submodule-deps/allwpilib
-	url = https://github.com/S1ink/allwpilib
+	url = https://github.com/wpilibsuite/allwpilib
 [submodule "submodule-deps/protobuf"]
 	path = submodule-deps/protobuf
 	url = https://github.com/protocolbuffers/protobuf
