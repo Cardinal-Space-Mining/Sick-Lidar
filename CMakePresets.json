@@ -5,7 +5,7 @@
 			"name": "vscode-configure",
 			"displayName": "vscode",
 			"cacheVariables": {
-				"PROJECT_CXX_STANDARD": "20",
+				"sickperception_CXX_STANDARD": "20",
 				"sickperception_USE_WPILIB": "ON",
 				"sickperception_MULTISTAGE_STEP": "1",
 				"LDRP_ENABLE_LOGGING": "ON",
@@ -13,6 +13,38 @@
 				"LDRP_ENABLE_SAFETY_CHECKS": "ON",
 				"LDRP_USE_UE_SIM_POINTS": "OFF",
 				"LDRP_USE_INTERNAL_SIM_POINTS": "OFF",
+				"LDRP_USE_ECHO_POINTS": "OFF",
+				"LDRP_USE_PRELIM_FILTERING": "ON",
+				"LDRP_ENABLE_TUNING": "ON",
+				"LDRP_ENABLE_PROFILING": "ON"
+			}
+		},
+		{
+			"name": "ue-sim",
+			"displayName": "uesim",
+			"cacheVariables": {
+				"sickperception_USE_WPILIB": "ON",
+				"LDRP_ENABLE_LOGGING": "ON",
+				"LDRP_ENABLE_DEBUG_LOGGING": "ON",
+				"LDRP_ENABLE_SAFETY_CHECKS": "ON",
+				"LDRP_USE_UE_SIM_POINTS": "ON",
+				"LDRP_USE_INTERNAL_SIM_POINTS": "OFF",
+				"LDRP_USE_ECHO_POINTS": "OFF",
+				"LDRP_USE_PRELIM_FILTERING": "ON",
+				"LDRP_ENABLE_TUNING": "ON",
+				"LDRP_ENABLE_PROFILING": "ON"
+			}
+		},
+		{
+			"name": "standalone-sim",
+			"displayName": "internalsim",
+			"cacheVariables": {
+				"sickperception_USE_WPILIB": "ON",
+				"LDRP_ENABLE_LOGGING": "ON",
+				"LDRP_ENABLE_DEBUG_LOGGING": "ON",
+				"LDRP_ENABLE_SAFETY_CHECKS": "ON",
+				"LDRP_USE_UE_SIM_POINTS": "OFF",
+				"LDRP_USE_INTERNAL_SIM_POINTS": "ON",
 				"LDRP_USE_ECHO_POINTS": "OFF",
 				"LDRP_USE_PRELIM_FILTERING": "ON",
 				"LDRP_ENABLE_TUNING": "ON",

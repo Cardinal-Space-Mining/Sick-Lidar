@@ -1085,7 +1085,7 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 #endif
 						for(const sick_scansegment_xd::ScanSegmentParserOutput::LidarPoint& lidar_point : scan_line.points) {
 #if LDRP_ENABLE_PRELIM_POINT_FILTERING
-							if(								// if angle in range...									// and distance greater than minimum
+							if(								// if angle in range...									// and range greater than minimum
 								lidar_point.azimuth <= _max_scan_theta && lidar_point.azimuth >= _min_scan_theta && lidar_point.range > _min_scan_range
 								// ...apply any other filters that benefit from points in lidar scan coord space as well
 							) {

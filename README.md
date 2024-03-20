@@ -26,8 +26,15 @@ For the most part, the project is configured to use the optimal build variables 
 - `sickperception_USE_WPILIB` -- Configures whether or not wpilib is built. Mainly a remnant and debug option since the current code will not work without wpilib.
 - `sickperception_MULTISTAGE_STEP` -- Manually force a specific build stage (0 or 1, -1 for auto).
 - `sickperception_CXX_STANDARD` -- C++ standard to use for building the project and dependencies. A minimum of C++20 is required.
+- `LDRP_ENABLE_LOGGING` -- Enable/disable logging altogether
 - `LDRP_ENABLE_DEBUG_LOGGING` -- Enable/disable debug logging in the core library.
 - `LDRP_ENABLE_SAFETY_CHECKS` -- Enable/disable "extra" safety checks in the core library.
+- `LDRP_USE_UE_SIM_POINTS` -- Enable compiling for testing with the unreal engine simulator. Mutually exclusive with `LDRP_USE_INTERNAL_SIM_POINTS` (enforced sliently, this option takes priority -- **if neither is used, then the program is compiled for use with a physical scanner**).
+- `LDRP_USE_INTERNAL_SIM_POINTS` -- Enable compiling for use with the internal point generator (see the previous note).
+- `LDRP_USE_ECHO_POINTS` -- Enable/disable the use of all echo points from the live scanner.
+- `LDRP_USE_PRELIM_FILTERING` -- Enable/disable preliminary range and azimuth angle filtering (greatly increases loop efficiency if these aren't needed).
+- `LDRP_ENABLE_TUNING` -- Enable/disable live tuning via published networktable entries.
+- `LDRP_ENABLE_PROFILING` -- Enable/disable filter pipeline profiling (per thread) via networktables.
 - `BUILD_SHARED_LIBS` -- Whether or not to build shared libraries (CMake default variable).
 - `CMAKE_BUILD_TYPE` -- Used on some build systems (non-MSVC) to define the build type (CMake default variable, defaults to `Release`).
 - `CMAKE_INSTALL_PREFIX` -- Where the installed files will be copied (CMake default variable).
@@ -36,7 +43,7 @@ For the most part, the project is configured to use the optimal build variables 
 - To configure:
   - `cmake -S <SOURCE DIRECTORY> -B <BUILD DIRECTORY>` on MSVC or similar (ie. if on windows), and
   - `cmake -S <SOURCE DIRECTORY> -B <BUILD DIRECTORY> -DCMAKE_BUILD_TYPE=<BUILD_TYPE>` on non-MSVC build systems (ie. if on linux).
-  - Additional options can be appended using the format `-D<OPTION>=<OPTION VAL>` (see above). Note that `-DCMAKE_BUILD_TYPE=<BUILD_TYPE>` may be dropped if a release build is required since this is the default value.
+  - Additional options can be appended using the format `-D<OPTION>=<OPTION VAL>` (see above).
 - To build (and install):
   - `cmake --build <BUILD DIRECTORY> --target install --config Release (--parallel)` on MSVC or similar (ie. if on windows), and
   - `cmake --build <BUILD DIRECTORY> --target install (--parallel <#parallel>)` on non-MSVC build systems (ie. if on linux).
