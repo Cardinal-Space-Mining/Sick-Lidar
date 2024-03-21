@@ -30,11 +30,11 @@ int main(int argc, char** argv) {
 	status_t s{0};
 	ldrp::LidarConfig _config{};
 	_config.points_logging_mode = (ldrp::POINT_LOGGING_INCLUDE_FILTERED | ldrp::POINT_LOGGING_NT);
-	_config.nt_use_client = false;
+	_config.nt_use_client = true;
+	_config.nt_client_team = 1111;
 	// _config.lidar_offset_xyz[2] = 7.5f;
 	_config.min_scan_theta_degrees = -180.f;
 	_config.max_scan_theta_degrees = 180.f;
-	// _config.nt_client_team = 1111;
 	_config.pose_history_period_s = 1.0;
 	_config.map_resolution_cm = 3.f;
 	_config.max_filter_threads = 1;
@@ -45,9 +45,9 @@ int main(int argc, char** argv) {
 
 	// nt::NetworkTableInstance::GetDefault().StartServer();
 	nt::NetworkTableInstance nt_inst = nt::NetworkTableInstance::GetDefault();
-	// nt::FloatArrayEntry nt_localization = nt_inst.GetFloatArrayTopic("rio telemetry/robot/pigeon rotation quat").GetEntry({});
-	nt::FloatArrayEntry nt_localization = nt_inst.GetFloatArrayTopic("uesim/pose").GetEntry({});
-	nt::RawEntry nt_grid = nt_inst.GetRawTopic("tmain/obstacle grid").GetEntry("Grid<U8>", {});
+	nt::FloatArrayEntry nt_localization = nt_inst.GetFloatArrayTopic("rio telemetry/robot/pigeon rotation quat").GetEntry({});
+	// nt::FloatArrayEntry nt_localization = nt_inst.GetFloatArrayTopic("uesim/pose").GetEntry({});
+	// nt::RawEntry nt_grid = nt_inst.GetRawTopic("tmain/obstacle grid").GetEntry("Grid<U8>", {});
 
 	signal(SIGINT, _action);
 
@@ -59,20 +59,20 @@ int main(int argc, char** argv) {
 	for(;_program_running.load();) {
 
 		std::vector<nt::TimestampedFloatArray> updates = nt_localization.ReadQueue();
-		// std::cout << "[Main Thread]: Localization recieved " << updates.size() << " pose updates" << std::endl;
+		std::cout << "[Main Thread]: Localization recieved " << updates.size() << " pose updates" << std::endl;
 		for(const nt::TimestampedFloatArray& u : updates) {
 			ldrp::updateWorldPose(u.value.data(), u.value.data() + 3, u.time);
 		}
 
 		// s = ldrp::updateWorldPose(pose, pose + 3);
 		// pose[0] += 0.1;
-		if (grid.grid) {
-			free(grid.grid);
-			grid.grid = nullptr;
-		}
+		// if (grid.grid) {
+		// 	free(grid.grid);
+		// 	grid.grid = nullptr;
+		// }
 		// high_resolution_clock::time_point a = high_resolution_clock::now();
-		s = ldrp::waitNextObstacleGrid(grid, &_grid_alloc, 10.0);
-		if(s == ldrp::STATUS_SUCCESS) grid.grid -= (sizeof(int64_t) * 2);
+		// s = ldrp::waitNextObstacleGrid(grid, &_grid_alloc, 10.0);
+		// if(s == ldrp::STATUS_SUCCESS) grid.grid -= (sizeof(int64_t) * 2);
 		// double dur = duration<double>{high_resolution_clock::now() - a}.count();
 		// if(s & ldrp::STATUS_TIMED_OUT) {
 		// 	std::cout << "[Main Thread]: Obstacle export timed out after " << dur << " seconds." << std::endl;
@@ -83,18 +83,18 @@ int main(int argc, char** argv) {
 		// 	std::cout << "[Main Thread]: Obstacle export failed after " << dur << " seconds." << std::endl;
 		// }
 
-		if(grid.grid) {
-			reinterpret_cast<int64_t*>(grid.grid)[0] = grid.cells_x;
-			reinterpret_cast<int64_t*>(grid.grid)[1] = grid.cells_y;
-			nt_grid.Set(
-				std::span<const uint8_t>{
-					grid.grid,
-					grid.grid + (grid.cells_x * grid.cells_y + (sizeof(int64_t) * 2))
-				}
-			);
-		}
+		// if(grid.grid) {
+		// 	reinterpret_cast<int64_t*>(grid.grid)[0] = grid.cells_x;
+		// 	reinterpret_cast<int64_t*>(grid.grid)[1] = grid.cells_y;
+		// 	nt_grid.Set(
+		// 		std::span<const uint8_t>{
+		// 			grid.grid,
+		// 			grid.grid + (grid.cells_x * grid.cells_y + (sizeof(int64_t) * 2))
+		// 		}
+		// 	);
+		// }
 
-		std::this_thread::sleep_for(10ms);
+		std::this_thread::sleep_for(5ms);
 	}
 
 	// bmp::generateBitmapImage(grid.grid, grid.cells_x, grid.cells_y, (char*)"./logs/out.bmp");

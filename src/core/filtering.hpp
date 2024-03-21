@@ -749,10 +749,18 @@ void write_interlaced_selection_bytes(
 	for(; _buff < buffer.size() / interlace_rep; _buff++) {
 		const size_t idx = interlace_rep * _buff + interlace_off;
 		if(_sel < selection.size() && _buff == selection[_sel]) {
-			buffer[idx] = selected;
+			if constexpr(sizeof(ElemT) > 8) {
+				memcpy(buffer.data() + idx, &selected, sizeof(ElemT));	// the function is meant to do a bit/byte-wise copy so might as well use a more efficient transfer when applicable
+			} else {
+				buffer[idx] = selected;
+			}
 			_sel++;
 		} else {
-			buffer[idx] = unselected;
+			if constexpr(sizeof(ElemT) > 8) {
+				memcpy(buffer.data() + idx, &unselected, sizeof(ElemT));
+			} else {
+				buffer[idx] = unselected;
+			}
 		}
 	}
 }

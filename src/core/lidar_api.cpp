@@ -150,6 +150,23 @@ static inline const uint32_t convertNumThreads(const int32_t input_num, const in
 	;
 }
 
+template<typename T, typename Time_t>
+class WindowedTimestampMatcher {
+public:
+	using Type = T;
+	using TimeT = Time_t;
+
+public:
+	// let the fun begin!
+
+
+protected:
+	TimeT lower;									// the lower bound time
+	std::vector< std::pair<TimeT, Type> > buffer;	// use a tree for better search performance
+
+
+};
+
 };
 
 
