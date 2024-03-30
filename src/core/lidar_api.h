@@ -28,8 +28,25 @@
 // "LiDaR Proccessing container namespace"
 namespace ldrp {
 
+	/** Compiled features (bitmask) */
+	enum : uint64_t {
+		FEATURE_USING_SCANNER		= (1 << 0),
+		FEATURE_USING_UE_SIM		= (1 << 1),
+		FEATURE_USING_INTERNAL_SIM	= (1 << 2),
+		FEATURE_USING_WPILIB		= (1 << 3),
+		FEATURE_SAFETY_CHECKS		= (1 << 4),
+		FEATURE_USING_LOGGING		= (1 << 5),
+		FEATURE_DEBUG_LOGGING		= (1 << 6),
+		FEATURE_USING_ALL_ECHOS		= (1 << 7),
+		FEATURE_PRELIM_FILTERING	= (1 << 8),
+		FEATURE_NT_TUNING			= (1 << 9),
+		FEATURE_NT_PROFLING			= (1 << 10),
+	};
+
+
 	using status_t = int32_t;
 
+	/** Status values (bitmask) */
 	enum : status_t {
 		STATUS_SUCCESS				= (0 << 0),		// success
 		STATUS_FAIL					= (1 << 0),		// generic fail, often |'d with other stati
@@ -43,6 +60,7 @@ namespace ldrp {
 		STATUS_TIMED_OUT			= (1 << 8),		// a timeout occurred
 	};
 
+	/** Logging bitmask options */
 	enum : uint64_t {
 		POINT_LOGGING_NONE		= 0,
 		POINT_LOGGING_TAR		= (1 << 0),
@@ -131,10 +149,8 @@ namespace ldrp {
 
 /** API */
 
-	// /** Get the pcl version string of the currently linked library */
-	// __API const char* pclVer();
-	// /** Get whether wpilib and supported functionality was compiled in */
-	// __API bool hasWpilib();
+	/** Get a bit string representing which features have been enabled during compilation (see enum above) */
+	__API uint64_t featureBits();
 
 	/** Initialize the global instance resources.
 	 * @param config -- the struct containing all the configs for the lidar instance */
@@ -156,7 +172,7 @@ namespace ldrp {
 	 * @param xyz - the (x, y, z) position as a float array (pointer to any contiguous float buffer)
 	 * @param qxyz - the quaternion representing the robot's rotation in world space -- ordered XYZW!
 	 * @param ts_microseconds - the timestamp in microseconds (relative to epoch) when the pose was collected */
-	__API status_t updateWorldPose(const float* xyz, const float* qxyzw, const uint64_t ts_microseconds = 0);
+	__API status_t updateWorldPose(const float* xyz, const float* qxyzw, const uint64_t ts_microseconds = 0);		// TODO: separate location and orientation updates with appropriate mapping in backed datastruct
 
 	/** Export the current obstacle grid.
 	 * @param grid - struct to which all grid data will be exported

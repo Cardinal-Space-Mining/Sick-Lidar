@@ -8,6 +8,7 @@
 
 #include <networktables/NetworkTableInstance.h>
 #include <networktables/FloatArrayTopic.h>
+#include <networktables/DoubleArrayTopic.h>
 #include <networktables/RawTopic.h>
 
 #include "lidar_api.h"
@@ -27,16 +28,18 @@ int main(int argc, char** argv) {
 
 	using ldrp::status_t;
 
+	std::cout << "ldrp feature bits: " << ldrp::featureBits() << std::endl;
+
 	status_t s{0};
 	ldrp::LidarConfig _config{};
 	_config.points_logging_mode = (ldrp::POINT_LOGGING_INCLUDE_FILTERED | ldrp::POINT_LOGGING_NT);
-	_config.nt_use_client = true;
+	_config.nt_use_client = false;
 	_config.nt_client_team = 1111;
 	// _config.lidar_offset_xyz[2] = 7.5f;
 	_config.min_scan_theta_degrees = -180.f;
 	_config.max_scan_theta_degrees = 180.f;
 	_config.pose_history_period_s = 1.0;
-	_config.map_resolution_cm = 3.f;
+	_config.map_resolution_cm = 10.f;
 	_config.max_filter_threads = 1;
 
 	s = ldrp::apiInit(_config);
@@ -45,7 +48,7 @@ int main(int argc, char** argv) {
 
 	// nt::NetworkTableInstance::GetDefault().StartServer();
 	nt::NetworkTableInstance nt_inst = nt::NetworkTableInstance::GetDefault();
-	nt::FloatArrayEntry nt_localization = nt_inst.GetFloatArrayTopic("rio telemetry/robot/pigeon rotation quat").GetEntry({});
+	nt::DoubleArrayEntry nt_localization = nt_inst.GetTable("rio telemetry")->GetSubTable("robot")->GetDoubleArrayTopic("pigeon rotation quat").GetEntry({});	// robot code sends doubles not floats!
 	// nt::FloatArrayEntry nt_localization = nt_inst.GetFloatArrayTopic("uesim/pose").GetEntry({});
 	// nt::RawEntry nt_grid = nt_inst.GetRawTopic("tmain/obstacle grid").GetEntry("Grid<U8>", {});
 
@@ -53,15 +56,23 @@ int main(int argc, char** argv) {
 
 	using namespace std::chrono_literals;
 	using namespace std::chrono;
-	// float					// x    y    z    w
-	// 	pose[] = { 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 1.f };
+	float					// x    y    z    w
+		pose[7] = { 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 1.f };
 	ldrp::ObstacleGrid grid{};
+	nt_localization.Set( {{ 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}} );
 	for(;_program_running.load();) {
 
-		std::vector<nt::TimestampedFloatArray> updates = nt_localization.ReadQueue();
-		std::cout << "[Main Thread]: Localization recieved " << updates.size() << " pose updates" << std::endl;
-		for(const nt::TimestampedFloatArray& u : updates) {
-			ldrp::updateWorldPose(u.value.data(), u.value.data() + 3, u.time);
+		std::vector<nt::TimestampedDoubleArray> updates = nt_localization.ReadQueue();
+		// std::cout << "[Main Thread]: Localization recieved " << updates.size() << " pose updates" << std::endl;
+		if(updates.size() <= 0) {
+			updates.emplace_back(nt_localization.GetAtomic());
+		}
+		for(const nt::TimestampedDoubleArray& u : updates) {
+			const double* _data = u.value.data();
+			for(size_t i = 0; i < 7; i++) {
+				pose[i] = static_cast<float>(_data[i]);
+			}
+			ldrp::updateWorldPose(pose, pose + 3, u.time);
 		}
 
 		// s = ldrp::updateWorldPose(pose, pose + 3);

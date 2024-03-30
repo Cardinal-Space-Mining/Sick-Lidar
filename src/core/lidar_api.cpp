@@ -150,19 +150,94 @@ static inline const uint32_t convertNumThreads(const int32_t input_num, const in
 	;
 }
 
+
+// template<typename Time_t>
+// struct timebase_traits {
+// 	inline static constexpr bool
+// 		is_float = std::is_floating_point<Time_t>::value,
+// 		is_integral = std::is_integral<Time_t>::value,
+// 		is_chrono = crno::is_clock<Time_t>::value;
+// };
+
 template<typename T, typename Time_t>
-class WindowedTimestampMatcher {
+class BoundedTimestampSampler {
 public:
+	using This_T = BoundedTimestampSampler<T, Time_t>;
 	using Type = T;
-	using TimeT = Time_t;
+	using TimeT = Time_t,
+	using ElemT = std::pair<TimeT, Type>;
+
+private:
+	static bool __t_less(TimeT t, const ElemT& elem) {
+		return t < elem.first;
+	}
+	static bool __t_greater(TimeT t, const ElemT& elem) {
+		return t > elem.first;
+	}
 
 public:
-	// let the fun begin!
+	BoundedTimestampSampler() = default;
+	~BoundedTimestampSampler() = default;
+
+
+	void updateMin(TimeT min) {
+		this->absolute_bound = min;
+		this->enforceBound();
+	}
+
+	inline void insert(TimeT time, const Type& sample) { this->insert(time, sample); }
+	void insert(TimeT time, Type&& sample) {
+
+		if(this->samples.size() <= 0 || time > this->samples.back().first) {
+			this->samples.emplace_back(time, std::forward<Type>(sample));
+		} else {
+			auto after = std::upper_bound(this->samples.begin(), this->samples.end(), time, &This_T::__t_less);
+			auto before = after - 1;
+			if(after == this->samples.begin()) {
+				this->samples.insert(after, std::pair{time, std::forward<Type>(sample)});
+			} else {
+				if(before == this->samples.begin() || before->first < time) {
+					this->samples.insert(after, std::pair{time, std::forward<Type>(sample)});
+				} else {
+					before->second = sample;
+				}
+			}
+		}
+
+	}
+
+	inline void clear() { this->samples.clear(); }
+
+	const Type* sample(TimeT time) const {
+
+		if( this->samples.empty() )					return nullptr;
+		
+		if( time <= this->samples.front().first )	return &this->samples.front().second;
+		if( time >= this->samples.back().first )	return &this->samples.back().second;
+		if( this->samples.size() == 1 )				return &this->samples[0].second;
+
+		auto greater = std::lower_bound(this->samples.begin(), this->samples.end(), time, &This_T::__t_greater);	// "lower bound" of times greater than t
+
+		if( greater == this->samples.begin() )		return &greater->second;
+
+		auto less = greater - 1;
+		return abs(time - less->first) < abs(greater->first - time) ? &less->second : &greater->second;		// return closer sample
+
+	}
+
+	inline const std::vector<ElemT>& getSamples() const { return this->samples; }
 
 
 protected:
-	TimeT lower;									// the lower bound time
-	std::vector< std::pair<TimeT, Type> > buffer;	// use a tree for better search performance
+	void enforceBound() {
+		auto last = this->samples.begin();
+		for(; last < this->samples.end() && last->first < this->absolute_bound; last++);
+		this->samples.erase(this->samples.begin(), last);
+	}
+
+protected:
+	TimeT absolute_bound = static_cast<TimeT>(0);	// the absolute minimum bounding time
+	std::vector<ElemT> samples{};	// use a tree for better search performance
 
 
 };
@@ -516,6 +591,8 @@ protected:	// main internal entities
 			units::time::second_t{ _config.pose_history_range },
 			&lerpClosest<const Eigen::Isometry3f&>
 		};
+	// ldru::BoundedTimestampSampler<Eigen::Isometry3f, int64_t>	// >>> int64_t timebase representing MICROSECONDS SINCE EPOCH <<<
+	// 	transform_sampler{};
 	QuantizedRatioGrid<ObstacleGrid::Quant_T, float>
 		accumulator{};
 	PCDTarWriter
@@ -535,12 +612,21 @@ protected:	// main internal entities
 
 /** Static API */
 
-// const char* pclVer() {	// these are dumb
-// 	return PCL_VERSION_PRETTY;
-// }
-// bool hasWpilib() {
-// 	return LDRP_USE_WPILIB;
-// }
+uint64_t featureBits() {
+	return (
+		(!LDRP_USE_SIM_MODE)					<< 0 |
+		(LDRP_USE_SIM_MODE & 2)					<< 1 |
+		(LDRP_USE_SIM_MODE & 1)					<< 2 |
+		(LDRP_USE_WPILIB)						<< 3 |
+		(LDRP_SAFETY_CHECKS)					<< 4 |
+		(LDRP_ENABLE_LOGGING)					<< 5 |
+		(LDRP_DEBUG_LOGGING)					<< 6 |
+		(LDRP_USE_ALL_ECHOS)					<< 7 |
+		(LDRP_ENABLE_PRELIM_POINT_FILTERING)	<< 8 |
+		(LDRP_ENABLE_NT_TUNING)					<< 9 |
+		(LDRP_ENABLE_NT_PROFILING)				<< 10
+	);
+}
 
 
 status_t apiInit(const LidarConfig& config) {
@@ -582,6 +668,18 @@ status_t setLogLevel(const int32_t lvl) {
 	return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
 }
 
+// status_t updateWorldPosition(const float* xyz, const uint64_t ts_us) {
+// 	if(LidarImpl::_global) {
+// 		return LidarImpl::_global->addWorldRef(xyz, nullptr, ts_us);
+// 	}
+// 	return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
+// }
+// status_t updateWorldOrientation(const float* qxyzw, const uint64_t ts_us) {
+// 	if(LidarImpl::_global) {
+// 		return LidarImpl::_global->addWorldRef(nullptr, qxyzw, ts_us);
+// 	}
+// 	return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
+// }
 status_t updateWorldPose(const float* xyz, const float* qxyzw, const uint64_t ts_us) {
 	if(LidarImpl::_global) {
 		return LidarImpl::_global->addWorldRef(xyz, qxyzw, ts_us);
@@ -616,6 +714,11 @@ status_t LidarImpl::addWorldRef(const float* xyz, const float* qxyzw, const uint
 			crno::duration<double>{ crno::hrc::now().time_since_epoch() }.count() :
 			(double)ts_us / 1e6
 	};
+	// const int64_t timestamp{
+	// 	ts_us == 0 ?
+	// 		static_cast<int64_t>(crno::duration_cast<crno::microseconds>(crno::hrc::now().time_since_epoch()).count()) :
+	// 		static_cast<int64_t>(ts_us)
+	// };
 
 	/* >> FOR FUTURE REFERENCE!!! <<
 		* "Eigen::QuaternionXX * Eigen::TranslationXX" IS NOT THE SAME AS "Eigen::TranslationXX * Eigen::QuaternionXX"
@@ -632,6 +735,7 @@ status_t LidarImpl::addWorldRef(const float* xyz, const float* qxyzw, const uint
 
 	this->_state.localization_mutex.lock();
 	this->transform_map.AddSample( timestamp, l2w_transform );
+	// this->transform_sampler.insert( timestamp, l2w_transform );
 	this->_state.localization_mutex.unlock();
 	return STATUS_SUCCESS;
 
@@ -933,6 +1037,7 @@ void LidarImpl::lidarWorker() {
 								frame_segments[idx].resize(this->_config.buffered_frames);	// cut off oldest scans beyond the buffer size (resize() removes from the back)
 								filled_segments |= seg_bit;		// save this segment as finished by enabling it's bit
 							}
+							// TODO: update min time bound for transform sampler
 						}
 						this->_nt.last_parsed_seg_idx.Set( log2(seg_bit) );
 
@@ -1085,10 +1190,15 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 				this->_state.localization_mutex.lock_shared();	// other threads can read from the buffer as well
 				std::optional<Eigen::Isometry3f> ts_transform = this->transform_map.Sample(
 					units::time::second_t{ segment.timestamp_sec + (segment.timestamp_nsec * 1E-9) } );
+				// const Eigen::Isometry3f* ts_transform = this->transform_sampler.sample(		// TODO: !!! THIS WILL LIKELY CAUSE PROBLEMS !!! >> if the vector gets realloced while we don't have mutex control, our pointer is no longer valid!
+				// 	static_cast<int64_t>(segment.timestamp_sec) * 1000000L + static_cast<int64_t>(segment.timestamp_nsec) / 1000L
+				// );
 				this->_state.localization_mutex.unlock_shared();
 
 				if(this->_config.skip_invalid_transform_ts && !ts_transform.has_value()) continue;
 				const Eigen::Isometry3f& transform = ts_transform.has_value() ? *ts_transform : DEFAULT_NO_POSE;
+				// if(this->_config.skip_invalid_transform_ts && !ts_transform) continue;
+				// const Eigen::Isometry3f& transform = ts_transform ? *ts_transform : DEFAULT_NO_POSE;
 
 				avg_origin += transform.translation();
 				origin_samples++;
