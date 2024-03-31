@@ -164,7 +164,7 @@ class BoundedTimestampSampler {
 public:
 	using This_T = BoundedTimestampSampler<T, Time_t>;
 	using Type = T;
-	using TimeT = Time_t,
+	using TimeT = Time_t;
 	using ElemT = std::pair<TimeT, Type>;
 
 private:
@@ -185,9 +185,9 @@ public:
 		this->enforceBound();
 	}
 
-	inline void insert(TimeT time, const Type& sample) { this->insert(time, sample); }
+	inline void insert(TimeT time, const Type& sample)
+		{ this->insert(time, sample); }
 	void insert(TimeT time, Type&& sample) {
-
 		if(this->samples.size() <= 0 || time > this->samples.back().first) {
 			this->samples.emplace_back(time, std::forward<Type>(sample));
 		} else {
@@ -203,15 +203,12 @@ public:
 				}
 			}
 		}
-
 	}
 
 	inline void clear() { this->samples.clear(); }
 
 	const Type* sample(TimeT time) const {
-
 		if( this->samples.empty() )					return nullptr;
-		
 		if( time <= this->samples.front().first )	return &this->samples.front().second;
 		if( time >= this->samples.back().first )	return &this->samples.back().second;
 		if( this->samples.size() == 1 )				return &this->samples[0].second;
@@ -222,7 +219,6 @@ public:
 
 		auto less = greater - 1;
 		return abs(time - less->first) < abs(greater->first - time) ? &less->second : &greater->second;		// return closer sample
-
 	}
 
 	inline const std::vector<ElemT>& getSamples() const { return this->samples; }

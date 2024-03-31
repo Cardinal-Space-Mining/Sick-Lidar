@@ -33,7 +33,7 @@ int main(int argc, char** argv) {
 	status_t s{0};
 	ldrp::LidarConfig _config{};
 	_config.points_logging_mode = (ldrp::POINT_LOGGING_INCLUDE_FILTERED | ldrp::POINT_LOGGING_NT);
-	_config.nt_use_client = false;
+	_config.nt_use_client = true;
 	_config.nt_client_team = 1111;
 	// _config.lidar_offset_xyz[2] = 7.5f;
 	_config.min_scan_theta_degrees = -180.f;
@@ -56,7 +56,7 @@ int main(int argc, char** argv) {
 
 	using namespace std::chrono_literals;
 	using namespace std::chrono;
-	float					// x    y    z    w
+	float						// x    y    z    w
 		pose[7] = { 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 1.f };
 	ldrp::ObstacleGrid grid{};
 	nt_localization.Set( {{ 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}} );
@@ -64,15 +64,22 @@ int main(int argc, char** argv) {
 
 		std::vector<nt::TimestampedDoubleArray> updates = nt_localization.ReadQueue();
 		// std::cout << "[Main Thread]: Localization recieved " << updates.size() << " pose updates" << std::endl;
+		std::optional<int64_t> _dt = nt_inst.GetServerTimeOffset();
+		const int64_t dt = (_dt.has_value() ? *_dt : 0L);
+		std::cout << "Time off (micros): " << dt << std::endl;
 		if(updates.size() <= 0) {
 			updates.emplace_back(nt_localization.GetAtomic());
 		}
 		for(const nt::TimestampedDoubleArray& u : updates) {
 			const double* _data = u.value.data();
-			for(size_t i = 0; i < 7; i++) {
-				pose[i] = static_cast<float>(_data[i]);
-			}
-			ldrp::updateWorldPose(pose, pose + 3, u.time);
+			pose[0] = static_cast<float>(_data[0]);
+			pose[1] = static_cast<float>(_data[1]);
+			pose[2] = static_cast<float>(_data[2]);
+			pose[3] = static_cast<float>(_data[4]);	// pigeon and wpilib internally use wxyz order, therefore we must reorder to xyzw
+			pose[4] = static_cast<float>(_data[5]);
+			pose[5] = static_cast<float>(_data[6]);
+			pose[6] = static_cast<float>(_data[3]);
+			ldrp::updateWorldPose(pose, pose + 3, u.time - dt);
 		}
 
 		// s = ldrp::updateWorldPose(pose, pose + 3);
