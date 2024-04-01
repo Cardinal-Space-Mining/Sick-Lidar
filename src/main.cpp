@@ -64,9 +64,9 @@ int main(int argc, char** argv) {
 
 		std::vector<nt::TimestampedDoubleArray> updates = nt_localization.ReadQueue();
 		// std::cout << "[Main Thread]: Localization recieved " << updates.size() << " pose updates" << std::endl;
-		std::optional<int64_t> _dt = nt_inst.GetServerTimeOffset();
-		const int64_t dt = (_dt.has_value() ? *_dt : 0L);
-		std::cout << "Time off (micros): " << dt << std::endl;
+		// std::optional<int64_t> _dt = nt_inst.GetServerTimeOffset();
+		// const int64_t dt = (_dt.has_value() ? *_dt : 0L);
+		// std::cout << "Time off (micros): " << dt << std::endl;
 		if(updates.size() <= 0) {
 			updates.emplace_back(nt_localization.GetAtomic());
 		}
@@ -79,7 +79,7 @@ int main(int argc, char** argv) {
 			pose[4] = static_cast<float>(_data[5]);
 			pose[5] = static_cast<float>(_data[6]);
 			pose[6] = static_cast<float>(_data[3]);
-			ldrp::updateWorldPose(pose, pose + 3, u.time - dt);
+			ldrp::updateWorldPose(pose, pose + 3, u.time);
 		}
 
 		// s = ldrp::updateWorldPose(pose, pose + 3);
@@ -112,7 +112,7 @@ int main(int argc, char** argv) {
 		// 	);
 		// }
 
-		std::this_thread::sleep_for(5ms);
+		std::this_thread::sleep_for(1ms);
 	}
 
 	// bmp::generateBitmapImage(grid.grid, grid.cells_x, grid.cells_y, (char*)"./logs/out.bmp");
