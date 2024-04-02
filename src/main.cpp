@@ -8,6 +8,7 @@
 
 #include <networktables/NetworkTableInstance.h>
 #include <networktables/FloatArrayTopic.h>
+#include <networktables/DoubleArrayTopic.h>
 #include <networktables/RawTopic.h>
 
 #include "lidar_api.h"
@@ -27,17 +28,21 @@ int main(int argc, char** argv) {
 
 	using ldrp::status_t;
 
+	std::cout << "ldrp feature bits: " << ldrp::featureBits() << std::endl;
+
 	status_t s{0};
 	ldrp::LidarConfig _config{};
 	_config.points_logging_mode = (ldrp::POINT_LOGGING_INCLUDE_FILTERED | ldrp::POINT_LOGGING_NT);
-	_config.nt_use_client = false;
+	_config.nt_use_client = true;
+	_config.nt_client_team = 1111;
 	// _config.lidar_offset_xyz[2] = 7.5f;
 	_config.min_scan_theta_degrees = -180.f;
 	_config.max_scan_theta_degrees = 180.f;
-	// _config.nt_client_team = 1111;
 	_config.pose_history_period_s = 1.0;
-	_config.map_resolution_cm = 3.f;
+	_config.map_resolution_cm = 5.f;
 	_config.max_filter_threads = 1;
+	_config.pmf_max_window_size_cm = 48.f;
+	// _config.skip_invalid_transform_ts = true;
 
 	s = ldrp::apiInit(_config);
 	s = ldrp::lidarInit();
@@ -45,56 +50,70 @@ int main(int argc, char** argv) {
 
 	// nt::NetworkTableInstance::GetDefault().StartServer();
 	nt::NetworkTableInstance nt_inst = nt::NetworkTableInstance::GetDefault();
-	// nt::FloatArrayEntry nt_localization = nt_inst.GetFloatArrayTopic("rio telemetry/robot/pigeon rotation quat").GetEntry({});
-	nt::FloatArrayEntry nt_localization = nt_inst.GetFloatArrayTopic("uesim/pose").GetEntry({});
-	nt::RawEntry nt_grid = nt_inst.GetRawTopic("tmain/obstacle grid").GetEntry("Grid<U8>", {});
+	nt::DoubleArrayEntry nt_localization = nt_inst.GetTable("rio telemetry")->GetSubTable("robot")->GetDoubleArrayTopic("pigeon rotation quat").GetEntry({});	// robot code sends doubles not floats!
+	// nt::FloatArrayEntry nt_localization = nt_inst.GetFloatArrayTopic("uesim/pose").GetEntry({});
+	// nt::RawEntry nt_grid = nt_inst.GetRawTopic("tmain/obstacle grid").GetEntry("Grid<U8>", {});
 
 	signal(SIGINT, _action);
 
 	using namespace std::chrono_literals;
 	using namespace std::chrono;
-	// float					// x    y    z    w
-	// 	pose[] = { 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 1.f };
+	float						// x    y    z    w
+		pose[7] = { 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 1.f };
 	ldrp::ObstacleGrid grid{};
+	nt_localization.Set( {{ 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}} );
 	for(;_program_running.load();) {
 
-		std::vector<nt::TimestampedFloatArray> updates = nt_localization.ReadQueue();
+		std::vector<nt::TimestampedDoubleArray> updates = nt_localization.ReadQueue();
+		// std::vector<nt::TimestampedFloatArray> updates = nt_localization.ReadQueue();
 		// std::cout << "[Main Thread]: Localization recieved " << updates.size() << " pose updates" << std::endl;
-		for(const nt::TimestampedFloatArray& u : updates) {
-			ldrp::updateWorldPose(u.value.data(), u.value.data() + 3, u.time);
+		// std::optional<int64_t> _dt = nt_inst.GetServerTimeOffset();
+		// const int64_t dt = (_dt.has_value() ? *_dt : 0L);
+		// std::cout << "Time off (micros): " << dt << std::endl;
+		if(updates.size() <= 0) {
+			updates.emplace_back(nt_localization.GetAtomic());
+		}
+		for(const auto& u : updates) {
+			const auto* _data = u.value.data();
+			pose[0] = static_cast<float>(_data[0]);
+			pose[1] = static_cast<float>(_data[1]);
+			pose[2] = static_cast<float>(_data[2]);
+			pose[3] = static_cast<float>(_data[4]);	// pigeon and wpilib internally use wxyz order, therefore we must reorder to xyzw
+			pose[4] = static_cast<float>(_data[5]);
+			pose[5] = static_cast<float>(_data[6]);
+			pose[6] = static_cast<float>(_data[3]);
+			ldrp::updateWorldPose(pose, pose + 3, u.time / 100LL);
 		}
 
 		// s = ldrp::updateWorldPose(pose, pose + 3);
-		// pose[0] += 0.1;
-		if (grid.grid) {
-			free(grid.grid);
-			grid.grid = nullptr;
-		}
+
 		// high_resolution_clock::time_point a = high_resolution_clock::now();
-		s = ldrp::waitNextObstacleGrid(grid, &_grid_alloc, 10.0);
-		if(s == ldrp::STATUS_SUCCESS) grid.grid -= (sizeof(int64_t) * 2);
-		// double dur = duration<double>{high_resolution_clock::now() - a}.count();
+		// s = ldrp::waitNextObstacleGrid(grid, &_grid_alloc, 10.0);
+		// if(s == ldrp::STATUS_SUCCESS) grid.grid -= (sizeof(int64_t) * 2);
+		// // double dur = duration<double>{high_resolution_clock::now() - a}.count();
 		// if(s & ldrp::STATUS_TIMED_OUT) {
-		// 	std::cout << "[Main Thread]: Obstacle export timed out after " << dur << " seconds." << std::endl;
+		// 	// std::cout << "[Main Thread]: Obstacle export timed out after " << dur << " seconds." << std::endl;
 		// } else if(s == ldrp::STATUS_SUCCESS) {
-		// 	std::cout << "[Main Thread]: Obstacle export succeeded after " << dur << " seconds." << std::endl;
-		// 	std::cout << "\t>> grid origin: (" << grid.origin_x_m << ", " << grid.origin_y_m << "), grid size: {" << grid.cells_x << " x " << grid.cells_y << "}" << std::endl;
+		// 	// std::cout << "[Main Thread]: Obstacle export succeeded after " << dur << " seconds." << std::endl;
+		// 	// std::cout << "\t>> grid origin: (" << grid.origin_x_m << ", " << grid.origin_y_m << "), grid size: {" << grid.cells_x << " x " << grid.cells_y << "}" << std::endl;
 		// } else {
-		// 	std::cout << "[Main Thread]: Obstacle export failed after " << dur << " seconds." << std::endl;
+		// 	// std::cout << "[Main Thread]: Obstacle export failed after " << dur << " seconds." << std::endl;
 		// }
 
-		if(grid.grid) {
-			reinterpret_cast<int64_t*>(grid.grid)[0] = grid.cells_x;
-			reinterpret_cast<int64_t*>(grid.grid)[1] = grid.cells_y;
-			nt_grid.Set(
-				std::span<const uint8_t>{
-					grid.grid,
-					grid.grid + (grid.cells_x * grid.cells_y + (sizeof(int64_t) * 2))
-				}
-			);
-		}
+		// if(grid.grid) {
+		// 	reinterpret_cast<int64_t*>(grid.grid)[0] = grid.cells_x;
+		// 	reinterpret_cast<int64_t*>(grid.grid)[1] = grid.cells_y;
+		// 	nt_grid.Set(
+		// 		std::span<const uint8_t>{
+		// 			grid.grid,
+		// 			grid.grid + (grid.cells_x * grid.cells_y + (sizeof(int64_t) * 2))
+		// 		}
+		// 	);
+		// 	free(grid.grid);
+		// 	grid.grid = nullptr;
+		// }
 
-		std::this_thread::sleep_for(10ms);
+		std::this_thread::sleep_for(1ms);
 	}
 
 	// bmp::generateBitmapImage(grid.grid, grid.cells_x, grid.cells_y, (char*)"./logs/out.bmp");
