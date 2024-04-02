@@ -1208,7 +1208,7 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 			for(size_t j = 0; j < f_inst->samples[i].size(); j++) {
 				const sick_scansegment_xd::ScanSegmentParserOutput& segment = f_inst->samples[i][j];
 				const int64_t seg_ts = (static_cast<int64_t>(segment.timestamp_sec) * 1000000L) + (static_cast<int64_t>(segment.timestamp_nsec) / 1000L);	// microseconds since epoch in local timebase (internally generated using system clock)
-
+				// ^^ THIS IS NOT IN MICROSECONDS!?!? (seems to be in 100us increments when live)
 				this->_state.localization_mutex.lock_shared();	// other threads can read from the buffer as well
 				const auto* ts_transform = this->transform_sampler.sampleTimestamped( seg_ts );		// TODO: !!! THIS WILL LIKELY CAUSE PROBLEMS !!! >> if the vector gets realloced while we don't have mutex control, our pointer is no longer valid!
 				if(this->_config.skip_invalid_transform_ts && !ts_transform) {

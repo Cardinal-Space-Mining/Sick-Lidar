@@ -82,7 +82,7 @@ int main(int argc, char** argv) {
 			pose[4] = static_cast<float>(_data[5]);
 			pose[5] = static_cast<float>(_data[6]);
 			pose[6] = static_cast<float>(_data[3]);
-			ldrp::updateWorldPose(pose, pose + 3, u.time / 100LL);
+			ldrp::updateWorldPose(pose, pose + 3, u.time);	// previous: div by 100 to get into same timebase as internally, but THIS IS ACTUALLY IN MICROSECONDS
 		}
 
 		// s = ldrp::updateWorldPose(pose, pose + 3);
