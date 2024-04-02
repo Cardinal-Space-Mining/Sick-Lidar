@@ -20,6 +20,38 @@
 			}
 		},
 		{
+			"name": "live-release",
+			"displayName": "live-release",
+			"cacheVariables": {
+				"sickperception_USE_WPILIB": "ON",
+				"LDRP_ENABLE_LOGGING": "ON",
+				"LDRP_ENABLE_DEBUG_LOGGING": "OFF",
+				"LDRP_ENABLE_SAFETY_CHECKS": "OFF",
+				"LDRP_USE_UE_SIM_POINTS": "OFF",
+				"LDRP_USE_INTERNAL_SIM_POINTS": "OFF",
+				"LDRP_USE_ECHO_POINTS": "OFF",
+				"LDRP_USE_PRELIM_FILTERING": "ON",
+				"LDRP_ENABLE_TUNING": "ON",
+				"LDRP_ENABLE_PROFILING": "OFF"
+			}
+		},
+		{
+			"name": "live-debug",
+			"displayName": "live-debug",
+			"cacheVariables": {
+				"sickperception_USE_WPILIB": "ON",
+				"LDRP_ENABLE_LOGGING": "ON",
+				"LDRP_ENABLE_DEBUG_LOGGING": "ON",
+				"LDRP_ENABLE_SAFETY_CHECKS": "ON",
+				"LDRP_USE_UE_SIM_POINTS": "OFF",
+				"LDRP_USE_INTERNAL_SIM_POINTS": "OFF",
+				"LDRP_USE_ECHO_POINTS": "OFF",
+				"LDRP_USE_PRELIM_FILTERING": "ON",
+				"LDRP_ENABLE_TUNING": "ON",
+				"LDRP_ENABLE_PROFILING": "ON"
+			}
+		},
+		{
 			"name": "ue-sim",
 			"displayName": "uesim",
 			"cacheVariables": {

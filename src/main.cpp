@@ -39,8 +39,10 @@ int main(int argc, char** argv) {
 	_config.min_scan_theta_degrees = -180.f;
 	_config.max_scan_theta_degrees = 180.f;
 	_config.pose_history_period_s = 1.0;
-	_config.map_resolution_cm = 10.f;
+	_config.map_resolution_cm = 5.f;
 	_config.max_filter_threads = 1;
+	_config.pmf_max_window_size_cm = 48.f;
+	// _config.skip_invalid_transform_ts = true;
 
 	s = ldrp::apiInit(_config);
 	s = ldrp::lidarInit();
@@ -63,6 +65,7 @@ int main(int argc, char** argv) {
 	for(;_program_running.load();) {
 
 		std::vector<nt::TimestampedDoubleArray> updates = nt_localization.ReadQueue();
+		// std::vector<nt::TimestampedFloatArray> updates = nt_localization.ReadQueue();
 		// std::cout << "[Main Thread]: Localization recieved " << updates.size() << " pose updates" << std::endl;
 		// std::optional<int64_t> _dt = nt_inst.GetServerTimeOffset();
 		// const int64_t dt = (_dt.has_value() ? *_dt : 0L);
@@ -70,8 +73,8 @@ int main(int argc, char** argv) {
 		if(updates.size() <= 0) {
 			updates.emplace_back(nt_localization.GetAtomic());
 		}
-		for(const nt::TimestampedDoubleArray& u : updates) {
-			const double* _data = u.value.data();
+		for(const auto& u : updates) {
+			const auto* _data = u.value.data();
 			pose[0] = static_cast<float>(_data[0]);
 			pose[1] = static_cast<float>(_data[1]);
 			pose[2] = static_cast<float>(_data[2]);
@@ -79,26 +82,22 @@ int main(int argc, char** argv) {
 			pose[4] = static_cast<float>(_data[5]);
 			pose[5] = static_cast<float>(_data[6]);
 			pose[6] = static_cast<float>(_data[3]);
-			ldrp::updateWorldPose(pose, pose + 3, u.time);
+			ldrp::updateWorldPose(pose, pose + 3, u.time / 100LL);
 		}
 
 		// s = ldrp::updateWorldPose(pose, pose + 3);
-		// pose[0] += 0.1;
-		// if (grid.grid) {
-		// 	free(grid.grid);
-		// 	grid.grid = nullptr;
-		// }
+
 		// high_resolution_clock::time_point a = high_resolution_clock::now();
 		// s = ldrp::waitNextObstacleGrid(grid, &_grid_alloc, 10.0);
 		// if(s == ldrp::STATUS_SUCCESS) grid.grid -= (sizeof(int64_t) * 2);
-		// double dur = duration<double>{high_resolution_clock::now() - a}.count();
+		// // double dur = duration<double>{high_resolution_clock::now() - a}.count();
 		// if(s & ldrp::STATUS_TIMED_OUT) {
-		// 	std::cout << "[Main Thread]: Obstacle export timed out after " << dur << " seconds." << std::endl;
+		// 	// std::cout << "[Main Thread]: Obstacle export timed out after " << dur << " seconds." << std::endl;
 		// } else if(s == ldrp::STATUS_SUCCESS) {
-		// 	std::cout << "[Main Thread]: Obstacle export succeeded after " << dur << " seconds." << std::endl;
-		// 	std::cout << "\t>> grid origin: (" << grid.origin_x_m << ", " << grid.origin_y_m << "), grid size: {" << grid.cells_x << " x " << grid.cells_y << "}" << std::endl;
+		// 	// std::cout << "[Main Thread]: Obstacle export succeeded after " << dur << " seconds." << std::endl;
+		// 	// std::cout << "\t>> grid origin: (" << grid.origin_x_m << ", " << grid.origin_y_m << "), grid size: {" << grid.cells_x << " x " << grid.cells_y << "}" << std::endl;
 		// } else {
-		// 	std::cout << "[Main Thread]: Obstacle export failed after " << dur << " seconds." << std::endl;
+		// 	// std::cout << "[Main Thread]: Obstacle export failed after " << dur << " seconds." << std::endl;
 		// }
 
 		// if(grid.grid) {
@@ -110,6 +109,8 @@ int main(int argc, char** argv) {
 		// 			grid.grid + (grid.cells_x * grid.cells_y + (sizeof(int64_t) * 2))
 		// 		}
 		// 	);
+		// 	free(grid.grid);
+		// 	grid.grid = nullptr;
 		// }
 
 		std::this_thread::sleep_for(1ms);
