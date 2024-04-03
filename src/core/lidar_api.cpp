@@ -151,6 +151,12 @@ static inline const uint32_t convertNumThreads(const int32_t input_num, const in
 	;
 }
 
+template<typename FT = float>
+static inline int64_t floatSecondsToIntMicros(const FT v) {
+	static_assert(std::is_floating_point_v<FT>, "");
+	return static_cast<int64_t>(v * static_cast<FT>(1e6));
+}
+
 
 // template<typename Time_t>
 // struct timebase_traits {
@@ -309,8 +315,11 @@ public:
 			.max_filter_threads			= ldru::convertNumThreads(config.max_filter_threads, 1),
 			.points_logging_mode		= config.points_logging_mode,
 			.points_log_fname			= config.points_tar_fname,
-			.pose_history_range			= config.pose_history_period_s,
-			.skip_invalid_transform_ts	= config.skip_invalid_transform_ts,
+			.pose_matching_history			= ldru::floatSecondsToIntMicros(config.pose_matching_history_range_s),
+			.pose_matching_max_delta		= ldru::floatSecondsToIntMicros(config.pose_matching_max_delta_s),
+			.pose_matching_wait_increment	= ldru::floatSecondsToIntMicros(config.pose_matching_wait_increment_s),
+			.pose_matching_wait_limit		= ldru::floatSecondsToIntMicros(config.pose_matching_wait_limit_s),
+			.pose_matching_skip_invalid		= config.pose_matching_skip_invalid,
 
 			.obstacle_point_color		= config.obstacle_point_color,
 			.standard_point_color		= config.standard_point_color,
@@ -487,8 +496,11 @@ public:	// global inst, constant values, configs, states
 		const uint32_t max_filter_threads		= ldru::convertNumThreads(LidarConfig::STATIC_DEFAULT.max_filter_threads, 1);	// minimum of 1 thread, otherwise reserve the main thread and some extra margin for other processes
 		const uint64_t points_logging_mode		= LidarConfig::STATIC_DEFAULT.points_logging_mode;
 		const char* points_log_fname			= LidarConfig::STATIC_DEFAULT.points_tar_fname;
-		const double pose_history_range			= LidarConfig::STATIC_DEFAULT.pose_history_period_s;		// seconds --> the window only gets applied when we add new poses so this just needs account for the greatest difference between new poses getting added and points getting transformed in a thread
-		const bool skip_invalid_transform_ts	= LidarConfig::STATIC_DEFAULT.skip_invalid_transform_ts;	// skip points for which we don't have a pose from localization (don't use the default pose of nothing!)
+		const int64_t pose_matching_history			= ldru::floatSecondsToIntMicros(LidarConfig::STATIC_DEFAULT.pose_matching_history_range_s);		// MICROSECONDS --> the window only gets applied when we add new poses so this just needs account for the greatest difference between new poses getting added and points getting transformed in a thread
+		const int64_t pose_matching_max_delta		= ldru::floatSecondsToIntMicros(LidarConfig::STATIC_DEFAULT.pose_matching_max_delta_s);			// ^ convert to from seconds as specified in header
+		const int64_t pose_matching_wait_increment	= ldru::floatSecondsToIntMicros(LidarConfig::STATIC_DEFAULT.pose_matching_wait_increment_s);
+		const int64_t pose_matching_wait_limit		= ldru::floatSecondsToIntMicros(LidarConfig::STATIC_DEFAULT.pose_matching_wait_limit_s);
+		const bool pose_matching_skip_invalid		= LidarConfig::STATIC_DEFAULT.pose_matching_skip_invalid;	// skip points for which we don't have a pose from localization (don't use the default pose of nothing!)
 
 		const uint32_t obstacle_point_color		= LidarConfig::STATIC_DEFAULT.obstacle_point_color;
 		const uint32_t standard_point_color		= LidarConfig::STATIC_DEFAULT.standard_point_color;
@@ -603,7 +615,7 @@ protected:	// main internal entities
 		finished_queue{};
 	// frc::TimeInterpolatableBuffer<Eigen::Isometry3f>
 	// 	transform_map{
-	// 		units::time::second_t{ _config.pose_history_range },
+	// 		units::time::second_t{ _config.pose_matching_history },
 	// 		&lerpClosest<const Eigen::Isometry3f&>
 	// 	};
 	ldru::TimestampSampler< std::tuple<Eigen::Isometry3f, Eigen::Vector3f, Eigen::Quaternionf>, int64_t >	// >>> int64_t timebase representing MICROSECONDS SINCE EPOCH <<<
@@ -753,7 +765,7 @@ status_t LidarImpl::addWorldRef(const float* xyz, const float* qxyzw, const uint
 	this->_state.localization_mutex.lock();
 	// this->transform_map.AddSample( timestamp, l2w_transform );
 	this->transform_sampler.insert( timestamp, std::make_tuple( l2w_transform, *reinterpret_cast<const Eigen::Vector3f*>(xyz), r2w_quat ) );
-	this->transform_sampler.updateMin( timestamp - static_cast<int64_t>(this->_config.pose_history_range * 1e6) );		// TODO: "dumb" management for now -- add a more robust tracking mechanism later
+	this->transform_sampler.updateMin( timestamp - this->_config.pose_matching_history );		// TODO: "dumb" management for now -- add a more robust tracking mechanism later
 	this->_state.localization_mutex.unlock();
 	return STATUS_SUCCESS;
 
@@ -1114,12 +1126,12 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 	f_inst->nt.is_active = nt_inst->GetBooleanTopic("activity").GetEntry(false);
 #if LDRP_ENABLE_NT_PROFILING
 	f_inst->nt.proc_step = nt_inst->GetIntegerTopic("state").GetEntry(0);
+	f_inst->nt.ts_offsets = nt_inst->GetFloatArrayTopic("ts matching debug").GetEntry({});
 
 	#define _NT_PROFILE_STAGE(n)		f_inst->nt.proc_step.Set((n));
 #else
 	#define _NT_PROFILE_STAGE(...)
 #endif
-	f_inst->nt.ts_offsets = nt_inst->GetFloatArrayTopic("rel timestamps").GetEntry({});
 
 	f_inst->nt.is_active.Set(false);
 	_NT_PROFILE_STAGE(0);	// 0 = init (pre looping)
@@ -1203,6 +1215,8 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 
 		_NT_PROFILE_STAGE(11);	// 11 = step 1 loop
 
+		int64_t waited_accum_us = this->_config.pose_matching_wait_limit;
+
 		// 1. transform points based on timestamp
 		for(size_t i = 0; i < f_inst->samples.size(); i++) {			// we could theoretically multithread this part -- just use a mutex for inserting points into the master collection
 			for(size_t j = 0; j < f_inst->samples[i].size(); j++) {
@@ -1211,20 +1225,31 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 
 				this->_state.localization_mutex.lock_shared();	// other threads can read from the buffer as well
 				const auto* ts_transform = this->transform_sampler.sampleTimestamped( seg_ts );		// TODO: !!! THIS WILL LIKELY CAUSE PROBLEMS !!! >> if the vector gets realloced while we don't have mutex control, our pointer is no longer valid!
-				if(this->_config.skip_invalid_transform_ts && !ts_transform) {
+				while( (waited_accum_us > 0LL) && ((!ts_transform) || (ts_transform && (seg_ts - ts_transform->first) > this->_config.pose_matching_max_delta)) ) {	// invalid result or closest match is earlier than current, and outside of range... (not after, since we can't do anything about that!)
+					
+					_NT_PROFILE_STAGE(12);	// 12 = ts buffering
+					this->_state.localization_mutex.unlock_shared();	// release temporarily
+					
+					crno::hrc::time_point a = crno::hrc::now();
+					std::this_thread::sleep_for(crno::microseconds( this->_config.pose_matching_wait_increment ));	// attempt to wait for new data
+					waited_accum_us -= crno::duration_cast<crno::microseconds>(crno::hrc::now() - a).count();	// subtract the amount we waited for
+					_NT_PROFILE_STAGE(11);	// back to state for external scope
+
+					this->_state.localization_mutex.lock_shared();		// relock
+					ts_transform = this->transform_sampler.sampleTimestamped( seg_ts );
+				
+				}
+				if(this->_config.pose_matching_skip_invalid && !ts_transform) {
 					this->_state.localization_mutex.unlock_shared();
 					continue;
 				}
+
 				const Eigen::Isometry3f transform = ts_transform ? std::get<0>(ts_transform->second) : DEFAULT_NO_POSE;	// we have to copy since the pointer may be invalidated once we release the mutex
 				const int64_t sample_ts = ts_transform ? ts_transform->first : 0ULL;
 				const size_t total_samples = this->transform_sampler.getSamples().size();
 				this->_state.localization_mutex.unlock_shared();
 
-				// const Eigen::Quaternionf q = Eigen::Quaternionf(transform.linear());
-				// const Eigen::Vector3f v = transform.translation();
-				// float _buff[7] = {};
-				// memcpy(_buff, &v, 3 * 4);
-				// memcpy(_buff + 3, &q, 4 * 4);
+#if LDRP_ENABLE_NT_PROFILING
 				const float _debug[4] = {
 					seg_ts,
 					sample_ts,
@@ -1232,6 +1257,7 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 					static_cast<float>(total_samples)
 				};
 				f_inst->nt.ts_offsets.Set(std::span<const float>{ _debug, _debug + 4 });
+#endif
 
 				avg_sample_origin += transform.translation();
 				avg_sample_timestamp += sample_ts;
@@ -1274,7 +1300,7 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 		point_cloud.is_dense = true;
 
 		if(this->_config.points_logging_mode & POINT_LOGGING_INCLUDE_RAW) {
-			_NT_PROFILE_STAGE(11);	// 11 = export raw cloud
+			_NT_PROFILE_STAGE(13);	// 13 = export raw cloud
 			if(this->_config.points_logging_mode & POINT_LOGGING_TAR) {
 				this->pcd_writer.addCloud(point_cloud);
 			}

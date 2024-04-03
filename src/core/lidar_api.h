@@ -95,8 +95,11 @@ namespace ldrp {
 		int32_t max_filter_threads{ -1 };		// 0 = use all available, <0 = however many less than std::thread::hardware_concurrency() - 1
 		uint64_t points_logging_mode{ POINT_LOGGING_NT | POINT_LOGGING_INCLUDE_ALL };
 		const char* points_tar_fname{ "lidar_points.tar" };
-		double pose_history_period_s{ 0.25 };
-		bool skip_invalid_transform_ts{ false };
+		double pose_matching_history_range_s{ 0.25 };
+		double pose_matching_max_delta_s{ 0.01 };	// 10 ms default max delta
+		double pose_matching_wait_increment_s{ 0.01 };	// 10 ms default wait time (per increment)
+		double pose_matching_wait_limit_s{ 0.02 };	// 20 ms default accumulated wait time (across multiple segment match cycles)
+		bool pose_matching_skip_invalid{ false };
 
 		uint32_t
 			obstacle_point_color = 0x0011DD00U,
