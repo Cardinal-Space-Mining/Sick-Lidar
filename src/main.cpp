@@ -36,13 +36,16 @@ int main(int argc, char** argv) {
 	_config.nt_use_client = true;
 	_config.nt_client_team = 1111;
 	// _config.lidar_offset_xyz[2] = 7.5f;
-	_config.min_scan_theta_degrees = -180.f;
-	_config.max_scan_theta_degrees = 180.f;
-	_config.pose_history_period_s = 1.0;
-	_config.map_resolution_cm = 5.f;
-	_config.max_filter_threads = 1;
+	_config.min_scan_theta_degrees = -90.f;
+	_config.max_scan_theta_degrees = 90.f;
+	_config.map_resolution_cm = 10.f;
+	_config.max_filter_threads = 2;
 	_config.pmf_max_window_size_cm = 48.f;
-	// _config.skip_invalid_transform_ts = true;
+	_config.pose_matching_history_range_s = 0.25;
+	_config.pose_matching_max_delta_s = 0.01;
+	_config.pose_matching_wait_increment_s = 0.008;
+	_config.pose_matching_wait_limit_s = 0.035;
+	_config.pose_matching_skip_invalid = false;
 
 	s = ldrp::apiInit(_config);
 	s = ldrp::lidarInit();
@@ -87,33 +90,36 @@ int main(int argc, char** argv) {
 
 		// s = ldrp::updateWorldPose(pose, pose + 3);
 
-		// high_resolution_clock::time_point a = high_resolution_clock::now();
-		// s = ldrp::waitNextObstacleGrid(grid, &_grid_alloc, 10.0);
-		// if(s == ldrp::STATUS_SUCCESS) grid.grid -= (sizeof(int64_t) * 2);
-		// // double dur = duration<double>{high_resolution_clock::now() - a}.count();
-		// if(s & ldrp::STATUS_TIMED_OUT) {
-		// 	// std::cout << "[Main Thread]: Obstacle export timed out after " << dur << " seconds." << std::endl;
-		// } else if(s == ldrp::STATUS_SUCCESS) {
-		// 	// std::cout << "[Main Thread]: Obstacle export succeeded after " << dur << " seconds." << std::endl;
-		// 	// std::cout << "\t>> grid origin: (" << grid.origin_x_m << ", " << grid.origin_y_m << "), grid size: {" << grid.cells_x << " x " << grid.cells_y << "}" << std::endl;
-		// } else {
-		// 	// std::cout << "[Main Thread]: Obstacle export failed after " << dur << " seconds." << std::endl;
-		// }
-
-		// if(grid.grid) {
-		// 	reinterpret_cast<int64_t*>(grid.grid)[0] = grid.cells_x;
-		// 	reinterpret_cast<int64_t*>(grid.grid)[1] = grid.cells_y;
-		// 	nt_grid.Set(
-		// 		std::span<const uint8_t>{
-		// 			grid.grid,
-		// 			grid.grid + (grid.cells_x * grid.cells_y + (sizeof(int64_t) * 2))
-		// 		}
-		// 	);
-		// 	free(grid.grid);
-		// 	grid.grid = nullptr;
-		// }
-
+// #define NT_EXPORT_GRID
+#ifdef NT_EXPORT_GRID
+		high_resolution_clock::time_point a = high_resolution_clock::now();
+		s = ldrp::waitNextObstacleGrid(grid, &_grid_alloc, 10.0);
+		if(s == ldrp::STATUS_SUCCESS) grid.grid -= (sizeof(int64_t) * 2);
+		// double dur = duration<double>{high_resolution_clock::now() - a}.count();
+		if(s & ldrp::STATUS_TIMED_OUT) {
+			// std::cout << "[Main Thread]: Obstacle export timed out after " << dur << " seconds." << std::endl;
+		} else if(s == ldrp::STATUS_SUCCESS) {
+			// std::cout << "[Main Thread]: Obstacle export succeeded after " << dur << " seconds." << std::endl;
+			// std::cout << "\t>> grid origin: (" << grid.origin_x_m << ", " << grid.origin_y_m << "), grid size: {" << grid.cells_x << " x " << grid.cells_y << "}" << std::endl;
+		} else {
+			// std::cout << "[Main Thread]: Obstacle export failed after " << dur << " seconds." << std::endl;
+		}
+		if(grid.grid) {
+			reinterpret_cast<int64_t*>(grid.grid)[0] = grid.cells_x;
+			reinterpret_cast<int64_t*>(grid.grid)[1] = grid.cells_y;
+			nt_grid.Set(
+				std::span<const uint8_t>{
+					grid.grid,
+					grid.grid + (grid.cells_x * grid.cells_y + (sizeof(int64_t) * 2))
+				}
+			);
+			free(grid.grid);
+			grid.grid = nullptr;
+		}
+#else
 		std::this_thread::sleep_for(1ms);
+#endif
+
 	}
 
 	// bmp::generateBitmapImage(grid.grid, grid.cells_x, grid.cells_y, (char*)"./logs/out.bmp");
