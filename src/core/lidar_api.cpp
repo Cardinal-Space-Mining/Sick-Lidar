@@ -54,6 +54,7 @@
 #include <limits>
 #include <deque>
 #include <mutex>
+#include <tuple>
 #include <span>
 
 #include <pcl/pcl_config.h>
@@ -150,6 +151,111 @@ static inline const uint32_t convertNumThreads(const int32_t input_num, const in
 	;
 }
 
+template<typename FT = float>
+static inline int64_t floatSecondsToIntMicros(const FT v) {
+	static_assert(std::is_floating_point_v<FT>, "");
+	return static_cast<int64_t>(v * static_cast<FT>(1e6));
+}
+
+
+// template<typename Time_t>
+// struct timebase_traits {
+// 	inline static constexpr bool
+// 		is_float = std::is_floating_point<Time_t>::value,
+// 		is_integral = std::is_integral<Time_t>::value,
+// 		is_chrono = crno::is_clock<Time_t>::value;
+// };
+
+/** TimestampSampler stores an ordered list of time-element pairs, and can efficiently look up the closes element given a target timestamp. */
+template<typename T, typename Time_t>
+class TimestampSampler {
+public:
+	using This_T = TimestampSampler<T, Time_t>;
+	using Type = T;
+	using TimeT = Time_t;
+	using ElemT = std::pair<TimeT, Type>;
+
+private:
+	static bool __t_less(TimeT t, const ElemT& elem) {
+		return t < elem.first;
+	}
+	static bool __t_greater(const ElemT& elem, TimeT t) {
+		return t > elem.first;
+	}
+
+public:
+	TimestampSampler() = default;
+	~TimestampSampler() = default;
+
+
+	/** Update the minimum bound timestamp such as to limit the number of entities stored in the buffer */
+	void updateMin(TimeT min) {
+		this->absolute_bound = min;
+		this->enforceBound();
+	}
+
+	/** Add a new sample to the buffer */
+	inline void insert(TimeT time, const Type& sample)
+		{ this->insert(time, sample); }
+	/** Add a new sample to the buffer */
+	void insert(TimeT time, Type&& sample) {
+		if(this->samples.size() <= 0 || time > this->samples.back().first) {
+			this->samples.emplace_back(time, std::forward<Type>(sample));
+		} else {
+			auto after = std::upper_bound(this->samples.begin(), this->samples.end(), time, &This_T::__t_less);
+			auto before = after - 1;
+			if(after == this->samples.begin()) {
+				this->samples.insert(after, std::pair{time, std::forward<Type>(sample)});
+			} else {
+				if(before == this->samples.begin() || before->first < time) {
+					this->samples.insert(after, std::pair{time, std::forward<Type>(sample)});
+				} else {
+					before->second = sample;
+				}
+			}
+		}
+	}
+
+	/** Erase all the elements */
+	inline void clear() { this->samples.clear(); }
+
+	/** Sample the element with a timestamp closest to that given as a parameter */
+	inline const Type* sample(TimeT time) const {
+		const ElemT* elem = this->sampleTimestamped(time);
+		return elem ? elem->second : nullptr;
+	}
+	/** Sample the closest element, but returns the full pair so that the element's timestamp can be accessed */
+	const ElemT* sampleTimestamped(TimeT time) const {
+		if( this->samples.empty() )					return nullptr;
+		if( time <= this->samples.front().first )	return &this->samples.front();
+		if( time >= this->samples.back().first )	return &this->samples.back();
+		if( this->samples.size() == 1 )				return &this->samples[0];
+
+		auto greater = std::lower_bound(this->samples.begin(), this->samples.end(), time, &This_T::__t_greater);	// "lower bound" of times greater than t
+		if( greater == this->samples.begin() )		return &*greater;
+
+		auto less = greater - 1;
+		return abs(time - less->first) < abs(greater->first - time) ? &*less : &*greater;		// return closer sample
+	}
+
+	/** Return a const reference to the internal element buffer */
+	inline const std::vector<ElemT>& getSamples() const { return this->samples; }
+
+
+protected:
+	void enforceBound() {
+		auto last = this->samples.begin();
+		for(; last < this->samples.end() && last->first < this->absolute_bound; last++);
+		this->samples.erase(this->samples.begin(), last);
+	}
+
+protected:
+	TimeT absolute_bound = static_cast<TimeT>(0);	// the absolute minimum bounding time
+	std::vector<ElemT> samples{};	// use a tree for better search performance
+
+
+};
+
 };
 
 
@@ -188,6 +294,12 @@ namespace ldrp {
 
 const LidarConfig LidarConfig::STATIC_DEFAULT{};
 
+
+using FloatT = float;
+using Vec3 = Eigen::Vector3<FloatT>;
+using Quat = Eigen::Quaternion<FloatT>;
+using Isometry3 = Eigen::Transform<FloatT, 3, Eigen::Isometry>;
+
 /** Interfacing and Filtering Implementation (singleton usage) */
 struct LidarImpl {
 public:
@@ -203,8 +315,11 @@ public:
 			.max_filter_threads			= ldru::convertNumThreads(config.max_filter_threads, 1),
 			.points_logging_mode		= config.points_logging_mode,
 			.points_log_fname			= config.points_tar_fname,
-			.pose_history_range			= config.pose_history_period_s,
-			.skip_invalid_transform_ts	= config.skip_invalid_transform_ts,
+			.pose_matching_history			= ldru::floatSecondsToIntMicros(config.pose_matching_history_range_s),
+			.pose_matching_max_delta		= ldru::floatSecondsToIntMicros(config.pose_matching_max_delta_s),
+			.pose_matching_wait_increment	= ldru::floatSecondsToIntMicros(config.pose_matching_wait_increment_s),
+			.pose_matching_wait_limit		= ldru::floatSecondsToIntMicros(config.pose_matching_wait_limit_s),
+			.pose_matching_skip_invalid		= config.pose_matching_skip_invalid,
 
 			.obstacle_point_color		= config.obstacle_point_color,
 			.standard_point_color		= config.standard_point_color,
@@ -381,8 +496,11 @@ public:	// global inst, constant values, configs, states
 		const uint32_t max_filter_threads		= ldru::convertNumThreads(LidarConfig::STATIC_DEFAULT.max_filter_threads, 1);	// minimum of 1 thread, otherwise reserve the main thread and some extra margin for other processes
 		const uint64_t points_logging_mode		= LidarConfig::STATIC_DEFAULT.points_logging_mode;
 		const char* points_log_fname			= LidarConfig::STATIC_DEFAULT.points_tar_fname;
-		const double pose_history_range			= LidarConfig::STATIC_DEFAULT.pose_history_period_s;		// seconds --> the window only gets applied when we add new poses so this just needs account for the greatest difference between new poses getting added and points getting transformed in a thread
-		const bool skip_invalid_transform_ts	= LidarConfig::STATIC_DEFAULT.skip_invalid_transform_ts;	// skip points for which we don't have a pose from localization (don't use the default pose of nothing!)
+		const int64_t pose_matching_history			= ldru::floatSecondsToIntMicros(LidarConfig::STATIC_DEFAULT.pose_matching_history_range_s);		// MICROSECONDS --> the window only gets applied when we add new poses so this just needs account for the greatest difference between new poses getting added and points getting transformed in a thread
+		const int64_t pose_matching_max_delta		= ldru::floatSecondsToIntMicros(LidarConfig::STATIC_DEFAULT.pose_matching_max_delta_s);			// ^ convert to from seconds as specified in header
+		const int64_t pose_matching_wait_increment	= ldru::floatSecondsToIntMicros(LidarConfig::STATIC_DEFAULT.pose_matching_wait_increment_s);
+		const int64_t pose_matching_wait_limit		= ldru::floatSecondsToIntMicros(LidarConfig::STATIC_DEFAULT.pose_matching_wait_limit_s);
+		const bool pose_matching_skip_invalid		= LidarConfig::STATIC_DEFAULT.pose_matching_skip_invalid;	// skip points for which we don't have a pose from localization (don't use the default pose of nothing!)
 
 		const uint32_t obstacle_point_color		= LidarConfig::STATIC_DEFAULT.obstacle_point_color;
 		const uint32_t standard_point_color		= LidarConfig::STATIC_DEFAULT.standard_point_color;
@@ -482,6 +600,7 @@ protected:	// nt pointers and filter instance struct
 		struct {
 			nt::BooleanEntry is_active;
 			nt::IntegerEntry proc_step;
+			nt::FloatArrayEntry ts_offsets;
 		} nt;
 	};
 
@@ -490,15 +609,17 @@ protected:	// main internal entities
 		lidar_thread{ nullptr };
 	sick_scansegment_xd::PayloadFifo*
 		udp_fifo{ nullptr };
-	std::vector<std::unique_ptr<FilterInstance> >
+	std::vector< std::unique_ptr<FilterInstance> >
 		filter_threads{};	// need pointers since filter instance doesn't like to be copied (vector issue)
 	std::deque<uint32_t>
 		finished_queue{};
-	frc::TimeInterpolatableBuffer<Eigen::Isometry3f>
-		transform_map{
-			units::time::second_t{ _config.pose_history_range },
-			&lerpClosest<const Eigen::Isometry3f&>
-		};
+	// frc::TimeInterpolatableBuffer<Eigen::Isometry3f>
+	// 	transform_map{
+	// 		units::time::second_t{ _config.pose_matching_history },
+	// 		&lerpClosest<const Eigen::Isometry3f&>
+	// 	};
+	ldru::TimestampSampler< std::tuple<Eigen::Isometry3f, Eigen::Vector3f, Eigen::Quaternionf>, int64_t >	// >>> int64_t timebase representing MICROSECONDS SINCE EPOCH <<<
+		transform_sampler{};	// ^^ stores the transform as well as the source position and orientation! (NEW!)
 	QuantizedRatioGrid<ObstacleGrid::Quant_T, float>
 		accumulator{};
 	PCDTarWriter
@@ -518,12 +639,21 @@ protected:	// main internal entities
 
 /** Static API */
 
-// const char* pclVer() {	// these are dumb
-// 	return PCL_VERSION_PRETTY;
-// }
-// bool hasWpilib() {
-// 	return LDRP_USE_WPILIB;
-// }
+uint64_t featureBits() {
+	return (
+		(!LDRP_USE_SIM_MODE)					<< 0 |
+		(LDRP_USE_SIM_MODE & 2)					<< 1 |
+		(LDRP_USE_SIM_MODE & 1)					<< 2 |
+		(LDRP_USE_WPILIB)						<< 3 |
+		(LDRP_SAFETY_CHECKS)					<< 4 |
+		(LDRP_ENABLE_LOGGING)					<< 5 |
+		(LDRP_DEBUG_LOGGING)					<< 6 |
+		(LDRP_USE_ALL_ECHOS)					<< 7 |
+		(LDRP_ENABLE_PRELIM_POINT_FILTERING)	<< 8 |
+		(LDRP_ENABLE_NT_TUNING)					<< 9 |
+		(LDRP_ENABLE_NT_PROFILING)				<< 10
+	);
+}
 
 
 status_t apiInit(const LidarConfig& config) {
@@ -565,6 +695,18 @@ status_t setLogLevel(const int32_t lvl) {
 	return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
 }
 
+// status_t updateWorldPosition(const float* xyz, const uint64_t ts_us) {
+// 	if(LidarImpl::_global) {
+// 		return LidarImpl::_global->addWorldRef(xyz, nullptr, ts_us);
+// 	}
+// 	return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
+// }
+// status_t updateWorldOrientation(const float* qxyzw, const uint64_t ts_us) {
+// 	if(LidarImpl::_global) {
+// 		return LidarImpl::_global->addWorldRef(nullptr, qxyzw, ts_us);
+// 	}
+// 	return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
+// }
 status_t updateWorldPose(const float* xyz, const float* qxyzw, const uint64_t ts_us) {
 	if(LidarImpl::_global) {
 		return LidarImpl::_global->addWorldRef(xyz, qxyzw, ts_us);
@@ -594,11 +736,18 @@ status_t waitNextObstacleGrid(ObstacleGrid& grid, ObstacleGrid::Quant_T*(*grid_r
 status_t LidarImpl::addWorldRef(const float* xyz, const float* qxyzw, const uint64_t ts_us) {
 
 	// check if lidar is running?
-	const units::time::second_t timestamp{
+	// const units::time::second_t timestamp{
+	// 	ts_us == 0 ?
+	// 		crno::duration<double>{ crno::hrc::now().time_since_epoch() }.count() :
+	// 		(double)ts_us * 1e-6
+	// };
+	const int64_t timestamp{
 		ts_us == 0 ?
-			crno::duration<double>{ crno::hrc::now().time_since_epoch() }.count() :
-			(double)ts_us / 1e6
+			static_cast<int64_t>(crno::duration_cast<crno::microseconds>(crno::hrc::now().time_since_epoch()).count()) :
+			static_cast<int64_t>(ts_us)
 	};
+
+	// LDRP_LOG( LOG_DEBUG, "WORLD REF ADDED: ({}, {}, {}), [{}, {}, {}, {}]", xyz[0], xyz[2], xyz[2], qxyzw[0], qxyzw[1], qxyzw[2], qxyzw[3] );
 
 	/* >> FOR FUTURE REFERENCE!!! <<
 		* "Eigen::QuaternionXX * Eigen::TranslationXX" IS NOT THE SAME AS "Eigen::TranslationXX * Eigen::QuaternionXX"
@@ -614,7 +763,9 @@ status_t LidarImpl::addWorldRef(const float* xyz, const float* qxyzw, const uint
 		l2w_transform = (*reinterpret_cast<const Eigen::Translation3f*>(&l_w_pos)) * l2w_quat;	// compose the lidar's global position and the lidar's global rotation
 
 	this->_state.localization_mutex.lock();
-	this->transform_map.AddSample( timestamp, l2w_transform );
+	// this->transform_map.AddSample( timestamp, l2w_transform );
+	this->transform_sampler.insert( timestamp, std::make_tuple( l2w_transform, *reinterpret_cast<const Eigen::Vector3f*>(xyz), r2w_quat ) );
+	this->transform_sampler.updateMin( timestamp - this->_config.pose_matching_history );		// TODO: "dumb" management for now -- add a more robust tracking mechanism later
 	this->_state.localization_mutex.unlock();
 	return STATUS_SUCCESS;
 
@@ -864,6 +1015,7 @@ void LidarImpl::lidarWorker() {
 						}
 					}
 					parsed_segment.segmentIndex = aquisition_loop_count;
+					// add timestamp!
 					std::this_thread::sleep_until(s + 4900us);
 					if constexpr(true) {
 #elif LDRP_USE_SIM_MODE == 2	// pull data from nt (uesim)
@@ -893,8 +1045,8 @@ void LidarImpl::lidarWorker() {
 							lpt.elevation = 0.f;
 						}
 						parsed_segment.segmentIndex = 0;
-						parsed_segment.timestamp_sec = (ts_raw.time % 1000000U);
-						parsed_segment.timestamp_nsec = (ts_raw.time - (ts_raw.time % 1000000U)) * 1000U;
+						parsed_segment.timestamp_sec = (ts_raw.time / 1000000ULL);		// microseconds to seconds
+						parsed_segment.timestamp_nsec = (ts_raw.time % 1000000ULL) * 1000ULL;	// leftover micros to nanoseconds
 						filled_segments = this->_config.enabled_segments;	// export immediately
 						valid = true;
 					}
@@ -916,6 +1068,7 @@ void LidarImpl::lidarWorker() {
 								frame_segments[idx].resize(this->_config.buffered_frames);	// cut off oldest scans beyond the buffer size (resize() removes from the back)
 								filled_segments |= seg_bit;		// save this segment as finished by enabling it's bit
 							}
+							// TODO: update min time bound for transform sampler
 						}
 						this->_nt.last_parsed_seg_idx.Set( log2(seg_bit) );
 
@@ -973,6 +1126,7 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 	f_inst->nt.is_active = nt_inst->GetBooleanTopic("activity").GetEntry(false);
 #if LDRP_ENABLE_NT_PROFILING
 	f_inst->nt.proc_step = nt_inst->GetIntegerTopic("state").GetEntry(0);
+	f_inst->nt.ts_offsets = nt_inst->GetFloatArrayTopic("ts matching debug").GetEntry({});
 
 	#define _NT_PROFILE_STAGE(n)		f_inst->nt.proc_step.Set((n));
 #else
@@ -1021,8 +1175,9 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 		point_cloud.clear();	// clear the vector and set w,h to 0
 		// point_ranges.clear();	// << MEMORY LEAK!!! (it was)
 
-		Eigen::Vector3f avg_origin{ 0.f, 0.f, 0.f };
-		size_t origin_samples = 0;
+		Eigen::Vector3f avg_sample_origin{ 0.f, 0.f, 0.f };
+		int64_t avg_sample_timestamp = 0;
+		size_t avg_samples = 0;
 
 #if LDRP_ENABLE_NT_TUNING
 		const float		// all "unitted" parameters are normalized to be in meters and radians!
@@ -1060,21 +1215,53 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 
 		_NT_PROFILE_STAGE(11);	// 11 = step 1 loop
 
+		int64_t waited_accum_us = this->_config.pose_matching_wait_limit;
+
 		// 1. transform points based on timestamp
 		for(size_t i = 0; i < f_inst->samples.size(); i++) {			// we could theoretically multithread this part -- just use a mutex for inserting points into the master collection
 			for(size_t j = 0; j < f_inst->samples[i].size(); j++) {
 				const sick_scansegment_xd::ScanSegmentParserOutput& segment = f_inst->samples[i][j];
+				const int64_t seg_ts = (static_cast<int64_t>(segment.timestamp_sec) * 1000000L) + (static_cast<int64_t>(segment.timestamp_nsec) / 1000L);	// microseconds since epoch in local timebase (internally generated using system clock)
 
 				this->_state.localization_mutex.lock_shared();	// other threads can read from the buffer as well
-				std::optional<Eigen::Isometry3f> ts_transform = this->transform_map.Sample(
-					units::time::second_t{ segment.timestamp_sec + (segment.timestamp_nsec * 1E-9) } );
+				const auto* ts_transform = this->transform_sampler.sampleTimestamped( seg_ts );		// TODO: !!! THIS WILL LIKELY CAUSE PROBLEMS !!! >> if the vector gets realloced while we don't have mutex control, our pointer is no longer valid!
+				while( (waited_accum_us > 0LL) && ((!ts_transform) || (ts_transform && (seg_ts - ts_transform->first) > this->_config.pose_matching_max_delta)) ) {	// invalid result or closest match is earlier than current, and outside of range... (not after, since we can't do anything about that!)
+					
+					_NT_PROFILE_STAGE(12);	// 12 = ts buffering
+					this->_state.localization_mutex.unlock_shared();	// release temporarily
+					
+					crno::hrc::time_point a = crno::hrc::now();
+					std::this_thread::sleep_for(crno::microseconds( this->_config.pose_matching_wait_increment ));	// attempt to wait for new data
+					waited_accum_us -= crno::duration_cast<crno::microseconds>(crno::hrc::now() - a).count();	// subtract the amount we waited for
+					_NT_PROFILE_STAGE(11);	// back to state for external scope
+
+					this->_state.localization_mutex.lock_shared();		// relock
+					ts_transform = this->transform_sampler.sampleTimestamped( seg_ts );
+				
+				}
+				if(this->_config.pose_matching_skip_invalid && !ts_transform) {
+					this->_state.localization_mutex.unlock_shared();
+					continue;
+				}
+
+				const Eigen::Isometry3f transform = ts_transform ? std::get<0>(ts_transform->second) : DEFAULT_NO_POSE;	// we have to copy since the pointer may be invalidated once we release the mutex
+				const int64_t sample_ts = ts_transform ? ts_transform->first : 0ULL;
+				const size_t total_samples = this->transform_sampler.getSamples().size();
 				this->_state.localization_mutex.unlock_shared();
 
-				if(this->_config.skip_invalid_transform_ts && !ts_transform.has_value()) continue;
-				const Eigen::Isometry3f& transform = ts_transform.has_value() ? *ts_transform : DEFAULT_NO_POSE;
+#if LDRP_ENABLE_NT_PROFILING
+				const float _debug[4] = {
+					seg_ts,
+					sample_ts,
+					static_cast<float>(seg_ts - sample_ts),
+					static_cast<float>(total_samples)
+				};
+				f_inst->nt.ts_offsets.Set(std::span<const float>{ _debug, _debug + 4 });
+#endif
 
-				avg_origin += transform.translation();
-				origin_samples++;
+				avg_sample_origin += transform.translation();
+				avg_sample_timestamp += sample_ts;
+				avg_samples++;
 
 				for(const sick_scansegment_xd::ScanSegmentParserOutput::Scangroup& scan_group : segment.scandata) {		// "ms100 transmits 16 groups"
 #if LDRP_USE_ALL_ECHOS
@@ -1113,7 +1300,7 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 		point_cloud.is_dense = true;
 
 		if(this->_config.points_logging_mode & POINT_LOGGING_INCLUDE_RAW) {
-			_NT_PROFILE_STAGE(11);	// 11 = export raw cloud
+			_NT_PROFILE_STAGE(13);	// 13 = export raw cloud
 			if(this->_config.points_logging_mode & POINT_LOGGING_TAR) {
 				this->pcd_writer.addCloud(point_cloud);
 			}
@@ -1143,7 +1330,10 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 			pmf_filtered_obstacles.clear();
 			combined_obstacles.clear();
 
-			if(origin_samples > 1) avg_origin /= origin_samples;
+			if(avg_samples > 1) {
+				avg_sample_origin /= avg_samples;
+				avg_sample_timestamp /= avg_samples;
+			}
 
 			// voxelize points
 			_NT_PROFILE_STAGE(21);	// 21 = filtering (voxelize)
@@ -1181,7 +1371,7 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 				z_low_subset_filtered,
 				pre_pmf_range_filtered,
 				0.f, _max_pmf_range,
-				avg_origin
+				avg_sample_origin
 			);
 
 			// apply pmf to selected points
