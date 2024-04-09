@@ -25,8 +25,12 @@
 #endif
 
 
-// "LiDaR Proccessing container namespace"
+// "LiDaR Perception container namespace"
 namespace ldrp {
+
+	using status_t = int32_t;
+	using measure_t = float;
+
 
 	/** Compiled features (bitmask) */
 	enum : uint64_t {
@@ -42,9 +46,6 @@ namespace ldrp {
 		FEATURE_NT_TUNING			= (1 << 9),
 		FEATURE_NT_PROFLING			= (1 << 10),
 	};
-
-
-	using status_t = int32_t;
 
 	/** Status values (bitmask) */
 	enum : status_t {
@@ -74,6 +75,7 @@ namespace ldrp {
 	};
 
 
+	/** LidarConfig contains all parameters used to configure the internal processing system. */
 	struct LidarConfig {
 
 		bool nt_use_client{ false };
@@ -131,6 +133,7 @@ namespace ldrp {
 
 	};
 
+	/** ObstacleGrid contains a raw map buffer and other properties that describe an obstacle map. */
 	template<typename Quant_t = uint8_t>
 	struct ObstacleGrid_ {
 		using Quant_T = Quant_t;	// "quantization type"
@@ -158,34 +161,51 @@ namespace ldrp {
 	/** Initialize the global instance resources.
 	 * @param config -- the struct containing all the configs for the lidar instance */
 	__API status_t apiInit(const LidarConfig& config = LidarConfig::STATIC_DEFAULT);
-	/** Deletes the global api instance. Does not need to be called unless a hard reset is necessary. */
+	/** Deletes the global api instance. Does not need to be called unless a hard reset is desired (erases all configurations). */
 	__API status_t apiDestroy();
-	/** Spools up lidar processing resources and threads. */
+	/** Spools up lidar resources and processing threads. */
 	__API status_t lidarInit();
-	/** Stops and joins lidar processing threads. */
+	/** Stops and joins all lidar processing threads. */
 	__API status_t lidarShutdown();
-	/** Calls lidarInit() or lidarShutdown() depending on the given state. */
+	/** Calls lidarInit() or lidarShutdown() depending on the provided target state. */
 	__API status_t lidarSetState(const bool enabled);
 
 	/** Specify the logging level: 0 = none, 1 = standard, 2 = verbose, 3 = VERBOOOSE! */
 	__API status_t setLogLevel(const int32_t lvl);
 
-	/** Apply a new world pose for the lidar -- used directly to transform points to world space.
-	 * Note that the position is interpreted as being in meters!
-	 * @param xyz - the (x, y, z) position as a float array (pointer to any contiguous float buffer)
-	 * @param qxyz - the quaternion representing the robot's rotation in world space -- ordered XYZW!
-	 * @param ts_microseconds - the timestamp in microseconds (relative to epoch) when the pose was collected */
-	__API status_t updateWorldPose(const float* xyz, const float* qxyzw, const uint64_t ts_microseconds = 0);		// TODO: separate location and orientation updates with appropriate mapping in backed datastruct
+	/** Insert a new [decoupled] position sample for the system's location within global space at the specified timestamp.
+	 * Units are interpreted in meters!
+	 * @param xyz - a pointer to the (x, y, z) position as a float array
+	 * @param ts_microseconds - the timestamp correlated with the sample's collection in microseconds since epoch (or in the system timebase) */
+	__API status_t updateWorldPosition(const measure_t* xyz, const uint64_t ts_microseconds = 0);
+	/** Insert a new [decoupled] orientation sample for the system's rotation within global space at the specified timestamp.
+	 * @param qxyzw - the quaternion representing the system's rotation in world space -- components are ordered XYZW!
+	 * @param ts_microseconds - the timestamp correlated with the sample's collection in microseconds since epoch (or in the system timebase) */
+	__API status_t updateWorldOrientation(const measure_t* qxyzw, const uint64_t ts_microseconds = 0);
+	/** Insert a new sample for the system's pose within global space at the specified timestamp.
+	 * Note that the position is interpreted as being in units of meters!
+	 * @param xyz - a pointer to the (x, y, z) position as a float array
+	 * @param qxyzw - the quaternion representing the system's rotation in world space -- components are ordered XYZW!
+	 * @param ts_microseconds - the timestamp correlated with the sample's collection in microseconds since epoch (or in the system timebase) */
+	__API status_t updateWorldPose(const measure_t* xyz, const measure_t* qxyzw, const uint64_t ts_microseconds = 0);		// TODO: separate location and orientation updates with appropriate mapping in backed datastruct
 
-	/** Export the current obstacle grid.
+	/** Export the most recent obstacle grid.
 	 * @param grid - struct to which all grid data will be exported
-	 * @param grid_resize - function pointer which provides a buffer of at least the size passed in	*/
+	 * @param grid_resize - function pointer to an allocator which provides a contiguous buffer of at least the size (in bytes) required */
 	__API status_t getObstacleGrid(ObstacleGrid& grid, ObstacleGrid::Quant_T*(*grid_resize)(size_t));
-	/** Wait until the internal accumulator gets updated (relative to last call of this function) and export the obstacle grid or unblock after the given timeout period.
+	/** Wait until the internal accumulator gets updated (relative to last call of this function) and export the obstacle grid, or unblock after the given timeout period.
 	 * @param grid - struct to which all grid data will be exported
-	 * @param grid_resize - function pointer which provides a buffer of at least the size passed in
-	 * @param timeout_ms - the timeout, in milliseconds, after which the function will unblock if no new data is available */
+	 * @param grid_resize - function pointer to an allocator which provides a contiguous buffer of at least the size (in bytes) required
+	 * @param timeout_ms - the timeout, in milliseconds, after which the function will unblock in the case that no updates occur */
 	__API status_t waitNextObstacleGrid(ObstacleGrid& grid, ObstacleGrid::Quant_T*(*grid_resize)(size_t), double timeout_ms);
+
+	/** Export the most recent caculated system pose relative to global space.
+	 * @param pose - a pointer to a contiguous buffer of AT LEAST SIZE 7 -- position units are in METERS, and component order consists of position (x, y, z) and rotation (qx, qy, qz, qw) */
+	__API status_t getCalculatedPose(measure_t* pose);
+	/** Wait until a new caclulation is available (relative to the last call of this function) and export the system's pose relative to global space.
+	 * @param pose - a pointer to a contiguous buffer of AT LEAST SIZE 7 -- position units are in METERS, and component order consists of position (x, y, z) and rotation (qx, qy, qz, qw)
+	 * @param timeout_ms - the timeout, in milliseconds, after which the function will unblock in the case that no updates occur */
+	__API status_t waitNextCalculatedPose(measure_t* pose, double timeout_ms);
 
 
 };

@@ -295,10 +295,28 @@ namespace ldrp {
 const LidarConfig LidarConfig::STATIC_DEFAULT{};
 
 
-using FloatT = float;
-using Vec3 = Eigen::Vector3<FloatT>;
-using Quat = Eigen::Quaternion<FloatT>;
-using Isometry3 = Eigen::Transform<FloatT, 3, Eigen::Isometry>;
+template<typename F>
+using Vec3_ = Eigen::Vector3<F>;
+template<typename F>
+using Trl3_ = Eigen::Translation<F, 3>;
+template<typename F>
+using Quat_ = Eigen::Quaternion<F>;
+template<typename F>
+using Isometry3_ = Eigen::Transform<F, 3, Eigen::Isometry>;
+
+using Vec3f = Vec3_<float>;
+using Quatf = Quat_<float>;
+using Isometry3f = Isometry3_<float>;
+
+using Vec3d = Vec3_<double>;
+using Quatd = Quat_<double>;
+using Isometry3d = Isometry3_<double>;
+
+using Vec3m = Vec3_<ldrp::measure_t>;
+using Quatm = Quat_<ldrp::measure_t>;
+using Isometry3m = Isometry3_<ldrp::measure_t>;
+
+
 
 /** Interfacing and Filtering Implementation (singleton usage) */
 struct LidarImpl {
@@ -462,12 +480,18 @@ protected:
 	}
 
 public:
+	/** get the pose data that is most closely correlated with the provided timestamp */
+	status_t getMatchingSample(measure_t* pose, const uint64_t ts_us);
 	/** add a world pose + linked timestamp */
-	status_t addWorldRef(const float* xyz, const float* qxyzw, const uint64_t ts_us);
+	status_t addWorldRef(const measure_t* xyz, const measure_t* qxyzw, const uint64_t ts_us);
 	/** export obstacles from the accumulator grid */
 	status_t exportObstacles(ObstacleGrid& grid, ObstacleGrid::Quant_T*(*grid_resize)(size_t));
-	/** wait for the next accumulator update (or pull cached updates) and export obstacles */
+	/** wait for the next accumulator update and export obstacles */
 	status_t exportNextObstacles(ObstacleGrid& grid, ObstacleGrid::Quant_T*(*grid_resize)(size_t), double timeout_ms);
+	/** export the newest localization pose */
+	status_t exportLocalizationPose(measure_t* pose);
+	/** wait for the next localization update and export the pose */
+	status_t exportNextLocalizationPose(measure_t* pose, double timeout_ms);
 
 protected:
 	status_t gridExportInternal(ObstacleGrid& grid, ObstacleGrid::Quant_T*(*grid_resize)(size_t), std::unique_lock<std::timed_mutex>& lock);
@@ -613,11 +637,6 @@ protected:	// main internal entities
 		filter_threads{};	// need pointers since filter instance doesn't like to be copied (vector issue)
 	std::deque<uint32_t>
 		finished_queue{};
-	// frc::TimeInterpolatableBuffer<Eigen::Isometry3f>
-	// 	transform_map{
-	// 		units::time::second_t{ _config.pose_matching_history },
-	// 		&lerpClosest<const Eigen::Isometry3f&>
-	// 	};
 	ldru::TimestampSampler< std::tuple<Eigen::Isometry3f, Eigen::Vector3f, Eigen::Quaternionf>, int64_t >	// >>> int64_t timebase representing MICROSECONDS SINCE EPOCH <<<
 		transform_sampler{};	// ^^ stores the transform as well as the source position and orientation! (NEW!)
 	QuantizedRatioGrid<ObstacleGrid::Quant_T, float>
@@ -695,19 +714,23 @@ status_t setLogLevel(const int32_t lvl) {
 	return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
 }
 
-// status_t updateWorldPosition(const float* xyz, const uint64_t ts_us) {
-// 	if(LidarImpl::_global) {
-// 		return LidarImpl::_global->addWorldRef(xyz, nullptr, ts_us);
-// 	}
-// 	return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
-// }
-// status_t updateWorldOrientation(const float* qxyzw, const uint64_t ts_us) {
-// 	if(LidarImpl::_global) {
-// 		return LidarImpl::_global->addWorldRef(nullptr, qxyzw, ts_us);
-// 	}
-// 	return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
-// }
-status_t updateWorldPose(const float* xyz, const float* qxyzw, const uint64_t ts_us) {
+status_t updateWorldPosition(const measure_t* xyz, const uint64_t ts_us) {
+	if(LidarImpl::_global) {
+		float _pose[7];
+		if(status_t s = LidarImpl::_global->getMatchingSample(_pose, ts_us)) return (s | STATUS_FAIL);
+		return LidarImpl::_global->addWorldRef(xyz, _pose + 3, ts_us);
+	}
+	return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
+}
+status_t updateWorldOrientation(const measure_t* qxyzw, const uint64_t ts_us) {
+	if(LidarImpl::_global) {
+		float _pose[7];
+		if(status_t s = LidarImpl::_global->getMatchingSample(_pose, ts_us)) return (s | STATUS_FAIL);
+		return LidarImpl::_global->addWorldRef(_pose, qxyzw, ts_us);
+	}
+	return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
+}
+status_t updateWorldPose(const measure_t* xyz, const measure_t* qxyzw, const uint64_t ts_us) {
 	if(LidarImpl::_global) {
 		return LidarImpl::_global->addWorldRef(xyz, qxyzw, ts_us);
 	}
@@ -727,20 +750,33 @@ status_t waitNextObstacleGrid(ObstacleGrid& grid, ObstacleGrid::Quant_T*(*grid_r
 	return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
 }
 
+status_t getCalculatedPose(measure_t* pose) {
+	if(LidarImpl::_global) {
+		return LidarImpl::_global->exportLocalizationPose(pose);
+	}
+	return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
+}
+status_t waitNextCalculatedPose(measure_t* pose, double timeout_ms) {
+	if(LidarImpl::_global) {
+		return LidarImpl::_global->exportNextLocalizationPose(pose, timeout_ms);
+	}
+	return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
+}
+
 
 
 
 
 /** LidarImpl interfacing implementation */
 
-status_t LidarImpl::addWorldRef(const float* xyz, const float* qxyzw, const uint64_t ts_us) {
+status_t LidarImpl::getMatchingSample(measure_t* pose, const uint64_t ts_us) {
+	// TODO
+	return STATUS_NOT_IMPLEMENTED | STATUS_FAIL;
+}
+status_t LidarImpl::addWorldRef(const measure_t* xyz, const measure_t* qxyzw, const uint64_t ts_us) {
 
-	// check if lidar is running?
-	// const units::time::second_t timestamp{
-	// 	ts_us == 0 ?
-	// 		crno::duration<double>{ crno::hrc::now().time_since_epoch() }.count() :
-	// 		(double)ts_us * 1e-6
-	// };
+	if(!xyz || !qxyzw) return STATUS_BAD_PARAM | STATUS_FAIL;
+
 	const int64_t timestamp{
 		ts_us == 0 ?
 			static_cast<int64_t>(crno::duration_cast<crno::microseconds>(crno::hrc::now().time_since_epoch()).count()) :
@@ -763,7 +799,6 @@ status_t LidarImpl::addWorldRef(const float* xyz, const float* qxyzw, const uint
 		l2w_transform = (*reinterpret_cast<const Eigen::Translation3f*>(&l_w_pos)) * l2w_quat;	// compose the lidar's global position and the lidar's global rotation
 
 	this->_state.localization_mutex.lock();
-	// this->transform_map.AddSample( timestamp, l2w_transform );
 	this->transform_sampler.insert( timestamp, std::make_tuple( l2w_transform, *reinterpret_cast<const Eigen::Vector3f*>(xyz), r2w_quat ) );
 	this->transform_sampler.updateMin( timestamp - this->_config.pose_matching_history );		// TODO: "dumb" management for now -- add a more robust tracking mechanism later
 	this->_state.localization_mutex.unlock();
@@ -802,6 +837,15 @@ status_t LidarImpl::exportNextObstacles(ObstacleGrid& grid, ObstacleGrid::Quant_
 	}
 	return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
 
+}
+
+status_t LidarImpl::exportLocalizationPose(measure_t* pose) {
+	// TODO
+	return STATUS_NOT_IMPLEMENTED | STATUS_FAIL;
+}
+status_t LidarImpl::exportNextLocalizationPose(measure_t* pose, double timeout_ms) {
+	// TODO
+	return STATUS_NOT_IMPLEMENTED | STATUS_FAIL;
 }
 
 status_t LidarImpl::gridExportInternal(ObstacleGrid& grid, ObstacleGrid::Quant_T*(*grid_resize)(size_t), std::unique_lock<std::timed_mutex>& lock) {
