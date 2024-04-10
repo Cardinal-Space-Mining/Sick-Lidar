@@ -94,6 +94,7 @@ namespace ldrp {
 
 		uint64_t enabled_segments_bits{ 0b111111111111 };
 		uint32_t buffered_scan_frames{ 1 };
+		bool enable_segment_transforms{ true };	// whether or not to transform all segments in the same frame equally
 		int32_t max_filter_threads{ -1 };		// 0 = use all available, <0 = however many less than std::thread::hardware_concurrency() - 1
 		uint64_t points_logging_mode{ POINT_LOGGING_NT | POINT_LOGGING_INCLUDE_ALL };
 		const char* points_tar_fname{ "lidar_points.tar" };
@@ -112,8 +113,8 @@ namespace ldrp {
 			max_scan_theta_degrees	= 90.f,
 			min_scan_range_cm		= 10.f,
 			max_pmf_range_cm		= 200.f,
-			max_z_thresh_cm			= 150.f,
-			min_z_thresh_cm			= 25.f,
+			max_z_thresh_cm			= 150.f,	// don't forget to configure this differently when using relative translations with SLAM
+			min_z_thresh_cm			= 25.f,		// ^ same here
 			voxel_size_cm			= 3.f,
 			map_resolution_cm		= 5.f,
 			pmf_window_base			= 2.f,
@@ -177,11 +178,13 @@ namespace ldrp {
 	 * Units are interpreted in meters!
 	 * @param xyz - a pointer to the (x, y, z) position as a float array
 	 * @param ts_microseconds - the timestamp correlated with the sample's collection in microseconds since epoch (or in the system timebase) */
-	__API status_t updateWorldPosition(const measure_t* xyz, const uint64_t ts_microseconds = 0);
+	inline status_t updateWorldPosition(const measure_t* xyz, const uint64_t ts_microseconds = 0)
+		{ ldrp::updateWorldPose(xyz, nullptr, ts_microseconds); }
 	/** Insert a new [decoupled] orientation sample for the system's rotation within global space at the specified timestamp.
 	 * @param qxyzw - the quaternion representing the system's rotation in world space -- components are ordered XYZW!
 	 * @param ts_microseconds - the timestamp correlated with the sample's collection in microseconds since epoch (or in the system timebase) */
-	__API status_t updateWorldOrientation(const measure_t* qxyzw, const uint64_t ts_microseconds = 0);
+	inline status_t updateWorldOrientation(const measure_t* qxyzw, const uint64_t ts_microseconds = 0)
+		{ ldrp::updateWorldPose(nullptr, qxyzw, ts_microseconds); }
 	/** Insert a new sample for the system's pose within global space at the specified timestamp.
 	 * Note that the position is interpreted as being in units of meters!
 	 * @param xyz - a pointer to the (x, y, z) position as a float array

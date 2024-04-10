@@ -157,6 +157,13 @@ static inline int64_t floatSecondsToIntMicros(const FT v) {
 	return static_cast<int64_t>(v * static_cast<FT>(1e6));
 }
 
+static inline int64_t rectifyTimestampMicros(const uint64_t ts_us) {
+	return (ts_us == 0 ?
+		static_cast<int64_t>(crno::duration_cast<crno::microseconds>(crno::hrc::now().time_since_epoch()).count()) :
+		static_cast<int64_t>(ts_us)
+	);
+}
+
 
 // template<typename Time_t>
 // struct timebase_traits {
@@ -330,6 +337,7 @@ public:
 			.use_msgpack				= config.use_msgpack,
 			.enabled_segments			= config.enabled_segments_bits,
 			.buffered_frames			= config.buffered_scan_frames,
+			.enable_segment_transforms	= config.enable_segment_transforms,
 			.max_filter_threads			= ldru::convertNumThreads(config.max_filter_threads, 1),
 			.points_logging_mode		= config.points_logging_mode,
 			.points_log_fname			= config.points_tar_fname,
@@ -480,8 +488,8 @@ protected:
 	}
 
 public:
-	/** get the pose data that is most closely correlated with the provided timestamp */
-	status_t getMatchingSample(measure_t* pose, const uint64_t ts_us);
+	// /** get the pose data that is most closely correlated with the provided timestamp */
+	// status_t getMatchingSample(measure_t* pose, const uint64_t ts_us);
 	/** add a world pose + linked timestamp */
 	status_t addWorldRef(const measure_t* xyz, const measure_t* qxyzw, const uint64_t ts_us);
 	/** export obstacles from the accumulator grid */
@@ -517,6 +525,7 @@ public:	// global inst, constant values, configs, states
 		// NOTE: points within the same segment are not 'rotationally' aligned! (only temporally aligned)
 		const uint64_t enabled_segments			= LidarConfig::STATIC_DEFAULT.enabled_segments_bits;	// 12 sections --> first 12 bits enabled (enable all section)
 		const uint32_t buffered_frames			= LidarConfig::STATIC_DEFAULT.buffered_scan_frames;		// how many samples of each segment we require per aquisition
+		const bool enable_segment_transforms	= LidarConfig::STATIC_DEFAULT.enable_segment_transforms;
 		const uint32_t max_filter_threads		= ldru::convertNumThreads(LidarConfig::STATIC_DEFAULT.max_filter_threads, 1);	// minimum of 1 thread, otherwise reserve the main thread and some extra margin for other processes
 		const uint64_t points_logging_mode		= LidarConfig::STATIC_DEFAULT.points_logging_mode;
 		const char* points_log_fname			= LidarConfig::STATIC_DEFAULT.points_tar_fname;
@@ -714,22 +723,22 @@ status_t setLogLevel(const int32_t lvl) {
 	return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
 }
 
-status_t updateWorldPosition(const measure_t* xyz, const uint64_t ts_us) {
-	if(LidarImpl::_global) {
-		float _pose[7];
-		if(status_t s = LidarImpl::_global->getMatchingSample(_pose, ts_us)) return (s | STATUS_FAIL);
-		return LidarImpl::_global->addWorldRef(xyz, _pose + 3, ts_us);
-	}
-	return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
-}
-status_t updateWorldOrientation(const measure_t* qxyzw, const uint64_t ts_us) {
-	if(LidarImpl::_global) {
-		float _pose[7];
-		if(status_t s = LidarImpl::_global->getMatchingSample(_pose, ts_us)) return (s | STATUS_FAIL);
-		return LidarImpl::_global->addWorldRef(_pose, qxyzw, ts_us);
-	}
-	return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
-}
+// status_t updateWorldPosition(const measure_t* xyz, const uint64_t ts_us) {
+// 	if(LidarImpl::_global) {
+// 		float _pose[7];
+// 		if(status_t s = LidarImpl::_global->getMatchingSample(_pose, ts_us)) return (s | STATUS_FAIL);
+// 		return LidarImpl::_global->addWorldRef(xyz, _pose + 3, ts_us);
+// 	}
+// 	return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
+// }
+// status_t updateWorldOrientation(const measure_t* qxyzw, const uint64_t ts_us) {
+// 	if(LidarImpl::_global) {
+// 		float _pose[7];
+// 		if(status_t s = LidarImpl::_global->getMatchingSample(_pose, ts_us)) return (s | STATUS_FAIL);
+// 		return LidarImpl::_global->addWorldRef(_pose, qxyzw, ts_us);
+// 	}
+// 	return STATUS_PREREQ_UNINITIALIZED | STATUS_FAIL;
+// }
 status_t updateWorldPose(const measure_t* xyz, const measure_t* qxyzw, const uint64_t ts_us) {
 	if(LidarImpl::_global) {
 		return LidarImpl::_global->addWorldRef(xyz, qxyzw, ts_us);
@@ -769,37 +778,63 @@ status_t waitNextCalculatedPose(measure_t* pose, double timeout_ms) {
 
 /** LidarImpl interfacing implementation */
 
-status_t LidarImpl::getMatchingSample(measure_t* pose, const uint64_t ts_us) {
-	// TODO
-	return STATUS_NOT_IMPLEMENTED | STATUS_FAIL;
-}
+// status_t LidarImpl::getMatchingSample(measure_t* pose, const uint64_t ts_us) {
+
+// 	if(!pose) return STATUS_BAD_PARAM | STATUS_FAIL;
+
+// 	this->_state.localization_mutex.lock_shared();
+// 	const auto* ts_sample = this->transform_sampler.sampleTimestamped(ldru::rectifyTimestampMicros(ts_us));
+// 	memcpy(pose, &std::get<1>(ts_sample->second), 3 * sizeof(measure_t));
+// 	memcpy(pose + 3, &std::get<2>(ts_sample->second), 4 * sizeof(measure_t));
+// 	this->_state.localization_mutex.unlock_shared();
+// 	return STATUS_SUCCESS;
+
+// }
 status_t LidarImpl::addWorldRef(const measure_t* xyz, const measure_t* qxyzw, const uint64_t ts_us) {
 
-	if(!xyz || !qxyzw) return STATUS_BAD_PARAM | STATUS_FAIL;
+	if(!xyz && !qxyzw) return STATUS_BAD_PARAM | STATUS_FAIL;	// if both are null there is nothing to correlate with
 
-	const int64_t timestamp{
-		ts_us == 0 ?
-			static_cast<int64_t>(crno::duration_cast<crno::microseconds>(crno::hrc::now().time_since_epoch()).count()) :
-			static_cast<int64_t>(ts_us)
-	};
-
-	// LDRP_LOG( LOG_DEBUG, "WORLD REF ADDED: ({}, {}, {}), [{}, {}, {}, {}]", xyz[0], xyz[2], xyz[2], qxyzw[0], qxyzw[1], qxyzw[2], qxyzw[3] );
+	const int64_t timestamp = ldru::rectifyTimestampMicros(ts_us);
+	Eigen::Vector3f r2w_pos;		// robot's position in the world
+	Eigen::Quaternionf r2w_quat;	// robot's rotation in the world
+	if(!xyz || !qxyzw) {
+		this->_state.localization_mutex.lock_shared();
+		const auto* ts_sample = this->transform_sampler.sampleTimestamped(timestamp);
+		r2w_pos = (xyz) ? 
+			*reinterpret_cast<const Eigen::Vector3f*>(xyz) : 	// if valid, use directly
+			((ts_sample) ? 
+				std::get<1>(ts_sample->second) : 	// else use sample if valid
+				Eigen::Vector3f::Identity()			// otherwise use identity
+			)
+		;
+		r2w_quat = (qxyzw) ? 
+			Eigen::Quaternionf{ qxyzw } : 	// if valid, use directly
+			((ts_sample) ? 
+				std::get<2>(ts_sample->second) : 	// else use sample if valid
+				Eigen::Quaternionf::Identity()		// otherwise use identity
+			)
+		;
+		this->_state.localization_mutex.unlock_shared();
+	} else {	// seems redundant but we want to avoid locking/unlocking whenever we can
+		r2w_pos = *reinterpret_cast<const Eigen::Vector3f*>(xyz);
+		r2w_quat = Eigen::Quaternionf{ qxyzw };
+	}
 
 	/* >> FOR FUTURE REFERENCE!!! <<
 		* "Eigen::QuaternionXX * Eigen::TranslationXX" IS NOT THE SAME AS "Eigen::TranslationXX * Eigen::QuaternionXX"
-		* The first ROTATES the translation by the quaternion, whereas the second one DOES NOT!!! */
+		* The first ROTATES the translation by the quaternion, whereas the second one DOES NOT!!! 
+		* ALSO -- Eigen::QuaternionXX is stored internally as XYZW but has constructors that take various orderings! (make sure to check!) */
 	const Eigen::Quaternionf
-		r2w_quat = Eigen::Quaternionf{ qxyzw },						// robot's rotation in the world
 		l2w_quat = (this->_config.lidar_offset_quat * r2w_quat);	// lidar's rotation in the world
 	const Eigen::Isometry3f
-		r2w_transform = (*reinterpret_cast<const Eigen::Translation3f*>(xyz)) * r2w_quat;	// compose robot's position and rotation
+		r2w_transform = (*reinterpret_cast<const Eigen::Translation3f*>(&r2w_pos)) * r2w_quat;	// compose robot's position and rotation
 	const Eigen::Vector3f
-		l_w_pos = r2w_transform * this->_config.lidar_offset_xyz;	// transform lidar's offset in robot space -- the same as rotating the lidar position to global coords and adding the robot's position
+		l2w_pos = r2w_transform * this->_config.lidar_offset_xyz;	// transform lidar's offset in robot space -- the same as rotating the lidar position to global coords and adding the robot's position
 	const Eigen::Isometry3f
-		l2w_transform = (*reinterpret_cast<const Eigen::Translation3f*>(&l_w_pos)) * l2w_quat;	// compose the lidar's global position and the lidar's global rotation
+		l2w_transform = (*reinterpret_cast<const Eigen::Translation3f*>(&l2w_pos)) * l2w_quat;	// compose the lidar's global position and the lidar's global rotation
 
 	this->_state.localization_mutex.lock();
-	this->transform_sampler.insert( timestamp, std::make_tuple( l2w_transform, *reinterpret_cast<const Eigen::Vector3f*>(xyz), r2w_quat ) );
+	this->transform_sampler.insert( timestamp, std::make_tuple( l2w_transform, r2w_pos, r2w_quat ) );
 	this->transform_sampler.updateMin( timestamp - this->_config.pose_matching_history );		// TODO: "dumb" management for now -- add a more robust tracking mechanism later
 	this->_state.localization_mutex.unlock();
 	return STATUS_SUCCESS;
@@ -841,11 +876,11 @@ status_t LidarImpl::exportNextObstacles(ObstacleGrid& grid, ObstacleGrid::Quant_
 
 status_t LidarImpl::exportLocalizationPose(measure_t* pose) {
 	// TODO
-	return STATUS_NOT_IMPLEMENTED | STATUS_FAIL;
+	return STATUS_NOT_IMPLEMENTED;
 }
 status_t LidarImpl::exportNextLocalizationPose(measure_t* pose, double timeout_ms) {
 	// TODO
-	return STATUS_NOT_IMPLEMENTED | STATUS_FAIL;
+	return STATUS_NOT_IMPLEMENTED;
 }
 
 status_t LidarImpl::gridExportInternal(ObstacleGrid& grid, ObstacleGrid::Quant_T*(*grid_resize)(size_t), std::unique_lock<std::timed_mutex>& lock) {
@@ -1263,6 +1298,7 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 
 		// 1. transform points based on timestamp
 		for(size_t i = 0; i < f_inst->samples.size(); i++) {			// we could theoretically multithread this part -- just use a mutex for inserting points into the master collection
+			// TODO: need to have the option to transform all segments of the same frame equally (for SLAM) -- "this->_config.enable_segment_transforms"
 			for(size_t j = 0; j < f_inst->samples[i].size(); j++) {
 				const sick_scansegment_xd::ScanSegmentParserOutput& segment = f_inst->samples[i][j];
 				const int64_t seg_ts = (static_cast<int64_t>(segment.timestamp_sec) * 1000000L) + (static_cast<int64_t>(segment.timestamp_nsec) / 1000L);	// microseconds since epoch in local timebase (internally generated using system clock)
@@ -1471,7 +1507,16 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 
 		}
 
-		// 3. update accumulator
+		// 3. localization refinement
+		{
+			// INTEGRATED LOCALIZATION HERE!!!
+		}
+		// 4. full transform to global space
+		{
+			// only applies to filtered obstacle points :)
+		}
+
+		// 5. update accumulator
 		{
 			_NT_PROFILE_STAGE(30);	// 30 = update grid (locking)
 
