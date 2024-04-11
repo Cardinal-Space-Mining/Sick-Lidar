@@ -126,21 +126,10 @@ namespace ldru {
 static void swapSegmentsNoIMU(sick_scansegment_xd::ScanSegmentParserOutput& a, sick_scansegment_xd::ScanSegmentParserOutput& b) {
 	std::swap(a.scandata, b.scandata);
 	std::swap(a.timestamp, b.timestamp);
-#if true
-	// address of end of struct minus address of starting data we want to copy
-	const size_t bytes = (reinterpret_cast<uint8_t*>(&a) + sizeof(decltype(a))) - reinterpret_cast<uint8_t*>(&a.timestamp_sec);	// should be 16 bytes
-	// constexpr size_t bytes = 16;
-	void* tmp = malloc(bytes);
-	memcpy(tmp, &a.timestamp_sec, bytes);
-	memcpy(&a.timestamp_sec, &b.timestamp_sec, bytes);
-	memcpy(&b.timestamp_sec, tmp, bytes);
-	free(tmp);
-#else	// safer alternative
 	std::swap(a.timestamp_sec, b.timestamp_sec);
 	std::swap(a.timestamp_nsec, b.timestamp_nsec);
 	std::swap(a.segmentIndex, b.segmentIndex);
 	std::swap(a.telegramCnt, b.telegramCnt);
-#endif
 }
 
 static inline const uint32_t convertNumThreads(const int32_t input_num, const int32_t reserved = 0) {
