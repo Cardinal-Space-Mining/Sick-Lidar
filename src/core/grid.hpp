@@ -503,7 +503,7 @@ public:
 				// std::cout << "[QRG]: Deleted old grid data with area " << this->area() << std::endl;
 			}
 			if(this->buffer) {
-				Base_T::memcpyWindow<Buff_T>(_buffer, this->buffer, _size, this->grid_size, _diff);
+				Base_T::memcpyWindow(_buffer, this->buffer, _size, this->grid_size, _diff);
 				delete[] this->buffer;
 				// std::cout << "[QRG]: Deleted old buffer data with area " << this->area() << std::endl;
 			}
