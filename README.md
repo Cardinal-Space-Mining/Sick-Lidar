@@ -43,7 +43,7 @@ For the most part, the project is configured to use the optimal build variables 
 - To configure:
   - `cmake -S <SOURCE DIRECTORY> -B <BUILD DIRECTORY>` on MSVC or similar (ie. if on windows), and
   - `cmake -S <SOURCE DIRECTORY> -B <BUILD DIRECTORY> -DCMAKE_BUILD_TYPE=<BUILD_TYPE>` on non-MSVC build systems (ie. if on linux).
-  - Additional options can be appended using the format `-D<OPTION>=<OPTION VAL>` (see above). Note that `-DCMAKE_BUILD_TYPE=<BUILD_TYPE>` may be dropped if a release build is required since this is the default value.
+  - Additional options can be appended using the format `-D<OPTION>=<OPTION VAL>` (see above).
 - To build (and install):
   - `cmake --build <BUILD DIRECTORY> --target install --config Release (--parallel)` on MSVC or similar (ie. if on windows), and
   - `cmake --build <BUILD DIRECTORY> --target install (--parallel <#parallel>)` on non-MSVC build systems (ie. if on linux).
