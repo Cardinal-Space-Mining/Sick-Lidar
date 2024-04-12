@@ -174,23 +174,23 @@ namespace ldrp {
 	/** Specify the logging level: 0 = none, 1 = standard, 2 = verbose, 3 = VERBOOOSE! */
 	__API status_t setLogLevel(const int32_t lvl);
 
-	/** Insert a new [decoupled] position sample for the system's location within global space at the specified timestamp.
-	 * Units are interpreted in meters!
-	 * @param xyz - a pointer to the (x, y, z) position as a float array
-	 * @param ts_microseconds - the timestamp correlated with the sample's collection in microseconds since epoch (or in the system timebase) */
-	inline status_t updateWorldPosition(const measure_t* xyz, const uint64_t ts_microseconds = 0)
-		{ ldrp::updateWorldPose(xyz, nullptr, ts_microseconds); }
-	/** Insert a new [decoupled] orientation sample for the system's rotation within global space at the specified timestamp.
-	 * @param qxyzw - the quaternion representing the system's rotation in world space -- components are ordered XYZW!
-	 * @param ts_microseconds - the timestamp correlated with the sample's collection in microseconds since epoch (or in the system timebase) */
-	inline status_t updateWorldOrientation(const measure_t* qxyzw, const uint64_t ts_microseconds = 0)
-		{ ldrp::updateWorldPose(nullptr, qxyzw, ts_microseconds); }
 	/** Insert a new sample for the system's pose within global space at the specified timestamp.
 	 * Note that the position is interpreted as being in units of meters!
 	 * @param xyz - a pointer to the (x, y, z) position as a float array
 	 * @param qxyzw - the quaternion representing the system's rotation in world space -- components are ordered XYZW!
 	 * @param ts_microseconds - the timestamp correlated with the sample's collection in microseconds since epoch (or in the system timebase) */
 	__API status_t updateWorldPose(const measure_t* xyz, const measure_t* qxyzw, const uint64_t ts_microseconds = 0);		// TODO: separate location and orientation updates with appropriate mapping in backed datastruct
+	/** Insert a new [decoupled] position sample for the system's location within global space at the specified timestamp.
+	 * Units are interpreted in meters!
+	 * @param xyz - a pointer to the (x, y, z) position as a float array
+	 * @param ts_microseconds - the timestamp correlated with the sample's collection in microseconds since epoch (or in the system timebase) */
+	inline status_t updateWorldPosition(const measure_t* xyz, const uint64_t ts_microseconds = 0)
+		{ return ldrp::updateWorldPose(xyz, nullptr, ts_microseconds); }
+	/** Insert a new [decoupled] orientation sample for the system's rotation within global space at the specified timestamp.
+	 * @param qxyzw - the quaternion representing the system's rotation in world space -- components are ordered XYZW!
+	 * @param ts_microseconds - the timestamp correlated with the sample's collection in microseconds since epoch (or in the system timebase) */
+	inline status_t updateWorldOrientation(const measure_t* qxyzw, const uint64_t ts_microseconds = 0)
+		{ return ldrp::updateWorldPose(nullptr, qxyzw, ts_microseconds); }
 
 	/** Export the most recent obstacle grid.
 	 * @param grid - struct to which all grid data will be exported

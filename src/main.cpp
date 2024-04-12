@@ -21,7 +21,7 @@ static void _action(int sig) {
 	_program_running = false;
 }
 static uint8_t* _grid_alloc(size_t s) {
-	return (uint8_t*)malloc(s + (sizeof(int64_t) * 2)) + (sizeof(int64_t) * 2);		// extra space for size at the beginning
+	return ((uint8_t*)malloc(s + 20) + 20);		// extra space for size at the beginning
 }
 
 int main(int argc, char** argv) {
@@ -33,7 +33,7 @@ int main(int argc, char** argv) {
 	status_t s{0};
 	ldrp::LidarConfig _config{};
 	_config.points_logging_mode = (ldrp::POINT_LOGGING_INCLUDE_FILTERED | ldrp::POINT_LOGGING_NT);
-	_config.nt_use_client = true;
+	_config.nt_use_client = false;
 	_config.nt_client_team = 1111;
 	// _config.lidar_offset_xyz[2] = 7.5f;
 	_config.min_scan_theta_degrees = -90.f;
@@ -53,9 +53,9 @@ int main(int argc, char** argv) {
 
 	// nt::NetworkTableInstance::GetDefault().StartServer();
 	nt::NetworkTableInstance nt_inst = nt::NetworkTableInstance::GetDefault();
-	nt::DoubleArrayEntry nt_localization = nt_inst.GetTable("rio telemetry")->GetSubTable("robot")->GetDoubleArrayTopic("pigeon rotation quat").GetEntry({});	// robot code sends doubles not floats!
-	// nt::FloatArrayEntry nt_localization = nt_inst.GetFloatArrayTopic("uesim/pose").GetEntry({});
-	// nt::RawEntry nt_grid = nt_inst.GetRawTopic("tmain/obstacle grid").GetEntry("Grid<U8>", {});
+	// nt::DoubleArrayEntry nt_localization = nt_inst.GetTable("rio telemetry")->GetSubTable("robot")->GetDoubleArrayTopic("pigeon rotation quat").GetEntry({});	// robot code sends doubles not floats!
+	nt::FloatArrayEntry nt_localization = nt_inst.GetFloatArrayTopic("uesim/pose").GetEntry({});
+	nt::RawEntry nt_grid = nt_inst.GetRawTopic("tmain/obstacle grid").GetEntry("Grid<U8>", {});
 
 	signal(SIGINT, _action);
 
@@ -67,8 +67,8 @@ int main(int argc, char** argv) {
 	nt_localization.Set( {{ 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}} );
 	for(;_program_running.load();) {
 
-		std::vector<nt::TimestampedDoubleArray> updates = nt_localization.ReadQueue();
-		// std::vector<nt::TimestampedFloatArray> updates = nt_localization.ReadQueue();
+		// std::vector<nt::TimestampedDoubleArray> updates = nt_localization.ReadQueue();
+		std::vector<nt::TimestampedFloatArray> updates = nt_localization.ReadQueue();
 		// std::cout << "[Main Thread]: Localization recieved " << updates.size() << " pose updates" << std::endl;
 		// std::optional<int64_t> _dt = nt_inst.GetServerTimeOffset();
 		// const int64_t dt = (_dt.has_value() ? *_dt : 0L);
@@ -90,11 +90,11 @@ int main(int argc, char** argv) {
 
 		// s = ldrp::updateWorldPose(pose, pose + 3);
 
-// #define NT_EXPORT_GRID
+#define NT_EXPORT_GRID
 #ifdef NT_EXPORT_GRID
 		high_resolution_clock::time_point a = high_resolution_clock::now();
 		s = ldrp::waitNextObstacleGrid(grid, &_grid_alloc, 10.0);
-		if(s == ldrp::STATUS_SUCCESS) grid.grid -= (sizeof(int64_t) * 2);
+		if(s == ldrp::STATUS_SUCCESS) grid.grid -= 20;
 		// double dur = duration<double>{high_resolution_clock::now() - a}.count();
 		if(s & ldrp::STATUS_TIMED_OUT) {
 			// std::cout << "[Main Thread]: Obstacle export timed out after " << dur << " seconds." << std::endl;
@@ -105,12 +105,15 @@ int main(int argc, char** argv) {
 			// std::cout << "[Main Thread]: Obstacle export failed after " << dur << " seconds." << std::endl;
 		}
 		if(grid.grid) {
-			reinterpret_cast<int64_t*>(grid.grid)[0] = grid.cells_x;
-			reinterpret_cast<int64_t*>(grid.grid)[1] = grid.cells_y;
+			reinterpret_cast<int32_t*>(grid.grid)[0] = grid.cells_x;
+			reinterpret_cast<int32_t*>(grid.grid)[1] = grid.cells_y;
+			reinterpret_cast<float*>(grid.grid)[2] = grid.origin_x_m;
+			reinterpret_cast<float*>(grid.grid)[3] = grid.origin_y_m;
+			reinterpret_cast<float*>(grid.grid)[4] = grid.cell_resolution_m;
 			nt_grid.Set(
 				std::span<const uint8_t>{
 					grid.grid,
-					grid.grid + (grid.cells_x * grid.cells_y + (sizeof(int64_t) * 2))
+					grid.grid + (grid.cells_x * grid.cells_y + 20)
 				}
 			);
 			free(grid.grid);
