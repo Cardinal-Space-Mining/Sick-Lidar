@@ -917,7 +917,7 @@ void LidarImpl::lidarWorker() {
 
 	// (the next 30 lines or so are converted from scansegment_threads.cpp: sick_scansegment_xd::MsgPackThreads::runThreadCb())
 	// init udp receiver
-	sick_scansegment_xd::UdpReceiver* udp_receiver = nullptr;
+	sick_scansegment_xd::UdpReceiver* udp_receiver = nullptr; // Maybe change this to stack allocation
 	for(;!udp_receiver && this->_state.enable_threads.load();) {
 		udp_receiver = new sick_scansegment_xd::UdpReceiver{};
 		if(udp_receiver->Init(
