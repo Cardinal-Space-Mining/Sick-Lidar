@@ -54,7 +54,7 @@ int main(int argc, char** argv) {
 	// nt::NetworkTableInstance::GetDefault().StartServer();
 	nt::NetworkTableInstance nt_inst = nt::NetworkTableInstance::GetDefault();
 	// nt::DoubleArrayEntry nt_localization = nt_inst.GetTable("rio telemetry")->GetSubTable("robot")->GetDoubleArrayTopic("pigeon rotation quat").GetEntry({});	// robot code sends doubles not floats!
-	nt::FloatArrayEntry nt_localization = nt_inst.GetFloatArrayTopic("uesim/pose").GetEntry({});
+	// nt::FloatArrayEntry nt_localization = nt_inst.GetFloatArrayTopic("uesim/pose").GetEntry({});
 	nt::RawEntry nt_grid = nt_inst.GetRawTopic("tmain/obstacle grid").GetEntry("Grid<U8>", {});
 
 	signal(SIGINT, _action);
@@ -64,29 +64,29 @@ int main(int argc, char** argv) {
 	float						// x    y    z    w
 		pose[7] = { 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 1.f };
 	ldrp::ObstacleGrid grid{};
-	nt_localization.Set( {{ 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}} );
+	// nt_localization.Set( {{ 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}} );
 	for(;_program_running.load();) {
 
 		// std::vector<nt::TimestampedDoubleArray> updates = nt_localization.ReadQueue();
-		std::vector<nt::TimestampedFloatArray> updates = nt_localization.ReadQueue();
+		// std::vector<nt::TimestampedFloatArray> updates = nt_localization.ReadQueue();
 		// std::cout << "[Main Thread]: Localization recieved " << updates.size() << " pose updates" << std::endl;
 		// std::optional<int64_t> _dt = nt_inst.GetServerTimeOffset();
 		// const int64_t dt = (_dt.has_value() ? *_dt : 0L);
 		// std::cout << "Time off (micros): " << dt << std::endl;
-		if(updates.size() <= 0) {
-			updates.emplace_back(nt_localization.GetAtomic());
-		}
-		for(const auto& u : updates) {
-			const auto* _data = u.value.data();
-			pose[0] = static_cast<float>(_data[0]);
-			pose[1] = static_cast<float>(_data[1]);
-			pose[2] = static_cast<float>(_data[2]);
-			pose[3] = static_cast<float>(_data[4]);	// pigeon and wpilib internally use wxyz order, therefore we must reorder to xyzw
-			pose[4] = static_cast<float>(_data[5]);
-			pose[5] = static_cast<float>(_data[6]);
-			pose[6] = static_cast<float>(_data[3]);
-			ldrp::updateWorldPose(pose, pose + 3, u.time);	// previous: div by 100 to get into same timebase as internally, but THIS IS ACTUALLY IN MICROSECONDS
-		}
+		// if(updates.size() <= 0) {
+		// 	updates.emplace_back(nt_localization.GetAtomic());
+		// }
+		// for(const auto& u : updates) {
+		// 	const auto* _data = u.value.data();
+		// 	pose[0] = static_cast<float>(_data[0]);
+		// 	pose[1] = static_cast<float>(_data[1]);
+		// 	pose[2] = static_cast<float>(_data[2]);
+		// 	pose[3] = static_cast<float>(_data[4]);	// pigeon and wpilib internally use wxyz order, therefore we must reorder to xyzw
+		// 	pose[4] = static_cast<float>(_data[5]);
+		// 	pose[5] = static_cast<float>(_data[6]);
+		// 	pose[6] = static_cast<float>(_data[3]);
+		// 	ldrp::updateWorldPose(pose, pose + 3, u.time);	// previous: div by 100 to get into same timebase as internally, but THIS IS ACTUALLY IN MICROSECONDS
+		// }
 
 		// s = ldrp::updateWorldPose(pose, pose + 3);
 

@@ -157,6 +157,11 @@ static inline int64_t floatSecondsToIntMicros(const FT v) {
 	return static_cast<int64_t>(v * static_cast<FT>(1e6));
 }
 
+template<typename T = uint32_t>
+static inline int64_t constructTimestampMicros(const T seconds, const T nanoseconds) {
+	return (static_cast<int64_t>(seconds) * 1000000L) + (static_cast<int64_t>(nanoseconds) / 1000L);
+}
+
 static inline int64_t rectifyTimestampMicros(const uint64_t ts_us) {
 	return (ts_us == 0 ?
 		static_cast<int64_t>(crno::duration_cast<crno::microseconds>(crno::hrc::now().time_since_epoch()).count()) :
@@ -183,10 +188,10 @@ public:
 	using ElemT = std::pair<TimeT, Type>;
 
 private:
-	static bool __t_less(TimeT t, const ElemT& elem) {
+	static bool t_less__(TimeT t, const ElemT& elem) {
 		return t < elem.first;
 	}
-	static bool __t_greater(const ElemT& elem, TimeT t) {
+	static bool t_greater__(const ElemT& elem, TimeT t) {
 		return t > elem.first;
 	}
 
@@ -209,7 +214,7 @@ public:
 		if(this->samples.size() <= 0 || time > this->samples.back().first) {
 			this->samples.emplace_back(time, std::forward<Type>(sample));
 		} else {
-			auto after = std::upper_bound(this->samples.begin(), this->samples.end(), time, &This_T::__t_less);
+			auto after = std::upper_bound(this->samples.begin(), this->samples.end(), time, &This_T::t_less__);
 			auto before = after - 1;
 			if(after == this->samples.begin()) {
 				this->samples.insert(after, std::pair{time, std::forward<Type>(sample)});
@@ -238,7 +243,7 @@ public:
 		if( time >= this->samples.back().first )	return &this->samples.back();
 		if( this->samples.size() == 1 )				return &this->samples[0];
 
-		auto greater = std::lower_bound(this->samples.begin(), this->samples.end(), time, &This_T::__t_greater);	// "lower bound" of times greater than t
+		auto greater = std::lower_bound(this->samples.begin(), this->samples.end(), time, &This_T::t_greater__);	// "lower bound" of times greater than t
 		if( greater == this->samples.begin() )		return &*greater;
 
 		auto less = greater - 1;
@@ -967,6 +972,10 @@ void LidarImpl::lidarWorker() {
 		fifo_timestamp scan_timestamp{};
 		size_t scan_count{0};	// not used but we need for a param
 
+		nt::FloatArrayEntry
+			test_imu_raw = this->_nt.base->GetFloatArrayTopic("multiscan imu/raw data").GetEntry({}),
+			test_imu_pose = this->_nt.base->GetFloatArrayTopic("multiscan imu/pose").GetEntry({});
+
 		if(this->_config.points_logging_mode & POINT_LOGGING_TAR) {
 			this->pcd_writer.setFile(this->_config.points_log_fname);
 		}
@@ -1141,6 +1150,27 @@ void LidarImpl::lidarWorker() {
 						if(this->_config.enabled_segments & seg_bit) {	// if the segment'th bit is set
 							size_t idx = ::countBitsBeforeN(this->_config.enabled_segments, parsed_segment.segmentIndex);	// get the index of the enabled bit (for our buffer)
 
+							// log imu data
+							if(parsed_segment.imudata.valid) {
+								test_imu_raw.Set(std::span<float>{
+									&parsed_segment.imudata.acceleration_x,
+									&parsed_segment.imudata.acceleration_x + 10
+								});
+								float _pose[7], _quat[4];
+								_pose[0] = 0;
+								_pose[1] = 0;
+								_pose[2] = 0;
+								memcpy(_pose + 3, &parsed_segment.imudata.orientation_w, 16);
+								test_imu_pose.Set(std::span<float>{
+									_pose,
+									_pose + 7
+								});
+
+								memcpy(_quat, &parsed_segment.imudata.orientation_x, 12);
+								_quat[3] = parsed_segment.imudata.orientation_w;
+								this->addWorldRef(nullptr, _quat, ldru::constructTimestampMicros(parsed_segment.timestamp_sec, parsed_segment.timestamp_nsec));
+							}
+
 							frame_segments[idx].emplace_front();	// create empty segment buffer
 							ldru::swapSegmentsNoIMU(frame_segments[idx].front(), parsed_segment);		// efficient buffer transfer (no deep copying!)
 							if(frame_segments[idx].size() >= this->_config.buffered_frames) {
@@ -1301,7 +1331,7 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 			// TODO: need to have the option to transform all segments of the same frame equally (for SLAM) -- "this->_config.enable_segment_transforms"
 			for(size_t j = 0; j < f_inst->samples[i].size(); j++) {
 				const sick_scansegment_xd::ScanSegmentParserOutput& segment = f_inst->samples[i][j];
-				const int64_t seg_ts = (static_cast<int64_t>(segment.timestamp_sec) * 1000000L) + (static_cast<int64_t>(segment.timestamp_nsec) / 1000L);	// microseconds since epoch in local timebase (internally generated using system clock)
+				const int64_t seg_ts = ldru::constructTimestampMicros(segment.timestamp_sec, segment.timestamp_nsec);	// microseconds since epoch in local timebase (internally generated using system clock)
 
 				this->_state.localization_mutex.lock_shared();	// other threads can read from the buffer as well
 				const auto* ts_transform = this->transform_sampler.sampleTimestamped( seg_ts );		// TODO: !!! THIS WILL LIKELY CAUSE PROBLEMS !!! >> if the vector gets realloced while we don't have mutex control, our pointer is no longer valid!
