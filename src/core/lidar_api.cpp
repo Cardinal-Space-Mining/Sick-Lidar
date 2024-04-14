@@ -92,6 +92,9 @@
 #include "sick_scansegment_xd/scansegment_parser_output.h"
 #include "sick_scan/sick_cloud_transform.h"
 
+#include "slam/include/dlo/map.h"
+#include "slam/include/dlo/odom.h"
+
 
 /** Make std:: namespaces more usable */
 namespace std {
@@ -1499,6 +1502,10 @@ void LidarImpl::filterWorker(LidarImpl::FilterInstance* f_inst) {
 		// 3. localization refinement
 		{
 			// INTEGRATED LOCALIZATION HERE!!!
+			
+			dlo::OdomNode::icpCB(const pcl::PointCloud& pc)
+
+
 		}
 		// 4. full transform to global space
 		{
