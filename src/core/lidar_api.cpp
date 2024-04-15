@@ -92,8 +92,9 @@
 #include "sick_scansegment_xd/scansegment_parser_output.h"
 #include "sick_scan/sick_cloud_transform.h"
 
-#include "slam/include/dlo/map.h"
-#include "slam/include/dlo/odom.h"
+#include "./slam/include/dlo/map.h"
+#include "./slam/include/dlo/odom.h"
+
 
 
 /** Make std:: namespaces more usable */

@@ -18,7 +18,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string>
-#include <sys/times.h>
+#include <sys/times.h>  // find windows equivalent
 #include <sys/vtimes.h>
 #include <thread>
 
@@ -26,7 +26,7 @@
 #include <cpuid.h>
 #endif
 
-#include <boost/algorithm/string.hpp>
+// #include <boost/algorithm/string.hpp>
 
 #include <pcl/filters/crop_box.h>
 #include <pcl/filters/voxel_grid.h>
@@ -34,23 +34,24 @@
 #include <pcl/surface/concave_hull.h>
 #include <pcl/surface/convex_hull.h>
 #include <pcl_conversions/pcl_conversions.h>
-#include <pcl_ros/impl/transforms.hpp>
-#include <pcl_ros/point_cloud.h>
-#include <pcl_ros/transforms.h>
-#include <tf2_ros/transform_broadcaster.h>
+// #include <pcl_ros/impl/transforms.hpp>
+// #include <pcl_ros/point_cloud.h>
+// #include <pcl_ros/transforms.h>
+// #include <tf2_ros/transform_broadcaster.h>
 
-#include <geometry_msgs/PoseStamped.h>
-#include <nav_msgs/Odometry.h>
-#include <sensor_msgs/CameraInfo.h>
-#include <sensor_msgs/Image.h>
-#include <sensor_msgs/Imu.h>
-#include <sensor_msgs/PointCloud2.h>
+// #include <geometry_msgs/PoseStamped.h>
+// #include <nav_msgs/Odometry.h>
+// #include <sensor_msgs/CameraInfo.h>
+// #include <sensor_msgs/Image.h>
+// #include <sensor_msgs/Imu.h>
+// #include <sensor_msgs/PointCloud2.h>
 
-#include <direct_lidar_odometry/save_pcd.h>
-#include <direct_lidar_odometry/save_traj.h>
-#include <nano_gicp/nano_gicp.hpp>
+// #include <direct_lidar_odometry/save_pcd.h>
+// #include <direct_lidar_odometry/save_traj.h>
+#include <../nano_gicp/nano_gicp.hpp>
 
-typedef pcl::PointXYZI PointType;
+
+typedef pcl::PointXYZI PointType;   // if we use all the same files, change this to pcl::PointXYZ to be compatible with the rest of the code
 
 namespace dlo {
 

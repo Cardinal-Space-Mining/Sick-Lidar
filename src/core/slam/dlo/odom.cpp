@@ -19,7 +19,8 @@
 *|_|_|_|_|_|_|_|_|_|_|_|_|_|_|_|_|_|_|_|_|_|_|_|_|_|_|_|_|_|_|_|_|_|_|_|_|
 *
 */
-#include "dlo/odom.h"
+#include "../include/dlo/odom.h"
+
 
 std::atomic<bool> dlo::OdomNode::abort_(false);
 

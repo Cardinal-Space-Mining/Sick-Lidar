@@ -42,6 +42,7 @@
 #ifndef NANO_GICP_NANO_SETTINGS_HPP
 #define NANO_GICP_NANO_SETTINGS_HPP
 
+
 namespace nano_gicp {
 
   enum class RegularizationMethod { NONE, MIN_EIG, NORMALIZED_MIN_EIG, PLANE, FROBENIUS };

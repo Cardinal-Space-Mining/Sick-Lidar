@@ -7,7 +7,8 @@
  *
  ***********************************************************/
 
-#include "dlo/map.h"
+#include "../include/dlo/map.h"
+
 
 std::atomic<bool> dlo::MapNode::abort_(false);
 

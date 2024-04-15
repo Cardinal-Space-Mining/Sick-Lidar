@@ -237,6 +237,7 @@ set(CMAKE_CXX_STANDARD ${sickperception_CXX_STANDARD})
 
 file(GLOB _shared_sources "${CMAKE_CURRENT_LIST_DIR}/*.cpp")
 file(GLOB _target_headers "${CMAKE_CURRENT_LIST_DIR}/*.h")
+list(APPEND _shared_sources "${CMAKE_CURRENT_LIST_DIR}/slam/dlo/map.cpp" "${CMAKE_CURRENT_LIST_DIR}/slam/dlo/odom.cpp")	# these are currently configured for ROS, so we will probably use different files completely
 if(${sickperception_USE_WPILIB})	# compile DataLogManager directly into our library
 	list(APPEND _shared_sources "${WPILIB_DIR}/ntcoreffi/src/main/native/cpp/DataLogManager.cpp")
 	list(APPEND _include_dirs "${WPILIB_DIR}/ntcoreffi/src/main/native/include")
@@ -272,7 +273,7 @@ if(${CMAKE_BUILD_TYPE} STREQUAL "Debug")
 	)
 else()
 	target_link_libraries(${PROJECT_NAME}_lib
-		PRIVATE pcl_common pcl_io pcl_octree #PCL_FILTERS
+		PRIVATE pcl_common pcl_io pcl_octree flann registration kdtree #PCL_FILTERS
 		PRIVATE general SickScanInternal_lib
 	)
 endif()

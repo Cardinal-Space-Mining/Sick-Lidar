@@ -39,8 +39,8 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *************************************************************************/
 
-#include <dlo/dlo.h>
-#include <nano_gicp/nano_gicp.hpp>
-#include <nano_gicp/impl/nano_gicp_impl.hpp>
+// #include <dlo/dlo.h>
+// #include <nano_gicp/lsq_registration.hpp>
+// #include <nano_gicp/impl/lsq_registration_impl.hpp>
 
-template class nano_gicp::NanoGICP<PointType, PointType>;
+// template class nano_gicp::LsqRegistration<PointType, PointType>;

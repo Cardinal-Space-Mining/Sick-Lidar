@@ -49,6 +49,7 @@
 #include <pcl/point_cloud.h>
 #include <pcl/registration/registration.h>
 
+
 namespace nano_gicp {
 
 enum class LSQ_OPTIMIZER_TYPE { GaussNewton, LevenbergMarquardt };
@@ -115,5 +116,8 @@ protected:
   Eigen::Matrix<double, 6, 6> final_hessian_;
 };
 }  // namespace nano_gicp
+
+
+#include "./impl/lsq_registration_impl.hpp"
 
 #endif

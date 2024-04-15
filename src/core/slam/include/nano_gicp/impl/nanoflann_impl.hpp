@@ -66,6 +66,8 @@
 #include <limits> // std::reference_wrapper
 #include <stdexcept>
 #include <vector>
+#include <type_traits>
+
 
 /** Library version: 0xMmP (M=Major,m=minor,P=patch) */
 #define NANOFLANN_VERSION 0x132

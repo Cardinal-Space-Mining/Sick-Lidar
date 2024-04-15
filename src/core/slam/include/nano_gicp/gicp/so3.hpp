@@ -45,6 +45,7 @@
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 
+
 namespace nano_gicp {
 
 inline Eigen::Matrix3f skew(const Eigen::Vector3f& x) {

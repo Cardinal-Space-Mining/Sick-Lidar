@@ -42,11 +42,13 @@
 #ifndef NANO_KDTREE_KDTREE_FLANN_H_
 #define NANO_KDTREE_KDTREE_FLANN_H_
 
-#include <boost/shared_ptr.hpp>
+#include <vector>
+#include <memory>
+
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <pcl/kdtree/kdtree_flann.h>
-#include "nano_gicp/impl/nanoflann_impl.hpp"
+
 
 namespace nanoflann
 {
@@ -60,10 +62,10 @@ public:
   typedef typename pcl::PointCloud<PointT>::Ptr PointCloudPtr;
   typedef typename pcl::PointCloud<PointT>::ConstPtr PointCloudConstPtr;
 
-  typedef boost::shared_ptr<KdTreeFLANN<PointT>> Ptr;
-  typedef boost::shared_ptr<const KdTreeFLANN<PointT>> ConstPtr;
-  typedef boost::shared_ptr<std::vector<int>> IndicesPtr;
-  typedef boost::shared_ptr<const std::vector<int>> IndicesConstPtr;
+  typedef std::shared_ptr<KdTreeFLANN<PointT>> Ptr;
+  typedef std::shared_ptr<const KdTreeFLANN<PointT>> ConstPtr;
+  typedef std::shared_ptr<std::vector<int>> IndicesPtr;
+  typedef std::shared_ptr<const std::vector<int>> IndicesConstPtr;
 
   KdTreeFLANN (bool sorted = false);
   KdTreeFLANN (const KdTreeFLANN<PointT> &k);
@@ -192,5 +194,7 @@ float KdTreeFLANN<PointT>::PointCloud_Adaptor::kdtree_get_pt(const size_t idx, i
 
 }
 
+
+#include "./impl/nanoflann_impl.hpp"
 
 #endif

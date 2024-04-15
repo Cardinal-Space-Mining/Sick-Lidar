@@ -7,7 +7,8 @@
  *
  ***********************************************************/
 
-#include "dlo/dlo.h"
+#include "./dlo.h"
+
 
 class dlo::MapNode {
 

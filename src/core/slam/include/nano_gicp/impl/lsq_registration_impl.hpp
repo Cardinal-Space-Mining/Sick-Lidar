@@ -39,10 +39,11 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *************************************************************************/
 
-#include <boost/format.hpp>
+// #include <boost/format.hpp>
 
-#include <nano_gicp/lsq_registration.hpp>
-#include <nano_gicp/gicp/so3.hpp>
+#include <../lsq_registration.hpp>
+#include <../gicp/so3.hpp>
+
 
 namespace nano_gicp {
 
@@ -180,13 +181,13 @@ bool LsqRegistration<PointTarget, PointSource>::step_lm(Eigen::Isometry3d& x0, E
     double yi = compute_error(xi);
     double rho = (y0 - yi) / (d.dot(lm_lambda_ * d - b));
 
-    if (lm_debug_print_) {
-      if (i == 0) {
-        std::cout << boost::format("--- LM optimization ---\n%5s %15s %15s %15s %15s %15s %5s\n") % "i" % "y0" % "yi" % "rho" % "lambda" % "|delta|" % "dec";
-      }
-      char dec = rho > 0.0 ? 'x' : ' ';
-      std::cout << boost::format("%5d %15g %15g %15g %15g %15g %5c") % i % y0 % yi % rho % lm_lambda_ % d.norm() % dec << std::endl;
-    }
+    // if (lm_debug_print_) {
+    //   if (i == 0) {
+    //     std::cout << boost::format("--- LM optimization ---\n%5s %15s %15s %15s %15s %15s %5s\n") % "i" % "y0" % "yi" % "rho" % "lambda" % "|delta|" % "dec";
+    //   }
+    //   char dec = rho > 0.0 ? 'x' : ' ';
+    //   std::cout << boost::format("%5d %15g %15g %15g %15g %15g %5c") % i % y0 % yi % rho % lm_lambda_ % d.norm() % dec << std::endl;
+    // }
 
     if (rho < 0) {
       if (is_converged(delta)) {
