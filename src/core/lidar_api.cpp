@@ -789,25 +789,23 @@ status_t LidarImpl::addWorldRef(const measure_t* xyz, const measure_t* qxyzw, co
 	if(!xyz && !qxyzw) return STATUS_BAD_PARAM | STATUS_FAIL;	// if both are null there is nothing to correlate with
 
 	const int64_t timestamp = ldru::rectifyTimestampMicros(ts_us);
-	Eigen::Vector3f r2w_pos;		// robot's position in the world
-	Eigen::Quaternionf r2w_quat;	// robot's rotation in the world
+	Eigen::Vector3f r2w_pos = Eigen::Vector3f::Identity();			// robot's position in the world
+	Eigen::Quaternionf r2w_quat = Eigen::Quaternionf::Identity();	// robot's rotation in the world
 	if(!xyz || !qxyzw) {
 		this->_state.localization_mutex.lock_shared();
 		const auto* ts_sample = this->transform_sampler.sampleTimestamped(timestamp);
-		r2w_pos = (xyz) ? 
-			*reinterpret_cast<const Eigen::Vector3f*>(xyz) : 	// if valid, use directly
-			((ts_sample) ? 
-				std::get<1>(ts_sample->second) : 	// else use sample if valid
-				Eigen::Vector3f::Identity()			// otherwise use identity
-			)
-		;
-		r2w_quat = (qxyzw) ? 
-			Eigen::Quaternionf{ qxyzw } : 	// if valid, use directly
-			((ts_sample) ? 
-				std::get<2>(ts_sample->second) : 	// else use sample if valid
-				Eigen::Quaternionf::Identity()		// otherwise use identity
-			)
-		;
+		if(xyz) {
+			r2w_pos = *reinterpret_cast<const Eigen::Vector3f*>(xyz);
+		} else if(ts_sample) {
+			r2w_pos = std::get<1>(ts_sample->second);
+			// prev_timestamp = ts_sample->first;
+		}
+		if(qxyzw) {
+			r2w_quat = Eigen::Quaternionf{ qxyzw };
+		} else if(ts_sample) {
+			r2w_quat = std::get<2>(ts_sample->second);
+			// prev_timestamp = ts_sample->first;
+		}
 		this->_state.localization_mutex.unlock_shared();
 	} else {	// seems redundant but we want to avoid locking/unlocking whenever we can
 		r2w_pos = *reinterpret_cast<const Eigen::Vector3f*>(xyz);
