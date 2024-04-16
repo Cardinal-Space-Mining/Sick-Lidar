@@ -1275,7 +1275,7 @@ void dlo::OdomNode::getSubmapKeyframes() {
     this->submap_hasChanged = true;
 
     // reinitialize submap cloud, normals
-    pcl::PointCloud<PointType>::Ptr submap_cloud_ (boost::make_shared<pcl::PointCloud<PointType>>());
+    pcl::PointCloud<PointType>::Ptr submap_cloud_ (std::make_shared<pcl::PointCloud<PointType>>());
     this->submap_normals.clear();
 
     for (auto k : this->submap_kf_idx_curr) {
