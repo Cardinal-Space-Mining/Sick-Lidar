@@ -28,21 +28,32 @@ namespace GridUtils {
 		return gridAlign<IntT, FloatT>(pt.x(), pt.y(), off, res);
 	}
 
-	/** Get a raw buffer idx from a 2d index and buffer size (Row~X, Col~Y order) */
-	template<typename IntT = int>
+	/** Get a raw buffer idx from a 2d index and buffer size (templated on major-order) */
+	template<bool X_Major = false, typename IntT = int>
 	inline static int64_t gridIdx(const IntT x, const IntT y, const Eigen::Vector2<IntT>& size) {
-		return static_cast<int64_t>(x) * size.y() + y;	// rows along x-axis, cols along y-axis, thus (x, y) --> x * #cols + y
+		if constexpr(X_Major) {
+			return static_cast<int64_t>(x) * size.y() + y;	// x-major = "contiguous blocks along [parallel to] y-axis" --> idx = (x * ymax) + y
+		} else {
+			return static_cast<int64_t>(y) * size.x() + x;	// y-major = "contiguous blocks along [parallel to] x-axis" --> idx = (y * xmax) + x
+		}
 	}
-	template<typename IntT = int>
+	template<bool X_Major = false, typename IntT = int>
 	inline static int64_t gridIdx(const Eigen::Vector2<IntT>& loc, const Eigen::Vector2<IntT>& size) {
-		return gridIdx<IntT>(loc.x(), loc.y(), size);
+		return gridIdx<X_Major, IntT>(loc.x(), loc.y(), size);
 	}
-	template<typename IntT = int>
-	inline static Eigen::Vector2<IntT> gridLoc(size_t idx, const Eigen::Vector2<IntT>& size) {
-		return Eigen::Vector2<IntT>{
-			static_cast<IntT>(idx / size.y()),
-			static_cast<IntT>(idx % size.y())
-		};
+	template<bool X_Major = false, typename IntT = int>
+	inline static Eigen::Vector2<IntT> gridLoc(const size_t idx, const Eigen::Vector2<IntT>& size) {
+		if constexpr(X_Major) {
+			return Eigen::Vector2<IntT>{	// x-major = "contiguous blocks along [parallel to] y-axis" --> x = idx / ymax, y = idx % ymax
+				static_cast<IntT>(idx / size.y()),
+				static_cast<IntT>(idx % size.y())
+			};
+		} else {
+			return Eigen::Vector2<IntT>{	// y-major = "contiguous blocks along [parallel to] x-axis" --> x = idx % xmax, y = idx / xmax
+				static_cast<IntT>(idx % size.x()),
+				static_cast<IntT>(idx / size.x())
+			};
+		}
 	}
 
 
@@ -53,6 +64,7 @@ template<
 	typename Cell_t,
 	typename Int_t = int,
 	typename Float_t = float,
+	bool X_Major = false,
 	size_t Max_Alloc_Bytes = (1ULL << 30)>
 class GridBase {
 	static_assert(std::is_integral_v<Int_t>, "");
@@ -62,11 +74,13 @@ public:
 	using Cell_T = Cell_t;
 	using IntT = Int_t;
 	using FloatT = Float_t;
-	using This_T = GridBase< Cell_T, IntT, FloatT, Max_Alloc_Bytes >;
+	using This_T = GridBase< Cell_T, IntT, FloatT, X_Major, Max_Alloc_Bytes >;
 
 	using Vec2i = Eigen::Vector2<IntT>;
 	using Vec2f = Eigen::Vector2<FloatT>;
 
+	static constexpr bool
+		X_Major_Order = X_Major;
 	static constexpr size_t
 		Cell_Size = sizeof(Cell_T),
 		Max_Alloc_NCells = Max_Alloc_Bytes / Cell_Size;
@@ -75,6 +89,44 @@ public:
 	constexpr inline static const IntT literalI(T v) { return static_cast<IntT>(v); }
 	template<typename T>
 	constexpr inline static const FloatT literalF(T v) { return static_cast<FloatT>(v); }
+
+	template<typename IT = IntT>
+	inline static int64_t gridIdx(const IT x, const IT y, const Eigen::Vector2<IT>& size) {
+		return GridUtils::gridIdx<This_T::X_Major_Order, IT>(x, y, size);
+	}
+	template<typename IT = IntT>
+	inline static int64_t gridIdx(const Eigen::Vector2<IT>& loc, const Eigen::Vector2<IT>& size) {
+		return GridUtils::gridIdx<This_T::X_Major_Order, IT>(loc, size);
+	}
+	template<typename IT = IntT>
+	inline static Eigen::Vector2<IT> gridLoc(const size_t idx, const Eigen::Vector2<IT>& size) {
+		return GridUtils::gridLoc<This_T::X_Major_Order, IT>(idx, size);
+	}
+
+	template<typename T = Cell_T, typename IT = IntT, size_t T_Bytes = sizeof(T)>
+	static void memcpyWindow(
+		T* dest, const T* src,
+		const Eigen::Vector2<IT>& dest_size, const Eigen::Vector2<IT>& src_size,
+		const Eigen::Vector2<IT>& diff
+	) {
+		if constexpr(This_T::X_Major_Order) {
+			for(int64_t _x = 0; _x < src_size.x(); _x++) {	// iterate through source "rows" of contiguous memory (along y -- for each x)
+				memcpy(
+					dest + ((_x + diff.x()) * dest_size.y() + diff.y()),
+					src + (_x * src_size.y()),
+					src_size.y() * T_Bytes
+				);
+			}
+		} else {
+			for(int64_t _y = 0; _y < src_size.y(); _y++) {	// iterate through source "rows" of contiguous memory (along x -- for each y)
+				memcpy(
+					dest + ((_y + diff.y()) * dest_size.x() + diff.x()),
+					src + (_y * src_size.x()),
+					src_size.x() * T_Bytes
+				);
+			}
+		}
+	}
 
 public:
 	GridBase() = default;
@@ -113,7 +165,7 @@ public:
 		return GridUtils::gridAlign<IntT, FloatT>(x, y, this->grid_origin, this->cell_res);
 	}
 	inline const int64_t cellIdxOf(const FloatT x, const FloatT y) const {
-		return GridUtils::gridIdx<IntT>(this->boundingLoc(x, y), this->grid_size);
+		return This_T::gridIdx<IntT>(this->boundingLoc(x, y), this->grid_size);
 	}
 
 
@@ -141,13 +193,7 @@ public:
 
 			const Vec2i _diff = _zero - _low;	// by how many grid cells did the origin shift
 			if (this->grid) {
-				for (IntT r = 0; r < this->grid_size.x(); r++) {		// for each row in existing...
-					memcpy(									// remap to new buffer
-						_grid + ((static_cast<int64_t>(r) + _diff.x()) * _size.y() + _diff.y()),	// (row + offset rows) * new row size + offset cols
-						this->grid + (static_cast<int64_t>(r) * this->grid_size.y()),
-						this->grid_size.y() * This_T::Cell_Size
-					);
-				}
+				This_T::memcpyWindow(_grid, this->grid, _size, this->grid_size, _diff);
 				delete[] this->grid;
 			}
 			this->grid_origin -= (_diff.template cast<FloatT>() * this->cell_res);
@@ -191,11 +237,12 @@ template<
 	typename Ratio_t = float,
 	typename Int_t = int,
 	typename Float_t = float,
+	bool X_Major = false,
 	size_t Max_Alloc_Bytes = (1ULL << 30)>
-class RatioGrid : public GridBase< RatioGridCell<Ratio_t>, Int_t, Float_t, Max_Alloc_Bytes > {
+class RatioGrid : public GridBase< RatioGridCell<Ratio_t>, Int_t, Float_t, X_Major, Max_Alloc_Bytes > {
 public:
 	using This_T = RatioGrid< Ratio_t, Int_t, Float_t >;
-	using Base_T = GridBase< RatioGridCell<Ratio_t>, Int_t, Float_t, Max_Alloc_Bytes >;
+	using Base_T = GridBase< RatioGridCell<Ratio_t>, Int_t, Float_t, X_Major, Max_Alloc_Bytes >;
 	using RatioT = Ratio_t;
 	using typename Base_T::IntT;
 	using typename Base_T::FloatT;
@@ -376,11 +423,12 @@ template<
 	typename Ratio_t = float,
 	typename Int_t = int,
 	typename Float_t = float,
+	bool X_Major = false,
 	size_t Max_Alloc_Bytes = (1ULL << 30)>
-class QuantizedRatioGrid : public RatioGrid< Ratio_t, Int_t, Float_t, Max_Alloc_Bytes > {
+class QuantizedRatioGrid : public RatioGrid< Ratio_t, Int_t, Float_t, X_Major, Max_Alloc_Bytes > {
 public:
-	using This_T = QuantizedRatioGrid< Buff_t, Ratio_t, Int_t, Float_t, Max_Alloc_Bytes >;
-	using Super_T = RatioGrid< Ratio_t, Int_t, Float_t, Max_Alloc_Bytes >;
+	using This_T = QuantizedRatioGrid< Buff_t, Ratio_t, Int_t, Float_t, X_Major, Max_Alloc_Bytes >;
+	using Super_T = RatioGrid< Ratio_t, Int_t, Float_t, X_Major, Max_Alloc_Bytes >;
 	using Buff_T = Buff_t;
 	using typename Super_T::Base_T;
 	using typename Super_T::RatioT;
@@ -450,24 +498,12 @@ public:
 
 			const Vec2i _diff = _zero - _low;	// by how many grid cells did the origin shift
 			if(this->grid) {
-				for (IntT r = 0; r < this->grid_size.x(); r++) {		// for each row in existing...
-					memcpy(									// remap to new buffer
-						_grid + ((static_cast<int64_t>(r) + _diff.x()) * _size.y() + _diff.y()),	// (row + offset rows) * new row size + offset cols
-						this->grid + (static_cast<int64_t>(r) * this->grid_size.y()),
-						this->grid_size.y() * Base_T::Cell_Size
-					);
-				}
+				Base_T::memcpyWindow(_grid, this->grid, _size, this->grid_size, _diff);
 				delete[] this->grid;
 				// std::cout << "[QRG]: Deleted old grid data with area " << this->area() << std::endl;
 			}
 			if(this->buffer) {
-				for (IntT r = 0; r < this->grid_size.x(); r++) {		// for each row in existing...
-					memcpy(
-						_buffer + ((static_cast<int64_t>(r) + _diff.x()) * _size.y() + _diff.y()),
-						this->buffer + (static_cast<int64_t>(r) * this->grid_size.y()),
-						this->grid_size.y() * This_T::Buff_Cell_Size
-					);
-				}
+				Base_T::memcpyWindow(_buffer, this->buffer, _size, this->grid_size, _diff);
 				delete[] this->buffer;
 				// std::cout << "[QRG]: Deleted old buffer data with area " << this->area() << std::endl;
 			}
