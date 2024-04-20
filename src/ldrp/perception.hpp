@@ -3,10 +3,10 @@
 #include "./filtering.hpp"
 #include "./grid.hpp"
 
-#include <pcl/point_cloud.h>
-#include <pcl/point_types.h>
-
 #include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/point_cloud2.hpp>
+#include <geometry_msgs/msg/transform_stamped.hpp>
+#include <nav_msgs/msg/occupancy_grid.hpp>
 
 
 class PerceptionNode : public rclcpp::Node {
@@ -16,8 +16,8 @@ public:
 
 
 protected:
-	void scan_cb(const sensor_msgs::msg::PointCloud2::SharedPtr scan);
-	void trfm_cb(const geometry_msgs::msg::TransformStamped::SharedPtr trfm);
+	void scan_cb(const sensor_msgs::msg::PointCloud2::ConstSharedPtr& scan);
+	void trfm_cb(const geometry_msgs::msg::TransformStamped::ConstSharedPtr& trfm);
 
 	void process();
 

@@ -35,7 +35,7 @@ endif()
 
 # Default CXX version
 if(NOT sickperception_CXX_STANDARD)
-	set(sickperception_CXX_STANDARD ${CMAKE_CXX_STANDARD})
+	set(sickperception_CXX_STANDARD 20)
 endif()
 
 
