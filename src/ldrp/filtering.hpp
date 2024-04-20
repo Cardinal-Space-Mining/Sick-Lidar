@@ -3,7 +3,9 @@
 #include <vector>
 #include <limits>
 #include <memory>
+#if __cplusplus > 201703L
 #include <span>
+#endif
 
 #include <Eigen/Core>
 
@@ -730,6 +732,7 @@ void pc_filter_distance(
 	}
 }
 
+#if __cplusplus > 201703L
 /** Write an element's bytes to a buffer every 'interlace_rep' number of element spans at an offset of 'interlace_off' in elments spans
  * (an element span = sizeof(ElemT)) */
 template<
@@ -764,3 +767,4 @@ void write_interlaced_selection_bytes(
 		}
 	}
 }
+#endif

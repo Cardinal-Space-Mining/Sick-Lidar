@@ -1,125 +1,219 @@
 cmake_minimum_required(VERSION 3.12)
 project(sick_perception)
 
-# ROS stuff
-# find_package(rosidl_default_generators REQUIRED)	# if we use all standard messages then we don't need this
-find_package(ament_cmake REQUIRED)
-find_package(rclcpp REQUIRED)
-find_package(std_msgs REQUIRED)
-find_package(sensor_msgs REQUIRED)
-find_package(geometry_msgs REQUIRED)
-find_package(nav_msgs REQUIRED)
-find_package(pcl_conversions REQUIRED)
-find_package(pcl_ros REQUIRED)
-# find_package(tf2_msgs REQUIRED)
-
-# Standard deps
-find_package(PCL REQUIRED COMPONENTS common filters, octree)
-find_package(Eigen3 REQUIRED)	# not explicitly needed
-
-# Not sure how install paths work with Colcon :|
-# if(${CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT})	# if an install prefix is defined by not the default, that overrides our default >>
-# 	set(CMAKE_INSTALL_PREFIX "${PROJECT_SOURCE_DIR}/install" CACHE PATH "" FORCE)
-# 	message(STATUS "[SICK PERCEPTION]: Install prefix overridden: ${CMAKE_INSTALL_PREFIX}")
-# else()
-# 	message(STATUS "[SICK PERCEPTION]: Using predefined install prefix: ${CMAKE_INSTALL_PREFIX}")
-# endif()
-
-# Default build type
-if(NOT MSVC)
-	if(NOT CMAKE_BUILD_TYPE)
-		set(CMAKE_BUILD_TYPE Release)
-		message(STATUS "[SICK PERCEPTION]: Release build type applied by default for non-MSVC build system")
-	endif()
+if(NOT sickperception_VSCODE_CONFIGURE)
+	set(sickperception_VSCODE_CONFIGURE OFF)
 endif()
+if(${sickperception_VSCODE_CONFIGURE})	# this is just a dummy configuration so vscode can figure out all the dependencies
+
+	message(STATUS "[SICK PERCEPTION]: Configuring for vscode.")
+
+	find_package(ament_cmake REQUIRED)
+	find_package(rclcpp REQUIRED)
+	find_package(std_msgs REQUIRED)
+	find_package(sensor_msgs REQUIRED)
+	find_package(geometry_msgs REQUIRED)
+	find_package(nav_msgs REQUIRED)
+	find_package(pcl_conversions REQUIRED)
+
+	find_package(PCL REQUIRED COMPONENTS common filters, octree)
+	find_package(Eigen3 REQUIRED)	# not explicitly needed
+
+	if(NOT MSVC)
+		if(NOT CMAKE_BUILD_TYPE)
+			set(CMAKE_BUILD_TYPE Release)
+			message(STATUS "[SICK PERCEPTION]: Release build type applied by default for non-MSVC build system")
+		endif()
+	endif()
+
+	if(NOT sickperception_CXX_STANDARD)
+		set(sickperception_CXX_STANDARD 17)
+	endif()
+
+	option(sickperception_USE_WPILIB_TESTING "Configure WPILib inclusion and enabling of internal debug features" OFF)
+	option(LDRP_ENABLE_LOGGING "Enable/disable internal logging altogether" ON)
+	option(LDRP_ENABLE_DEBUG_LOGGING "Enable/disable DEBUG LEVEL internal logging" ON)
+	option(LDRP_ENABLE_SAFETY_CHECKS "Enable/disable additional safety checks" ON)
+	option(LDRP_USE_UESIM_NT_INTERFACE "Enable/disable unreal engine simulation as point source (overrides ROS topic source)" OFF)
+	option(LDRP_ENABLE_TUNING "Enable live tuning via ROS topics and/or networktables" ON)
+	option(LDRP_ENABLE_PROFILING "Enable pipeline profiling data via ROS topics and/or networktables" OFF)
+
+	if(${sickperception_USE_WPILIB_TESTING})
+		message(STATUS "[SICK PERCEPTION]: WPILib support is currently disabled")
+	else()
+	endif()
+
+	if(${LDRP_ENABLE_LOGGING})
+		list(APPEND ldrp_defines -DLDRP_ENABLE_LOGGING=true)
+	else()
+		list(APPEND ldrp_defines -DLDRP_ENABLE_LOGGING=false)
+	endif()
+	if(${LDRP_ENABLE_DEBUG_LOGGING})
+		list(APPEND ldrp_defines -DLDRP_DEBUG_LOGGING=true)
+	else()
+		list(APPEND ldrp_defines -DLDRP_DEBUG_LOGGING=false)
+	endif()
+	if(${LDRP_ENABLE_SAFETY_CHECKS})
+		list(APPEND ldrp_defines -DLDRP_SAFETY_CHECKS=true)
+	else()
+		list(APPEND ldrp_defines -DLDRP_SAFETY_CHECKS=false)
+	endif()
+	if(${LDRP_USE_UESIM_NT_INTERFACE})
+		list(APPEND ldrp_defines -DLDRP_USE_UESIM=true)
+	else()
+		list(APPEND ldrp_defines -DLDRP_USE_UESIM=false)
+	endif()
+	if(${LDRP_ENABLE_TUNING})
+		list(APPEND ldrp_defines -DLDRP_ENABLE_TUNING=true)
+	else()
+		list(APPEND ldrp_defines -DLDRP_ENABLE_TUNING=false)
+	endif()
+	if(${LDRP_ENABLE_PROFILING})
+		list(APPEND ldrp_defines -DLDRP_ENABLE_PROFILING=true)
+	else()
+		list(APPEND ldrp_defines -DLDRP_ENABLE_PROFILING=false)
+	endif()
+
+	set(CMAKE_CXX_STANDARD ${sickperception_CXX_STANDARD})
+
+	set(ldrp_src "${CMAKE_CURRENT_LIST_DIR}/src")
+	list(APPEND ldrp_sources "${ldrp_src}/main.cpp" "${ldrp_src}/ldrp/perception.cpp")
+	list(APPEND ldrp_includedirs)
+
+	add_executable(ldrp_node ${ldrp_sources})
+
+	target_include_directories(ldrp_node
+		PRIVATE ${PCL_INCLUDE_DIRS}
+		PRIVATE ${ldrp_includedirs})
+	target_link_directories(ldrp_node
+		PRIVATE ${PCL_LIBRARY_DIRS})
+	target_link_libraries(ldrp_node
+		${PCL_LIBRARIES})	# PRIVATE here causes conflicts with ament_target_dependencies
+	target_compile_definitions(ldrp_node
+		PRIVATE ${ldrp_defines}
+		PRIVATE ${PCL_DEFINITIONS})
+
+else()
+	# ROS stuff
+	# find_package(rosidl_default_generators REQUIRED)	# if we use all standard messages then we don't need this
+	find_package(ament_cmake REQUIRED)
+	find_package(rclcpp REQUIRED)
+	find_package(std_msgs REQUIRED)
+	find_package(sensor_msgs REQUIRED)
+	find_package(geometry_msgs REQUIRED)
+	find_package(nav_msgs REQUIRED)
+	find_package(pcl_conversions REQUIRED)
+	find_package(pcl_ros REQUIRED)
+	# find_package(tf2_msgs REQUIRED)
+
+	# Standard deps
+	find_package(PCL REQUIRED COMPONENTS common filters, octree)
+	find_package(Eigen3 REQUIRED)	# not explicitly needed
+
+	# Not sure how install paths work with Colcon :|
+	# if(${CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT})	# if an install prefix is defined by not the default, that overrides our default >>
+	# 	set(CMAKE_INSTALL_PREFIX "${PROJECT_SOURCE_DIR}/install" CACHE PATH "" FORCE)
+	# 	message(STATUS "[SICK PERCEPTION]: Install prefix overridden: ${CMAKE_INSTALL_PREFIX}")
+	# else()
+	# 	message(STATUS "[SICK PERCEPTION]: Using predefined install prefix: ${CMAKE_INSTALL_PREFIX}")
+	# endif()
+
+	# Default build type
+	if(NOT MSVC)
+		if(NOT CMAKE_BUILD_TYPE)
+			set(CMAKE_BUILD_TYPE Release)
+			message(STATUS "[SICK PERCEPTION]: Release build type applied by default for non-MSVC build system")
+		endif()
+	endif()
 
 # Default CXX version
 if(NOT sickperception_CXX_STANDARD)
-	set(sickperception_CXX_STANDARD 20)
+	set(sickperception_CXX_STANDARD 17)
 endif()
 
 
-# Project
-option(sickperception_USE_WPILIB_TESTING "Configure WPILib inclusion and enabling of internal debug features" OFF)
-option(LDRP_ENABLE_LOGGING "Enable/disable internal logging altogether" ON)
-option(LDRP_ENABLE_DEBUG_LOGGING "Enable/disable DEBUG LEVEL internal logging" ON)
-option(LDRP_ENABLE_SAFETY_CHECKS "Enable/disable additional safety checks" ON)
-option(LDRP_USE_UESIM_NT_INTERFACE "Enable/disable unreal engine simulation as point source (overrides ROS topic source)" OFF)
-option(LDRP_ENABLE_TUNING "Enable live tuning via ROS topics and/or networktables" ON)
-option(LDRP_ENABLE_PROFILING "Enable pipeline profiling data via ROS topics and/or networktables" OFF)
+	# Project
+	option(sickperception_USE_WPILIB_TESTING "Configure WPILib inclusion and enabling of internal debug features" OFF)
+	option(LDRP_ENABLE_LOGGING "Enable/disable internal logging altogether" ON)
+	option(LDRP_ENABLE_DEBUG_LOGGING "Enable/disable DEBUG LEVEL internal logging" ON)
+	option(LDRP_ENABLE_SAFETY_CHECKS "Enable/disable additional safety checks" ON)
+	option(LDRP_USE_UESIM_NT_INTERFACE "Enable/disable unreal engine simulation as point source (overrides ROS topic source)" OFF)
+	option(LDRP_ENABLE_TUNING "Enable live tuning via ROS topics and/or networktables" ON)
+	option(LDRP_ENABLE_PROFILING "Enable pipeline profiling data via ROS topics and/or networktables" OFF)
 
-if(${sickperception_USE_WPILIB_TESTING})
-	message(STATUS "[SICK PERCEPTION]: WPILib support is currently disabled")
-else()
+	if(${sickperception_USE_WPILIB_TESTING})
+		message(STATUS "[SICK PERCEPTION]: WPILib support is currently disabled")
+	else()
+	endif()
+	# message(STATUS	# debug all the configured options
+	# 	"[SICK PERCEPTION]:\n"
+	# 	"this is a multiline message test\n"
+	# 	"third line!?"
+	# )
+
+	if(${LDRP_ENABLE_LOGGING})
+		list(APPEND ldrp_defines -DLDRP_ENABLE_LOGGING=true)
+	else()
+		list(APPEND ldrp_defines -DLDRP_ENABLE_LOGGING=false)
+	endif()
+	if(${LDRP_ENABLE_DEBUG_LOGGING})
+		list(APPEND ldrp_defines -DLDRP_DEBUG_LOGGING=true)
+	else()
+		list(APPEND ldrp_defines -DLDRP_DEBUG_LOGGING=false)
+	endif()
+	if(${LDRP_ENABLE_SAFETY_CHECKS})
+		list(APPEND ldrp_defines -DLDRP_SAFETY_CHECKS=true)
+	else()
+		list(APPEND ldrp_defines -DLDRP_SAFETY_CHECKS=false)
+	endif()
+	if(${LDRP_USE_UESIM_NT_INTERFACE})
+		list(APPEND ldrp_defines -DLDRP_USE_UESIM=true)
+	else()
+		list(APPEND ldrp_defines -DLDRP_USE_UESIM=false)
+	endif()
+	if(${LDRP_ENABLE_TUNING})
+		list(APPEND ldrp_defines -DLDRP_ENABLE_TUNING=true)
+	else()
+		list(APPEND ldrp_defines -DLDRP_ENABLE_TUNING=false)
+	endif()
+	if(${LDRP_ENABLE_PROFILING})
+		list(APPEND ldrp_defines -DLDRP_ENABLE_PROFILING=true)
+	else()
+		list(APPEND ldrp_defines -DLDRP_ENABLE_PROFILING=false)
+	endif()
+
+
+	set(CMAKE_CXX_STANDARD ${sickperception_CXX_STANDARD})
+
+	set(ldrp_src "${CMAKE_CURRENT_LIST_DIR}/src")
+	list(APPEND ldrp_sources "${ldrp_src}/main.cpp" "${ldrp_src}/ldrp/perception.cpp")
+	list(APPEND ldrp_includedirs)
+
+	add_executable(ldrp_node ${ldrp_sources})
+
+	target_include_directories(ldrp_node
+		PRIVATE ${PCL_INCLUDE_DIRS}
+		PRIVATE ${ldrp_includedirs})
+	target_link_directories(ldrp_node
+		PRIVATE ${PCL_LIBRARY_DIRS})
+	target_link_libraries(ldrp_node
+		${PCL_LIBRARIES})	# PRIVATE here causes conflicts with ament_target_dependencies
+	target_compile_definitions(ldrp_node
+		PRIVATE ${ldrp_defines}
+		PRIVATE ${PCL_DEFINITIONS})
+
+	ament_target_dependencies(ldrp_node
+		"rclcpp"
+		"pcl_conversions"
+		"pcl_ros"
+		"tf2_ros"
+		"nav_msgs"
+		"sensor_msgs"
+		"geometry_msgs")
+	# ament_export_include_directories()
+	# ament_export_dependencies()
+	ament_package()
 endif()
-# message(STATUS	# debug all the configured options
-# 	"[SICK PERCEPTION]:\n"
-# 	"this is a multiline message test\n"
-# 	"third line!?"
-# )
-
-if(${LDRP_ENABLE_LOGGING})
-	list(APPEND ldrp_defines -DLDRP_ENABLE_LOGGING=true)
-else()
-	list(APPEND ldrp_defines -DLDRP_ENABLE_LOGGING=false)
-endif()
-if(${LDRP_ENABLE_DEBUG_LOGGING})
-	list(APPEND ldrp_defines -DLDRP_DEBUG_LOGGING=true)
-else()
-	list(APPEND ldrp_defines -DLDRP_DEBUG_LOGGING=false)
-endif()
-if(${LDRP_ENABLE_SAFETY_CHECKS})
-	list(APPEND ldrp_defines -DLDRP_SAFETY_CHECKS=true)
-else()
-	list(APPEND ldrp_defines -DLDRP_SAFETY_CHECKS=false)
-endif()
-if(${LDRP_USE_UESIM_NT_INTERFACE})
-	list(APPEND ldrp_defines -DLDRP_USE_UESIM=true)
-else()
-	list(APPEND ldrp_defines -DLDRP_USE_UESIM=false)
-endif()
-if(${LDRP_ENABLE_TUNING})
-	list(APPEND ldrp_defines -DLDRP_ENABLE_TUNING=true)
-else()
-	list(APPEND ldrp_defines -DLDRP_ENABLE_TUNING=false)
-endif()
-if(${LDRP_ENABLE_PROFILING})
-	list(APPEND ldrp_defines -DLDRP_ENABLE_PROFILING=true)
-else()
-	list(APPEND ldrp_defines -DLDRP_ENABLE_PROFILING=false)
-endif()
-
-
-set(CMAKE_CXX_STANDARD ${sickperception_CXX_STANDARD})
-
-set(ldrp_src "${CMAKE_CURRENT_LIST_DIR}/src")
-list(APPEND ldrp_sources "${ldrp_src}/main.cpp" "${ldrp_src}/ldrp/perception.cpp")
-list(APPEND ldrp_includedirs)
-
-add_executable(ldrp_node ${ldrp_sources})
-
-target_include_directories(ldrp_node
-	PRIVATE ${PCL_INCLUDE_DIRS}
-	PRIVATE ${ldrp_includedirs})
-target_link_directories(ldrp_node
-	PRIVATE ${PCL_LIBRARY_DIRS})
-target_link_libraries(ldrp_node
-	${PCL_LIBRARIES})	# PRIVATE here causes conflicts with ament_target_dependencies
-target_compile_definitions(ldrp_node
-	PRIVATE ${ldrp_defines}
-	PRIVATE ${PCL_DEFINITIONS})
-
-ament_target_dependencies(ldrp_node
-	"rclcpp"
-	"pcl_conversions"
-	"pcl_ros"
-	"tf2_ros"
-	"nav_msgs"
-	"sensor_msgs"
-	"geometry_msgs")
-# ament_export_include_directories()
-# ament_export_dependencies()
-ament_package()
 
 
 
