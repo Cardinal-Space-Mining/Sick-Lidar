@@ -9,14 +9,21 @@ find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
-find_package(pcl_conversions REQUIRED)	# check what this and the next dep do differently
-find_package(pcl_ros REQUIRED)	# I don't think we need this but we might
+find_package(pcl_conversions REQUIRED)
+find_package(pcl_ros REQUIRED)
 # find_package(tf2_msgs REQUIRED)
 
 # Standard deps
 find_package(PCL REQUIRED COMPONENTS common filters, octree)
 find_package(Eigen3 REQUIRED)	# not explicitly needed
 
+# Not sure how install paths work with Colcon :|
+# if(${CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT})	# if an install prefix is defined by not the default, that overrides our default >>
+# 	set(CMAKE_INSTALL_PREFIX "${PROJECT_SOURCE_DIR}/install" CACHE PATH "" FORCE)
+# 	message(STATUS "[SICK PERCEPTION]: Install prefix overridden: ${CMAKE_INSTALL_PREFIX}")
+# else()
+# 	message(STATUS "[SICK PERCEPTION]: Using predefined install prefix: ${CMAKE_INSTALL_PREFIX}")
+# endif()
 
 # Default build type
 if(NOT MSVC)
@@ -33,6 +40,7 @@ endif()
 
 
 # Project
+option(sickperception_USE_WPILIB_TESTING "Configure WPILib inclusion and enabling of internal debug features" OFF)
 option(LDRP_ENABLE_LOGGING "Enable/disable internal logging altogether" ON)
 option(LDRP_ENABLE_DEBUG_LOGGING "Enable/disable DEBUG LEVEL internal logging" ON)
 option(LDRP_ENABLE_SAFETY_CHECKS "Enable/disable additional safety checks" ON)
@@ -40,47 +48,82 @@ option(LDRP_USE_UESIM_NT_INTERFACE "Enable/disable unreal engine simulation as p
 option(LDRP_ENABLE_TUNING "Enable live tuning via ROS topics and/or networktables" ON)
 option(LDRP_ENABLE_PROFILING "Enable pipeline profiling data via ROS topics and/or networktables" OFF)
 
-if(${LDRP_ENABLE_LOGGING})
-	list(APPEND _LDRP_DEFINES -DLDRP_ENABLE_LOGGING=true)
+if(${sickperception_USE_WPILIB_TESTING})
+	message(STATUS "[SICK PERCEPTION]: WPILib support is currently disabled")
 else()
-	list(APPEND _LDRP_DEFINES -DLDRP_ENABLE_LOGGING=false)
+endif()
+# message(STATUS	# debug all the configured options
+# 	"[SICK PERCEPTION]:\n"
+# 	"this is a multiline message test\n"
+# 	"third line!?"
+# )
+
+if(${LDRP_ENABLE_LOGGING})
+	list(APPEND ldrp_defines -DLDRP_ENABLE_LOGGING=true)
+else()
+	list(APPEND ldrp_defines -DLDRP_ENABLE_LOGGING=false)
 endif()
 if(${LDRP_ENABLE_DEBUG_LOGGING})
-	list(APPEND _LDRP_DEFINES -DLDRP_DEBUG_LOGGING=true)
+	list(APPEND ldrp_defines -DLDRP_DEBUG_LOGGING=true)
 else()
-	list(APPEND _LDRP_DEFINES -DLDRP_DEBUG_LOGGING=false)
+	list(APPEND ldrp_defines -DLDRP_DEBUG_LOGGING=false)
 endif()
 if(${LDRP_ENABLE_SAFETY_CHECKS})
-	list(APPEND _LDRP_DEFINES -DLDRP_SAFETY_CHECKS=true)
+	list(APPEND ldrp_defines -DLDRP_SAFETY_CHECKS=true)
 else()
-	list(APPEND _LDRP_DEFINES -DLDRP_SAFETY_CHECKS=false)
+	list(APPEND ldrp_defines -DLDRP_SAFETY_CHECKS=false)
 endif()
 if(${LDRP_USE_UESIM_NT_INTERFACE})
-	list(APPEND _LDRP_DEFINES -DLDRP_USE_SIM_MODE=true)
+	list(APPEND ldrp_defines -DLDRP_USE_UESIM=true)
 else()
-	list(APPEND _LDRP_DEFINES -DLDRP_USE_SIM_MODE=false)
+	list(APPEND ldrp_defines -DLDRP_USE_UESIM=false)
 endif()
 if(${LDRP_ENABLE_TUNING})
-	list(APPEND _LDRP_DEFINES -DLDRP_ENABLE_NT_TUNING=true)
+	list(APPEND ldrp_defines -DLDRP_ENABLE_TUNING=true)
 else()
-	list(APPEND _LDRP_DEFINES -DLDRP_ENABLE_NT_TUNING=false)
+	list(APPEND ldrp_defines -DLDRP_ENABLE_TUNING=false)
 endif()
 if(${LDRP_ENABLE_PROFILING})
-	list(APPEND _LDRP_DEFINES -DLDRP_ENABLE_NT_PROFILING=true)
+	list(APPEND ldrp_defines -DLDRP_ENABLE_PROFILING=true)
 else()
-	list(APPEND _LDRP_DEFINES -DLDRP_ENABLE_NT_PROFILING=false)
+	list(APPEND ldrp_defines -DLDRP_ENABLE_PROFILING=false)
 endif()
+
 
 set(CMAKE_CXX_STANDARD ${sickperception_CXX_STANDARD})
 
 
+list(APPEND ldrp_sources)
+list(APPEND ldrp_includedirs)
 
 add_executable(ldrp_node ${ldrp_sources})
-target_include_directories(ldrp_node PRIVATE ${PCL_INCLUDE_DIRS})
-target_link_directories(ldrp_node PRIVATE ${PCL_LIBRARY_DIRS})
-target_link_libraries()
+
+target_include_directories(ldrp_node
+	PRIVATE ${PCL_INCLUDE_DIRS}
+	PRIVATE ${ldrp_includedirs})
+target_link_directories(ldrp_node
+	PRIVATE ${PCL_LIBRARY_DIRS})
+target_link_libraries(ldrp_node
+	${PCL_LIBRARIES})	# PRIVATE here causes conflicts with ament_target_dependencies
+target_compile_definitions(ldrp_node
+	PRIVATE ${ldrp_defines}
+	PRIVATE ${PCL_DEFINITIONS})
+
+ament_target_dependencies(ldrp_node
+	"rclcpp"
+	"pcl_conversions"
+	"pcl_ros"
+	"tf2_ros"
+	"nav_msgs"
+	"sensor_msgs"
+	"geometry_msgs")
+# ament_export_include_directories()
+# ament_export_dependencies()
+ament_package()
 
 
+
+# ============================================================================
 
 # # include(CMakeDependentOption)
 # include(GNUInstallDirs)

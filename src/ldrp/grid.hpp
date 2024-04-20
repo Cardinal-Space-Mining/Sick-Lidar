@@ -9,7 +9,7 @@
 #include <Eigen/Core>
 #include <pcl/point_cloud.h>
 
-#include "filtering.hpp"
+#include "./filtering.hpp"
 
 
 /** Generic grid helpers */
