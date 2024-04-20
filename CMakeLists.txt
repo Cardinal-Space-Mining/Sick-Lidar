@@ -92,8 +92,8 @@ endif()
 
 set(CMAKE_CXX_STANDARD ${sickperception_CXX_STANDARD})
 
-
-list(APPEND ldrp_sources)
+set(ldrp_src "${CMAKE_CURRENT_LIST_DIR}/src")
+list(APPEND ldrp_sources "${ldrp_src}/main.cpp" "${ldrp_src}/ldrp/perception.cpp")
 list(APPEND ldrp_includedirs)
 
 add_executable(ldrp_node ${ldrp_sources})
