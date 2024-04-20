@@ -210,6 +210,10 @@ endif()
 		"nav_msgs"
 		"sensor_msgs"
 		"geometry_msgs")
+
+	install(
+		TARGETS ldrp_node
+		DESTINATION lib/${PROJECT_NAME}/)
 	# ament_export_include_directories()
 	# ament_export_dependencies()
 	ament_package()
