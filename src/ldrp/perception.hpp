@@ -45,7 +45,7 @@ protected:
 		double
 			scan_matching_history_range_s = 0.25,
 			map_resolution_cm		= 5.,
-			max_pmf_range_cm		= 250.,
+			pmf_max_range_cm		= 250.,
 			max_z_thresh_cm			= 100.,
 			min_z_thresh_cm			= 25.,
 			voxel_size_cm			= 3.,

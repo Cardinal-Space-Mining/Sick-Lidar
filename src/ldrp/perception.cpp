@@ -32,6 +32,29 @@
  * params example: https://docs.ros.org/en/iron/Tutorials/Beginner-Client-Libraries/Using-Parameters-In-A-Class-CPP.html
 */
 
+/** Default macro definitions -- configurable via CMake */
+#ifndef LDRP_ENABLE_LOGGING		// enable/disable all logging output
+  #define LDRP_ENABLE_LOGGING		true
+#endif
+#ifndef LDRP_DEBUG_LOGGING		// enable/disable debug level logging
+  #define LDRP_DEBUG_LOGGING		false
+#endif
+#ifndef LDRP_SAFETY_CHECKS		// enable/disable additional safety checking (ex. bound checking)
+  #define LDRP_SAFETY_CHECKS		true
+#endif
+#ifndef LDRP_USE_UESIM			// whether or not WPILib is being compiled into the library - for build system internal use only
+  #define LDRP_USE_UESIM			false
+#endif
+#ifndef LDRP_USE_UESIM			// enable/disable using simulation as the source of points, and set which simulation source to use (1 = internal, 2 = UE simulator)
+  #define LDRP_USE_UESIM			false
+#endif
+#ifndef LDRP_ENABLE_TUNING		// enable/disable live tuning using networktables (requires WPILib)
+  #define LDRP_ENABLE_TUNING		false
+#endif
+#ifndef LDRP_ENABLE_PROFILING	// enable/disable live and logged filter pipeline profiling over networktables
+  #define LDRP_ENABLE_PROFILING		false
+#endif
+
 #include "./perception.hpp"
 #include "./filtering.hpp"
 
@@ -69,7 +92,7 @@ namespace util {
 
 
 PerceptionNode::PerceptionNode() : rclcpp::Node("perception_node") {
-	RCLCPP_INFO(this->get_logger(), "Perception Node Initialization!\n");
+	RCLCPP_INFO(this->get_logger(), "Perception Node Initialization!");
 	// setup subs/pubs
 	this->scan_sub = this->create_subscription<sensor_msgs::msg::PointCloud2>("input_scan", 1,
 		std::bind(&PerceptionNode::scan_cb, this, std::placeholders::_1));
@@ -77,30 +100,62 @@ PerceptionNode::PerceptionNode() : rclcpp::Node("perception_node") {
 		std::bind(&PerceptionNode::trfm_cb, this, std::placeholders::_1));
 	this->grid_pub = this->create_publisher<nav_msgs::msg::OccupancyGrid>("obstacle_grid", 1);
 
-//get parameters
-	util::declare_param(this, "voxel_size_cm", this->_config.voxel_size_cm, this->_config.voxel_size_cm);
+	//get parameters
 	util::declare_param(this, "map_resolution_cm", this->_config.map_resolution_cm, this->_config.map_resolution_cm);
-	util::declare_param(this, "max_pmf_range_cm", this->_config.max_pmf_range_cm, this->_config.max_pmf_range_cm);
+	util::declare_param(this, "voxel_size_cm", this->_config.voxel_size_cm, this->_config.voxel_size_cm);
 	util::declare_param(this, "max_z_thresh_cm", this->_config.max_z_thresh_cm, this->_config.max_z_thresh_cm);
 	util::declare_param(this, "min_z_thresh_cm", this->_config.min_z_thresh_cm, this->_config.min_z_thresh_cm);
+	util::declare_param(this, "pmf_max_range_cm", this->_config.pmf_max_range_cm, this->_config.pmf_max_range_cm);
 	util::declare_param(this, "pmf_window_base", this->_config.pmf_window_base, this->_config.pmf_window_base);
 	util::declare_param(this, "pmf_max_window_size_cm", this->_config.pmf_max_window_size_cm, this->_config.pmf_max_window_size_cm);
 	util::declare_param(this, "pmf_cell_size_cm", this->_config.pmf_cell_size_cm, this->_config.pmf_cell_size_cm);
 	util::declare_param(this, "pmf_init_distance_cm", this->_config.pmf_init_distance_cm, this->_config.pmf_init_distance_cm);
 	util::declare_param(this, "pmf_max_distance_cm", this->_config.pmf_max_distance_cm, this->_config.pmf_max_distance_cm);
 	util::declare_param(this, "pmf_slope", this->_config.pmf_slope, this->_config.pmf_slope);
-	util::declare_param(this, "scan_matching_history_range_s", this->_config.scan_matching_history_range_s, this->_config.scan_matching_history_range_s);
+	util::declare_param(this, "scan_matching_history_s", this->_config.scan_matching_history_range_s, this->_config.scan_matching_history_range_s);
 	// util::declare_param(this, "TODO", this->_config.scan_matching_skip_invalid, this->_config.scan_matching_skip_invalid);
 
-	this->accumulator.reset(1.f);	// use params
+	// log params
+	RCLCPP_INFO(this->get_logger(),
+		"\n--------- Configured Params ---------"
+		"\nMap resolution (cm): %f"
+		"\nVoxel size (cm): %f"
+		"\nMax Z threshold (cm): %f"
+		"\nMin Z threshold (cm): %f"
+		"\nPMF range cutoff (cm): %f"
+		"\nPMF window base: %f"
+		"\nPMF max window size (cm): %f"
+		"\nPMF cell size (cm): %f"
+		"\nPMF init distance (cm): %f"
+		"\nPMF max distance (cm): %f"
+		"\nPMF slope: %f"
+		"\nScan matching history (s): %f"
+		"\n-------------------------------------",
+		this->_config.map_resolution_cm,
+		this->_config.voxel_size_cm,
+		this->_config.max_z_thresh_cm,
+		this->_config.min_z_thresh_cm,
+		this->_config.pmf_max_range_cm,
+		this->_config.pmf_window_base,
+		this->_config.pmf_max_window_size_cm,
+		this->_config.pmf_cell_size_cm,
+		this->_config.pmf_init_distance_cm,
+		this->_config.pmf_max_distance_cm,
+		this->_config.pmf_slope,
+		this->_config.scan_matching_history_range_s
+	);
+
+	this->accumulator.reset(this->_config.map_resolution_cm * 1e-2f);	// use params
 
 }
 
 PerceptionNode::~PerceptionNode() {}
 
 
+
 void PerceptionNode::scan_cb(const sensor_msgs::msg::PointCloud2::ConstSharedPtr& scan) {
-	RCLCPP_INFO(this->get_logger(), "Scan callback called!\n");
+
+	RCLCPP_INFO(this->get_logger(), "Scan callback called!");
 
 	pcl::PointCloud<pcl::PointXYZ>::Ptr point_cloud = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
 	pcl::fromROSMsg(*scan, *point_cloud);
@@ -109,11 +164,18 @@ void PerceptionNode::scan_cb(const sensor_msgs::msg::PointCloud2::ConstSharedPtr
 	this->scan_sampler.insert( ts, point_cloud );
 	this->scan_sampler.updateMin(ts - util::floatSecondsToIntMicros(this->_config.scan_matching_history_range_s));
 
+	RCLCPP_INFO(this->get_logger(),
+		"\nScan sample timestamp (ms): %ld"
+		"\nTotal scan samples: %ld",
+		ts,
+		this->scan_sampler.getSamples().size()
+	);
+
 }
 
 
 void PerceptionNode::trfm_cb(const geometry_msgs::msg::TransformStamped::ConstSharedPtr& trfm) {
-	RCLCPP_INFO(this->get_logger(), "Transform callback called!\n");
+	RCLCPP_INFO(this->get_logger(), "Transform callback called!");
 
 	const int64_t trfm_target_ts = util::constructTimestampMicros<uint32_t>(trfm->header.stamp.sec, trfm->header.stamp.nanosec);
 	const typename decltype(this->scan_sampler)::ElemT* sample = this->scan_sampler.sampleTimestamped(trfm_target_ts);
@@ -129,8 +191,20 @@ void PerceptionNode::trfm_cb(const geometry_msgs::msg::TransformStamped::ConstSh
 
 	// valid case to use transform with scan
 	else if(ts_diff < this->_config.scan_matching_history_range_s) {
+
 		pcl::PointCloud<pcl::PointXYZ>::Ptr scan = sample->second;
 		this->scan_sampler.updateMin(sample->first + 1);	// don't use 'sample' after here since it is invalid
+
+		RCLCPP_INFO(this->get_logger(),
+			"\nTransform timestamp (ms): %ld"
+			"\nSampled timestamp (ms): %ld"
+			"\nTimestamp difference (ms): %ld"
+			"\nTotal scan samples: %ld",
+			trfm_target_ts,
+			sample->first,
+			ts_diff,
+			this->scan_sampler.getSamples().size()
+		);
 
 		const Eigen::Quaternionf quat{
 			static_cast<float>(trfm->transform.rotation.w),
@@ -146,10 +220,11 @@ void PerceptionNode::trfm_cb(const geometry_msgs::msg::TransformStamped::ConstSh
 
 		pcl::transformPointCloud(
 			*scan, *scan,	// :O
-			pos * quat // be very careful with the order of these uWu
+			(pos * quat) // be very careful with the order of these uWu
 		);
 
 		this->process_and_export(*scan, *reinterpret_cast<const Eigen::Vector3f*>(&pos));
+
 	}
 
 }
@@ -158,7 +233,7 @@ void PerceptionNode::trfm_cb(const geometry_msgs::msg::TransformStamped::ConstSh
 
 void PerceptionNode::process(const pcl::PointCloud<pcl::PointXYZ>& cloud, const Eigen::Vector3f& origin) {
 
-	RCLCPP_INFO(this->get_logger(), "Processing...\n");
+	RCLCPP_INFO(this->get_logger(), "Processing...");
 
 	static const pcl::Indices DEFAULT_NO_SELECTION = pcl::Indices{};
 
@@ -175,10 +250,10 @@ void PerceptionNode::process(const pcl::PointCloud<pcl::PointXYZ>& cloud, const 
 
 #if LDRP_ENABLE_TUNING
 	float
-		max_pmf_range_m			= (float) this->get_parameter("max_pmf_range_cm").as_double() * 1e-2f,
+		voxel_size_m			= (float) this->get_parameter("voxel_size_cm").as_double() * 1e-2f,
 		max_z_thresh_m			= (float) this->get_parameter("max_z_thresh_cm").as_double() * 1e-2f,
 		min_z_thresh_m			= (float) this->get_parameter("min_z_thresh_cm").as_double() * 1e-2f,
-		voxel_size_m			= (float) this->get_parameter("voxel_size_cm").as_double() * 1e-2f,
+		max_pmf_range_m			= (float) this->get_parameter("pmf_max_range_cm").as_double() * 1e-2f,
 		pmf_window_base			= (float) this->get_parameter("pmf_window_base").as_double(),
 		pmf_max_window_size_m	= (float) this->get_parameter("pmf_max_window_size_cm").as_double() * 1e-2f,
 		pmf_cell_size_m			= (float) this->get_parameter("pmf_cell_size_cm").as_double() * 1e-2f,
@@ -188,10 +263,10 @@ void PerceptionNode::process(const pcl::PointCloud<pcl::PointXYZ>& cloud, const 
 	;
 #else
 	float
-		max_pmf_range_m			= (float) this->_config.max_pmf_range_cm * 1e-2f,
+		voxel_size_m			= (float) this->_config.voxel_size_cm * 1e-2f,
 		max_z_thresh_m			= (float) this->_config.max_z_thresh_cm * 1e-2f,
 		min_z_thresh_m			= (float) this->_config.min_z_thresh_cm * 1e-2f,
-		voxel_size_m			= (float) this->_config.voxel_size_cm * 1e-2f,
+		max_pmf_range_m			= (float) this->_config.pmf_max_range_cm * 1e-2f,
 		pmf_window_base			= (float) this->_config.pmf_window_base,
 		pmf_max_window_size_m	= (float) this->_config.pmf_max_window_size_cm * 1e-2f,
 		pmf_cell_size_m			= (float) this->_config.pmf_cell_size_cm * 1e-2f,
