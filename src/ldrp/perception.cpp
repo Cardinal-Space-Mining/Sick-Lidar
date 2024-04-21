@@ -59,6 +59,7 @@
 #include "./filtering.hpp"
 
 #include <limits>
+#include <memory>
 #include <type_traits>
 
 #include <pcl/common/transforms.h>
@@ -94,11 +95,11 @@ namespace util {
 PerceptionNode::PerceptionNode() : rclcpp::Node("perception_node") {
 	RCLCPP_INFO(this->get_logger(), "Perception Node Initialization!");
 	// setup subs/pubs
-	this->scan_sub = this->create_subscription<sensor_msgs::msg::PointCloud2>("input_scan", 1,
+	this->scan_sub = this->create_subscription<sensor_msgs::msg::PointCloud2>("/cloud_all_fields_fullframe", 1,
 		std::bind(&PerceptionNode::scan_cb, this, std::placeholders::_1));
-	this->trfm_sub = this->create_subscription<geometry_msgs::msg::TransformStamped>("input_trfm", 1,
-		std::bind(&PerceptionNode::trfm_cb, this, std::placeholders::_1));
-	this->grid_pub = this->create_publisher<nav_msgs::msg::OccupancyGrid>("obstacle_grid", 1);
+	this->pose_sub = this->create_subscription<geometry_msgs::msg::PoseStamped>("/undecided_yet", 1,
+		std::bind(&PerceptionNode::pose_cb, this, std::placeholders::_1));
+	this->grid_pub = this->create_publisher<nav_msgs::msg::OccupancyGrid>("/obstacle_grid", 1);
 
 	//get parameters
 	util::declare_param(this, "map_resolution_cm", this->_config.map_resolution_cm, this->_config.map_resolution_cm);
@@ -174,10 +175,10 @@ void PerceptionNode::scan_cb(const sensor_msgs::msg::PointCloud2::ConstSharedPtr
 }
 
 
-void PerceptionNode::trfm_cb(const geometry_msgs::msg::TransformStamped::ConstSharedPtr& trfm) {
+void PerceptionNode::pose_cb(const geometry_msgs::msg::PoseStamped::ConstSharedPtr& pose) {
 	RCLCPP_INFO(this->get_logger(), "Transform callback called!");
 
-	const int64_t trfm_target_ts = util::constructTimestampMicros<uint32_t>(trfm->header.stamp.sec, trfm->header.stamp.nanosec);
+	const int64_t trfm_target_ts = util::constructTimestampMicros<uint32_t>(pose->header.stamp.sec, pose->header.stamp.nanosec);
 	const typename decltype(this->scan_sampler)::ElemT* sample = this->scan_sampler.sampleTimestamped(trfm_target_ts);
 	
 	// if scan doesn't exist
@@ -207,15 +208,15 @@ void PerceptionNode::trfm_cb(const geometry_msgs::msg::TransformStamped::ConstSh
 		);
 
 		const Eigen::Quaternionf quat{
-			static_cast<float>(trfm->transform.rotation.w),
-			static_cast<float>(trfm->transform.rotation.x),
-			static_cast<float>(trfm->transform.rotation.y),
-			static_cast<float>(trfm->transform.rotation.z)
+			static_cast<float>(pose->pose.orientation.w),
+			static_cast<float>(pose->pose.orientation.x),
+			static_cast<float>(pose->pose.orientation.y),
+			static_cast<float>(pose->pose.orientation.z)
 		};
 		const Eigen::Translation3f pos{
-			static_cast<float>(trfm->transform.translation.x),
-			static_cast<float>(trfm->transform.translation.y),
-			static_cast<float>(trfm->transform.translation.z)
+			static_cast<float>(pose->pose.position.x),
+			static_cast<float>(pose->pose.position.y),
+			static_cast<float>(pose->pose.position.z)
 		};
 
 		pcl::transformPointCloud(
