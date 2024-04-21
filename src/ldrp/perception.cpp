@@ -157,6 +157,7 @@ void PerceptionNode::trfm_cb(const geometry_msgs::msg::TransformStamped::ConstSh
 
 
 void PerceptionNode::process(const pcl::PointCloud<pcl::PointXYZ>& cloud, const Eigen::Vector3f& origin) {
+
 	RCLCPP_INFO(this->get_logger(), "Processing...\n");
 
 	static const pcl::Indices DEFAULT_NO_SELECTION = pcl::Indices{};
@@ -174,15 +175,15 @@ void PerceptionNode::process(const pcl::PointCloud<pcl::PointXYZ>& cloud, const 
 
 #if LDRP_ENABLE_TUNING
 	float
-		max_pmf_range_m			= (float) this->get_parameter("max_pmf_range_m").as_double() * 1e-2f,
-		max_z_thresh_m			= (float) this->get_parameter("max_z_thresh_m").as_double() * 1e-2f,
-		min_z_thresh_m			= (float) this->get_parameter("min_z_thresh_m").as_double() * 1e-2f,
-		voxel_size_m			= (float) this->get_parameter("voxel_size_m").as_double() * 1e-2f,
+		max_pmf_range_m			= (float) this->get_parameter("max_pmf_range_cm").as_double() * 1e-2f,
+		max_z_thresh_m			= (float) this->get_parameter("max_z_thresh_cm").as_double() * 1e-2f,
+		min_z_thresh_m			= (float) this->get_parameter("min_z_thresh_cm").as_double() * 1e-2f,
+		voxel_size_m			= (float) this->get_parameter("voxel_size_cm").as_double() * 1e-2f,
 		pmf_window_base			= (float) this->get_parameter("pmf_window_base").as_double(),
-		pmf_max_window_size_m	= (float) this->get_parameter("pmf_max_window_size_m").as_double() * 1e-2f,
-		pmf_cell_size_m			= (float) this->get_parameter("pmf_cell_size_m").as_double() * 1e-2f,
-		pmf_init_distance_m		= (float) this->get_parameter("pmf_init_distance_m").as_double() * 1e-2f,
-		pmf_max_distance_m		= (float) this->get_parameter("pmf_max_distance_m").as_double() * 1e-2f,
+		pmf_max_window_size_m	= (float) this->get_parameter("pmf_max_window_size_cm").as_double() * 1e-2f,
+		pmf_cell_size_m			= (float) this->get_parameter("pmf_cell_size_cm").as_double() * 1e-2f,
+		pmf_init_distance_m		= (float) this->get_parameter("pmf_init_distance_cm").as_double() * 1e-2f,
+		pmf_max_distance_m		= (float) this->get_parameter("pmf_max_distance_cm").as_double() * 1e-2f,
 		pmf_slope				= (float) this->get_parameter("pmf_slope").as_double()
 	;
 #else

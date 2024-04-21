@@ -179,7 +179,8 @@ public:
 			_min = this->boundingLoc(min.x(), min.y()),	// grid cell locations containing min and max, aligned with current offsets
 			_max = this->boundingLoc(max.x(), max.y());
 
-		if (_min.cwiseLess(_zero).any() || _max.cwiseGreater(this->grid_size).any()) {
+		// if (_min.cwiseLess(_zero).any() || _max.cwiseGreater(this->grid_size).any()) {
+		if( (_min.x() < _zero.x() || _min.y() < _zero.y()) || (_max.x() > this->grid_size.x() || _max.y() > this->grid_size.y()) ) {
 			const Vec2i
 				_low = _min.cwiseMin(_zero),		// new high and low bounds for the map
 				_high = _max.cwiseMax(this->grid_size) + _one,	// need to add an additional row + col since indexing happens in the corner, thus by default the difference between corners will not cover the entire size
