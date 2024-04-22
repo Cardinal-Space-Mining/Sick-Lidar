@@ -18,7 +18,7 @@ TODO (make diagrams!)
 | [direct_lidar_inertial_odometry](https://github.com/vectr-ucla/direct_lidar_inertial_odometry) | The `feature/ros2` branch, unless a ROS1->ROS2 bridge is utilized. | Localization - uses SLAM to produce a location and orientation estimate. |
 
 ## Initialization / Updating
-The project includes submodules for all relevant ROS dependencies (and some vestigial dependencies). These are not required to build the project, but may be utilized as an easy way to pull all required external packages if they need to built and installed. Use the `--recurse-submodules` option when cloning fresh and `git submodule update --init --recursive` for an already cloned project or when changing/updating branches.
+~~The project includes submodules for all relevant ROS dependencies (and some vestigial dependencies). These are not required to build the project, but may be utilized as an easy way to pull all required external packages if they need to built and installed. Use the `--recurse-submodules` option when cloning fresh and `git submodule update --init --recursive` for an already cloned project or when changing/updating branches.~~
 
 ## Build System
 Since the project targets ROS2, it can be built using Colcon (which uses CMake). Dependencies are listed below:

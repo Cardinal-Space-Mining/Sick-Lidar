@@ -1,3 +1,0 @@
-[submodule "submodule-deps/dlio"]
-	path = submodule-deps/dlio
-	url = https://github.com/vectr-ucla/direct_lidar_inertial_odometry
