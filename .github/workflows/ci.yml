@@ -17,40 +17,41 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: echo '::echo::on'
+      - run: echo 'This pipeline is currently disabled.''
 
-      - name: "Get PCL"
-        run: |
-          sudo apt-get update && sudo apt-get install libpcl-dev
-
-      - name: "Checkout"
-        uses: actions/checkout@main
-        with:
-          submodules: recursive
-
-      - name: "Build/Install Stage 1"
-        run: |
-          cmake . -B ./cmake-build -Dsickperception_MULTISTAGE_STEP=0
-          cmake --build ./cmake-build --target install --config Release --parallel $(nproc)
-      
-      - name: "Build/Install Stage 2"
-        run: |
-          cmake . -B ./cmake-build -Dsickperception_MULTISTAGE_STEP=1
-          cmake --build ./cmake-build --target install --config Release --parallel $(nproc)
-      
-      - name: "Inspect Install"
-        run: |
-          cd install
-          ls -l -R
-
-      # - name: "Zip Artifacts"
+      # - name: "Get PCL"
       #   run: |
-      #     sudo apt-get install zip
-      #     zip -r build.zip install
+      #     sudo apt-get update && sudo apt-get install libpcl-dev
 
-      - name: "Upload Artifacts"
-        uses: actions/upload-artifact@main
-        with:
-          name: ci-build
-          path: |
-            ./install
-            ./cmake-build
+      # - name: "Checkout"
+      #   uses: actions/checkout@main
+      #   with:
+      #     submodules: recursive
+
+      # - name: "Build/Install Stage 1"
+      #   run: |
+      #     cmake . -B ./cmake-build -Dsickperception_MULTISTAGE_STEP=0
+      #     cmake --build ./cmake-build --target install --config Release --parallel $(nproc)
+      
+      # - name: "Build/Install Stage 2"
+      #   run: |
+      #     cmake . -B ./cmake-build -Dsickperception_MULTISTAGE_STEP=1
+      #     cmake --build ./cmake-build --target install --config Release --parallel $(nproc)
+      
+      # - name: "Inspect Install"
+      #   run: |
+      #     cd install
+      #     ls -l -R
+
+      # # - name: "Zip Artifacts"
+      # #   run: |
+      # #     sudo apt-get install zip
+      # #     zip -r build.zip install
+
+      # - name: "Upload Artifacts"
+      #   uses: actions/upload-artifact@main
+      #   with:
+      #     name: ci-build
+      #     path: |
+      #       ./install
+      #       ./cmake-build
