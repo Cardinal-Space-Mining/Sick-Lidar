@@ -1,5 +1,31 @@
 #pragma once
 
+/** Default macro definitions -- configurable via CMake */
+#ifndef LDRP_ENABLE_LOGGING		// enable/disable all logging output
+  #define LDRP_ENABLE_LOGGING		true
+#endif
+#ifndef LDRP_DEBUG_LOGGING		// enable/disable debug level logging
+  #define LDRP_DEBUG_LOGGING		false
+#endif
+#ifndef LDRP_SAFETY_CHECKS		// enable/disable additional safety checking (ex. bound checking)
+  #define LDRP_SAFETY_CHECKS		true
+#endif
+#ifndef LDRP_USE_UESIM			// whether or not WPILib is being compiled into the library - for build system internal use only
+  #define LDRP_USE_UESIM			false
+#endif
+#ifndef LDRP_USE_UESIM			// enable/disable using simulation as the source of points, and set which simulation source to use (1 = internal, 2 = UE simulator)
+  #define LDRP_USE_UESIM			false
+#endif
+#ifndef LDRP_ENABLE_TUNING		// enable/disable live tuning using networktables (requires WPILib)
+  #define LDRP_ENABLE_TUNING		false
+#endif
+#ifndef LDRP_ENABLE_PROFILING	// enable/disable live and logged filter pipeline profiling over networktables
+  #define LDRP_ENABLE_PROFILING		false
+#endif
+
+#if !LDRP_SAFETY_CHECKS
+  #define GRID_IMPL_SKIP_BOUND_CHECKING		// disables array bound checking within QRG
+#endif
 #include "./grid.hpp"
 #include "./timestamp_sampler.hpp"
 
@@ -55,6 +81,12 @@ protected:
 			pmf_slope				= 2.;
 
 	} _config;
+
+#if LDRP_ENABLE_PROFILING
+	struct {
+		
+	} _profile;
+#endif
 
 
 };
