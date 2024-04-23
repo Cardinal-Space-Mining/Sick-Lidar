@@ -3,10 +3,12 @@ name: CI
 on:
   push:
     paths:
+      - '.github/workflows/ci.yml'
       - 'src/**'
       - 'CMakeLists.txt'
   pull_request:
     paths:
+      - '.github/workflows/ci.yml'
       - 'src/**'
       - 'CMakeLists.txt'
   workflow_dispatch:
@@ -18,39 +20,51 @@ jobs:
     steps:
       - run: echo '::echo::on'
 
-      - name: "Get PCL"
-        run: |
-          sudo apt-get update && sudo apt-get install libpcl-dev
+      - uses: actions/checkout@main
 
-      - name: "Checkout"
-        uses: actions/checkout@main
+      - uses: ros-tooling/setup-ros@v0.7
         with:
-          submodules: recursive
+          required-ros-distributions: humble
 
-      - name: "Build/Install Stage 1"
-        run: |
-          cmake . -B ./cmake-build -Dsickperception_MULTISTAGE_STEP=0
-          cmake --build ./cmake-build --target install --config Release --parallel $(nproc)
-      
-      - name: "Build/Install Stage 2"
-        run: |
-          cmake . -B ./cmake-build -Dsickperception_MULTISTAGE_STEP=1
-          cmake --build ./cmake-build --target install --config Release --parallel $(nproc)
-      
-      - name: "Inspect Install"
-        run: |
-          cd install
-          ls -l -R
+      - uses: ros-tooling/action-ros-ci@v0.3
+        with:
+          package-name: sick_perception
+          target-ros2-distro: humble
+          colcon-extra-args: --event-handler console_direct+
 
-      # - name: "Zip Artifacts"
+      # - name: "Get PCL"
       #   run: |
-      #     sudo apt-get install zip
-      #     zip -r build.zip install
+      #     sudo apt-get update && sudo apt-get install libpcl-dev
 
-      - name: "Upload Artifacts"
-        uses: actions/upload-artifact@main
-        with:
-          name: ci-build
-          path: |
-            ./install
-            ./cmake-build
+      # - name: "Checkout"
+      #   uses: actions/checkout@main
+      #   with:
+      #     submodules: recursive
+
+      # - name: "Build/Install Stage 1"
+      #   run: |
+      #     cmake . -B ./cmake-build -Dsickperception_MULTISTAGE_STEP=0
+      #     cmake --build ./cmake-build --target install --config Release --parallel $(nproc)
+      
+      # - name: "Build/Install Stage 2"
+      #   run: |
+      #     cmake . -B ./cmake-build -Dsickperception_MULTISTAGE_STEP=1
+      #     cmake --build ./cmake-build --target install --config Release --parallel $(nproc)
+      
+      # - name: "Inspect Install"
+      #   run: |
+      #     cd install
+      #     ls -l -R
+
+      # # - name: "Zip Artifacts"
+      # #   run: |
+      # #     sudo apt-get install zip
+      # #     zip -r build.zip install
+
+      # - name: "Upload Artifacts"
+      #   uses: actions/upload-artifact@main
+      #   with:
+      #     name: ci-build
+      #     path: |
+      #       ./install
+      #       ./cmake-build
