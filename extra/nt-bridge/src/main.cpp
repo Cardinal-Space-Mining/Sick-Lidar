@@ -1,0 +1,154 @@
+#include <functional>
+#include <memory>
+#include <span>
+
+#include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/point_cloud2.hpp>
+#include <geometry_msgs/msg/pose_stamped.hpp>
+#include <nav_msgs/msg/occupancy_grid.hpp>
+
+#include <networktables/NetworkTableInstance.h>
+#include <networktables/NetworkTable.h>
+#include <networktables/FloatArrayTopic.h>
+#include <networktables/RawTopic.h>
+
+
+class NTBridgeNode : public rclcpp::Node {
+public:
+	NTBridgeNode(
+		bool use_nt_client = false,
+		int nt_client_team = -1,
+		const char* nt_client_server = "localhost",
+		unsigned int nt_client_port = 0
+	) : Node("nt_bridge_node") {
+		nt::NetworkTableInstance inst = nt::NetworkTableInstance::GetDefault();
+
+		bool using_client = false;
+		if(use_nt_client) {
+			if(nt_client_team >= 0) {
+				inst.StartClient4("nt_bridge_node");
+				inst.SetServerTeam(
+					nt_client_team,
+					nt_client_port
+				);
+				using_client = true;
+				RCLCPP_INFO(this->get_logger(), "Started NT client using team number: %d", nt_client_team);
+			}
+			if(nt_client_server != nullptr) {
+				inst.StartClient4("nt_bridge_node");
+				inst.SetServer(
+					nt_client_server,
+					nt_client_port
+				);
+				using_client = true;
+				RCLCPP_INFO(this->get_logger(), "Started NT client using server: %s", nt_client_server);
+			}
+		}
+		if(!using_client) {
+			inst.StartServer();
+			RCLCPP_INFO(this->get_logger(), "Started NT server.");
+		}
+
+		this->nt_scan_sub = inst.GetRawTopic("uesim/scan").Subscribe( "PointXYZ_[]", {} );
+		this->nt_pose_sub = inst.GetFloatArrayTopic("uesim/pose").Subscribe( {} );
+
+		inst.AddListener(this->nt_scan_sub, nt::EventFlags::kValueAll, std::bind(&NTBridgeNode::nt_scan_cb, this, std::placeholders::_1));
+		inst.AddListener(this->nt_pose_sub, nt::EventFlags::kValueAll, std::bind(&NTBridgeNode::nt_pose_cb, this, std::placeholders::_1));
+
+		this->scan_pub = this->create_publisher<sensor_msgs::msg::PointCloud2>("/uesim/scan", 1);
+		this->pose_pub = this->create_publisher<geometry_msgs::msg::PoseStamped>("/uesim/pose", 1);
+	}
+	~NTBridgeNode() = default;
+
+protected:
+	void nt_scan_cb(const nt::Event& event) {
+		const nt::Value& val = event.GetValueEventData()->value;
+		if( val.IsRaw() ) {
+			std::span<const uint8_t> data = val.GetRaw();
+			const size_t
+				nelems = data.size() / 16,
+				nbytes = nelems * 16;
+
+			sensor_msgs::msg::PointCloud2 cloud;
+			cloud.data.resize(nbytes);
+			memcpy(cloud.data.data(), data.data(), nbytes);
+
+			cloud.width = nelems;
+			cloud.height = 1;
+			cloud.is_bigendian = false;
+			cloud.point_step = 16;
+			cloud.row_step = nbytes;
+			cloud.is_dense = true;
+			cloud.header.frame_id = "1";
+
+			cloud.fields.resize(3);
+			cloud.fields[0].name = "x";
+			cloud.fields[0].offset = 0;
+			cloud.fields[0].datatype = sensor_msgs::msg::PointField::FLOAT32;
+			cloud.fields[0].count = 1;
+			cloud.fields[1].name = "y";
+			cloud.fields[1].offset = 4;
+			cloud.fields[1].datatype = sensor_msgs::msg::PointField::FLOAT32;
+			cloud.fields[1].count = 1;
+			cloud.fields[2].name = "z";
+			cloud.fields[2].offset = 8;
+			cloud.fields[2].datatype = sensor_msgs::msg::PointField::FLOAT32;
+			cloud.fields[2].count = 1;
+
+			cloud.header.stamp.sec = static_cast<int32_t>( val.time() / 1000000L );
+			cloud.header.stamp.nanosec = static_cast<uint32_t>( val.time() % 1000000L ) * 1000U;
+
+			this->scan_pub->publish(cloud);
+
+			RCLCPP_INFO(this->get_logger(), "Published Scan!");
+		}
+	}
+	void nt_pose_cb(const nt::Event& event) {
+		const nt::Value& val = event.GetValueEventData()->value;
+		if( val.IsFloatArray() ) {
+			std::span<const float> data = val.GetFloatArray();
+
+			if(data.size() >= 7) {
+				geometry_msgs::msg::PoseStamped pose;
+				
+				pose.pose.position.x = static_cast<double>( data[0] );
+				pose.pose.position.y = static_cast<double>( data[1] );
+				pose.pose.position.z = static_cast<double>( data[2] );
+
+				pose.pose.orientation.w = static_cast<double>( data[3] );
+				pose.pose.orientation.x = static_cast<double>( data[4] );
+				pose.pose.orientation.y = static_cast<double>( data[5] );
+				pose.pose.orientation.z = static_cast<double>( data[6] );
+
+				pose.header.stamp.sec = static_cast<int32_t>( val.time() / 1000000L );
+				pose.header.stamp.nanosec = static_cast<uint32_t>( val.time() % 1000000L ) * 1000U;
+
+				this->pose_pub->publish(pose);
+
+				RCLCPP_INFO(this->get_logger(), "Published Pose!");
+			}
+		}
+	}
+
+
+protected:
+	nt::RawSubscriber nt_scan_sub;
+	nt::FloatArraySubscriber nt_pose_sub;
+
+	rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr scan_pub;
+	rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_pub;
+
+	// rclcpp::Subscription<nav_msgs::msg::OccupancyGrid> grid_sub;
+
+};
+
+
+int main(int argc, char** argv) {
+
+	rclcpp::init(argc, argv);
+	rclcpp::spin(std::make_shared<NTBridgeNode>());
+	rclcpp::shutdown();
+
+	return 0;
+
+}

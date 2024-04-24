@@ -35,25 +35,10 @@ public:
 
 	/** Add a new sample to the buffer */
 	inline void insert(TimeT time, const Type& sample)
-		{ this->insert(time, sample); }
+		{ this->_insert(time, Type{ sample }); }
 	/** Add a new sample to the buffer */
-	void insert(TimeT time, Type&& sample) {
-		if(this->samples.size() <= 0 || time > this->samples.back().first) {
-			this->samples.emplace_back(time, std::forward<Type>(sample));
-		} else {
-			auto after = std::upper_bound(this->samples.begin(), this->samples.end(), time, &This_T::t_less__);
-			auto before = after - 1;
-			if(after == this->samples.begin()) {
-				this->samples.insert(after, std::pair{time, std::forward<Type>(sample)});
-			} else {
-				if(before == this->samples.begin() || before->first < time) {
-					this->samples.insert(after, std::pair{time, std::forward<Type>(sample)});
-				} else {
-					before->second = sample;
-				}
-			}
-		}
-	}
+	inline void insert(TimeT time, Type&& sample)
+		{ this->_insert(time, sample); }
 
 	/** Erase all the elements */
 	inline void clear() { this->samples.clear(); }
@@ -82,6 +67,24 @@ public:
 
 
 protected:
+	void _insert(TimeT time, Type&& sample) {
+		if(this->samples.size() <= 0 || time > this->samples.back().first) {
+			this->samples.emplace_back(time, std::forward<Type>(sample));
+		} else {
+			auto after = std::upper_bound(this->samples.begin(), this->samples.end(), time, &This_T::t_less__);
+			auto before = after - 1;
+			if(after == this->samples.begin()) {
+				this->samples.insert(after, std::pair{time, std::forward<Type>(sample)});
+			} else {
+				if(before == this->samples.begin() || before->first < time) {
+					this->samples.insert(after, std::pair{time, std::forward<Type>(sample)});
+				} else {
+					before->second = sample;
+				}
+			}
+		}
+	}
+
 	void enforceBound() {
 		auto last = this->samples.begin();
 		for(; last < this->samples.end() && last->first < this->absolute_bound; last++);

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.12)
-project(nt-bridge)
+project(nt_bridge)
 
 if(NOT MSVC)
 	if(NOT CMAKE_BUILD_TYPE)
@@ -7,6 +7,8 @@ if(NOT MSVC)
 		message(STATUS "[NT BRIDGE]: Release build type applied by default for non-MSVC build system")
 	endif()
 endif()
+
+set(CMAKE_CXX_STANDARD 20)
 
 message(STATUS "[NT BRIDGE]: Configuring protobuf...")
 execute_process(
@@ -52,3 +54,29 @@ set(Protobuf_PROTOC_EXECUTABLE	"${PROJECT_SOURCE_DIR}/protobuf/cmake-install/bin
 list(APPEND CMAKE_LIBRARY_PATH	"${PROJECT_SOURCE_DIR}/protobuf/cmake-install/lib")
 add_subdirectory(allwpilib)
 set(BUILD_SHARED_LIBS ${__BUILD_SHARED_LIBS})
+
+
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
+
+add_executable(nt_bridge_node "src/main.cpp")
+target_link_libraries(nt_bridge_node
+	wpiutil
+	wpinet
+	wpimath
+	ntcore
+)
+
+ament_target_dependencies(nt_bridge_node
+	"rclcpp"
+	"nav_msgs"
+	"sensor_msgs"
+	"geometry_msgs"
+)
+install(
+	TARGETS nt_bridge_node
+	DESTINATION lib/${PROJECT_NAME}/)
+ament_package()
