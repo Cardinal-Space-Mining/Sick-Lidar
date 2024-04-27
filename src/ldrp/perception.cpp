@@ -7,24 +7,33 @@
 *   See the License for the specific language governing permissions and        *
 *   limitations under the License.                                             *
 *                                                                              *
-*                                           ##**#                              *
-*                                         #%%#%%%@                             *
-*                                        %%%#%%@@@@                            *
-*                                         %%*%%%@@@                            *
-*                                          +*%%@@@                             *
-*                                           *%@@@%%%*=+%%%                     *
-*                                       +##++*++++*%@*++#%%%                   *
-*                                    +++#++*+++==*%%@#+++#%%                   *
-*                                 +++*#*++++++++*%%@@%*+*#*+*                  *
-*                               *+*#%%@*+*+++*#%%%%@@@%++++*##                 *
-*                               +++==*%#####*##%%%%%#***++*#%%%                *
-*                      #%%%###*+****=*%%%%%%%#%##****###%%%%%%%%               *
-*                    -----========+*#%%#%%%%%%@@@@%%%%%%%%%%%%%%               *
-*              ---===++++++++**+=--==++++++++*##*++***+++**#%@@@               *
-*           --=+*##%%##%%###%%%*-----===++*#%###*#%%%%%%%%%%@@                 *
-*          ++#%%%%%%%%%%%%%@@@#=--===++*#%%%@@@#*#%@@@@@@@@                    *
-*          *#%@@%%%%%@@@@@@@#=--=-::.....-+#%%@@*#%@@@@@@@                     *
-*          %@@@@@@@@@@@@@@*--=-............::-+@@@@%%@@@@                      *
+*                                ;xxxxxxx:                                     *
+*                               ;$$$$$$$$$       ...::..                       *
+*                               $$$$$$$$$$x   .:::::::::::..                   *
+*                            x$$$$$$$$$$$$$$::::::::::::::::.                  *
+*                        :$$$$$&X;      .xX:::::::::::::.::...                 *
+*                .$$Xx++$$$$+  :::.     :;:   .::::::.  ....  :                *
+*               :$$$$$$$$$  ;:      ;xXXXXXXXx  .::.  .::::. .:.               *
+*              :$$$$$$$$: ;      ;xXXXXXXXXXXXXx: ..::::::  .::.               *
+*             ;$$$$$$$$ ::   :;XXXXXXXXXXXXXXXXXX+ .::::.  .:::                *
+*              X$$$$$X : +XXXXXXXXXXXXXXXXXXXXXXXX; .::  .::::.                *
+*               .$$$$ :xXXXXXXXXXXXXXXXXXXXXXXXXXXX.   .:::::.                 *
+*                X$$X XXXXXXXXXXXXXXXXXXXXXXXXXXXXx:  .::::.                   *
+*                $$$:.XXXXXXXXXXXXXXXXXXXXXXXXXXX  ;; ..:.                     *
+*                $$& :XXXXXXXXXXXXXXXXXXXXXXXX;  +XX; X$$;                     *
+*                $$$::XXXXXXXXXXXXXXXXXXXXXX: :XXXXX; X$$;                     *
+*                X$$X XXXXXXXXXXXXXXXXXXX; .+XXXXXXX; $$$                      *
+*                $$$$ ;XXXXXXXXXXXXXXX+  +XXXXXXXXx+ X$$$+                     *
+*              x$$$$$X ;XXXXXXXXXXX+ :xXXXXXXXX+   .;$$$$$$                    *
+*             +$$$$$$$$ ;XXXXXXx;;+XXXXXXXXX+    : +$$$$$$$$                   *
+*              +$$$$$$$$: xXXXXXXXXXXXXXX+      ; X$$$$$$$$                    *
+*               :$$$$$$$$$. +XXXXXXXXX:      ;: x$$$$$$$$$                     *
+*               ;x$$$$XX$$$$+ .;+X+      :;: :$$$$$xX$$$X                      *
+*              ;;;;;;;;;;X$$$$$$$+      :X$$$$$$&.                             *
+*              ;;;;;;;:;;;;;x$$$$$$$$$$$$$$$$x.                                *
+*              :;;;;;;;;;;;;.  :$$$$$$$$$$X                                    *
+*               .;;;;;;;;:;;    +$$$$$$$$$                                     *
+*                 .;;;;;;.       X$$$$$$$:                                     *
 *                                                                              *
 *******************************************************************************/
 /** FOR REFERENCE
@@ -66,17 +75,49 @@ namespace util {
 		return (static_cast<int64_t>(seconds) * 1000000L) + (static_cast<int64_t>(nanoseconds) / 1000L);
 	}
 
+
+	void _test(rclcpp::Node* node) {
+		pcl::PointCloud<pcl::PointXYZ> _c;
+		sensor_msgs::msg::PointCloud2 _c2;
+		pcl::toROSMsg(_c, _c2);
+		RCLCPP_INFO(node->get_logger(),
+			"\n-------------------------------- TESTING --------------------------------"
+			"\nPointXYZ \"frame_id\": %s"
+			"\nPointCloud2 total fields: %ld"
+			"\nPointCloud2 field #1: { name: %s, offset: %d, datatype: %d, count: %d }"
+			"\nPointCloud2 field #2: { name: %s, offset: %d, datatype: %d, count: %d }"
+			"\nPointCloud2 field #3: { name: %s, offset: %d, datatype: %d, count: %d }"
+			"\n-------------------------------------------------------------------------",
+			_c.header.frame_id.c_str(),
+			_c2.fields.size(),
+			_c2.fields[0].name.c_str(),
+			_c2.fields[0].offset,
+			_c2.fields[0].datatype,
+			_c2.fields[0].count,
+			_c2.fields[1].name.c_str(),
+			_c2.fields[1].offset,
+			_c2.fields[1].datatype,
+			_c2.fields[1].count,
+			_c2.fields[2].name.c_str(),
+			_c2.fields[2].offset,
+			_c2.fields[2].datatype,
+			_c2.fields[2].count
+		);
+	}
+
 };
 
 
 PerceptionNode::PerceptionNode() : rclcpp::Node("perception_node") {
 	RCLCPP_INFO(this->get_logger(), "Perception Node Initialization!");
 	// setup subs/pubs
-	this->scan_sub = this->create_subscription<sensor_msgs::msg::PointCloud2>("/cloud_all_fields_fullframe", 1,
+	this->scan_sub = this->create_subscription<sensor_msgs::msg::PointCloud2>("/uesim/scan", 1,
 		std::bind(&PerceptionNode::scan_cb, this, std::placeholders::_1));
-	this->pose_sub = this->create_subscription<geometry_msgs::msg::PoseStamped>("/dlio/odom_node/pose", 1,
+	this->pose_sub = this->create_subscription<geometry_msgs::msg::PoseStamped>("/uesim/pose", 1,
 		std::bind(&PerceptionNode::pose_cb, this, std::placeholders::_1));
-	this->grid_pub = this->create_publisher<nav_msgs::msg::OccupancyGrid>("/obstacle_grid", 1);
+	this->grid_pub = this->create_publisher<nav_msgs::msg::OccupancyGrid>("/ldrp/obstacle_grid", 1);
+
+	// util::_test(this);
 
 	//get parameters
 	util::declare_param(this, "map_resolution_cm", this->_config.map_resolution_cm, this->_config.map_resolution_cm);
@@ -132,57 +173,88 @@ PerceptionNode::~PerceptionNode() {}
 
 
 void PerceptionNode::scan_cb(const sensor_msgs::msg::PointCloud2::ConstSharedPtr& scan) {
-
+	// this->sampler_mutex.lock();
 	RCLCPP_INFO(this->get_logger(), "Scan callback called!");
 
 	pcl::PointCloud<pcl::PointXYZ>::Ptr point_cloud = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
 	pcl::fromROSMsg(*scan, *point_cloud);
 
 	const int64_t ts = util::constructTimestampMicros<uint32_t>(scan->header.stamp.sec, scan->header.stamp.nanosec);
+	this->sampler_mutex.lock();
 	this->scan_sampler.insert( ts, point_cloud );
 	this->scan_sampler.updateMin(ts - util::floatSecondsToIntMicros(this->_config.scan_matching_history_range_s));
+	const size_t current_nsamples = this->scan_sampler.getSamples().size();
+	this->sampler_mutex.unlock();
 
 	RCLCPP_INFO(this->get_logger(),
-		"\nScan sample timestamp (ms): %ld"
-		"\nTotal scan samples: %ld",
+		"\n\tScan sample timestamp (us): %ld"
+		"\n\tTotal scan samples: %ld",
 		ts,
-		this->scan_sampler.getSamples().size()
+		current_nsamples
 	);
+	// this->sampler_mutex.unlock();
 
 }
 
 
 void PerceptionNode::pose_cb(const geometry_msgs::msg::PoseStamped::ConstSharedPtr& pose) {
-	RCLCPP_DEBUG(this->get_logger(), "Transform callback called!");
+	// this->sampler_mutex.lock();
+	RCLCPP_INFO(this->get_logger(), "Transform callback called!");
 
 	const int64_t trfm_target_ts = util::constructTimestampMicros<uint32_t>(pose->header.stamp.sec, pose->header.stamp.nanosec);
+	this->sampler_mutex.lock();
 	const typename decltype(this->scan_sampler)::ElemT* sample = this->scan_sampler.sampleTimestamped(trfm_target_ts);
+	this->sampler_mutex.unlock();
 	
 	// if scan doesn't exist
-	if(!sample) return;
+	if(!sample) {
+		RCLCPP_INFO(this->get_logger(),
+			"Invalid sample recieved!"
+			"\n\tTransform timestamp (us): %ld",
+			trfm_target_ts
+		);
+		// this->sampler_mutex.unlock();
+		return;
+	}
 
 	// transform age - scan age
 	const int64_t ts_diff = trfm_target_ts - sample->first;
 
 	// if scan came after the transform do not use it
-	if(ts_diff < 0) return;
+	// if(ts_diff < 0) {
+	// 	RCLCPP_INFO(this->get_logger(),
+	// 		"Invalid timestamp delta!"
+	// 		"\n\tTransform timestamp (ms): %ld"
+	// 		"\n\tSampled timestamp (ms): %ld"
+	// 		"\n\tTimestamp difference (ms): %ld",
+	// 		trfm_target_ts,
+	// 		sample->first,
+	// 		ts_diff
+	// 	);
+	// 	this->sampler_mutex.unlock();
+	// 	return;
+	// }
 
 	// valid case to use transform with scan
-	else if(ts_diff < this->_config.scan_matching_history_range_s) {
+	if(abs(ts_diff) < util::floatSecondsToIntMicros(this->_config.scan_matching_history_range_s)) {	// config for 'epsilon'
 
 		pcl::PointCloud<pcl::PointXYZ>::Ptr scan = sample->second;
+		this->sampler_mutex.lock();
 		this->scan_sampler.updateMin(sample->first + 1);	// don't use 'sample' after here since it is invalid
+		const size_t current_nsamples = this->scan_sampler.getSamples().size();
+		this->sampler_mutex.unlock();
 
 		RCLCPP_INFO(this->get_logger(),
-			"\nTransform timestamp (ms): %ld"
-			"\nSampled timestamp (ms): %ld"
-			"\nTimestamp difference (ms): %ld"
-			"\nTotal scan samples: %ld",
+			"\n\tTransform timestamp (us): %ld"
+			"\n\tSampled timestamp (us): %ld"
+			"\n\tTimestamp difference (us): %ld"
+			"\n\tTotal scan samples: %ld",
 			trfm_target_ts,
 			sample->first,
 			ts_diff,
-			this->scan_sampler.getSamples().size()
+			current_nsamples
 		);
+		// this->sampler_mutex.unlock();
 
 		const Eigen::Quaternionf quat{
 			static_cast<float>(pose->pose.orientation.w),
@@ -204,6 +276,7 @@ void PerceptionNode::pose_cb(const geometry_msgs::msg::PoseStamped::ConstSharedP
 		this->process_and_export(*scan, *reinterpret_cast<const Eigen::Vector3f*>(&pos));
 
 	}
+	// this->sampler_mutex.unlock();
 
 }
 
@@ -343,5 +416,18 @@ void PerceptionNode::process_and_export(const pcl::PointCloud<pcl::PointXYZ>& cl
 	memcpy(out_grid.data.data(), this->accumulator.buffData(), _area);
 
 	this->grid_pub->publish(out_grid);
+
+	RCLCPP_INFO(this->get_logger(),
+		"Grid Updated!"
+		"\n\tOrigin: (%f, %f)"
+		"\n\tDims: (%d, %d)"
+		"\n\tSize: (%f, %f)",
+		_origin.x(),
+		_origin.y(),
+		_grid_size.x(),
+		_grid_size.y(),
+		_grid_size.x() * this->accumulator.cellRes(),
+		_grid_size.y() * this->accumulator.cellRes()
+	);
 
 }

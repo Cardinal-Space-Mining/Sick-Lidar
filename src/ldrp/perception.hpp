@@ -29,6 +29,8 @@
 #include "./grid.hpp"
 #include "./timestamp_sampler.hpp"
 
+#include <mutex>
+
 #include <Eigen/Core>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
@@ -62,12 +64,14 @@ protected:
 	TimestampSampler<pcl::PointCloud<pcl::PointXYZ>::Ptr, int64_t> scan_sampler{};
 	QuantizedRatioGrid<uint8_t, float> accumulator{};
 
+	std::mutex sampler_mutex{};
+
 	struct {
 
 		// bool
 		// 	scan_matching_skip_invalid = false;
 		double
-			scan_matching_history_range_s = 0.25,
+			scan_matching_history_range_s = 1.0,
 			map_resolution_cm		= 5.,
 			pmf_max_range_cm		= 250.,
 			max_z_thresh_cm			= 100.,
