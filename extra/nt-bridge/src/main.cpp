@@ -51,12 +51,14 @@ public:
 
 		this->nt_scan_sub = inst.GetRawTopic("uesim/scan").Subscribe( "PointXYZ_[]", {} );
 		this->nt_pose_sub = inst.GetFloatArrayTopic("uesim/pose").Subscribe( {} );
+		this->nt_grid_pub = inst.GetRawTopic("nt-bridge/grid").Publish( "Grid_U8" );
 
 		inst.AddListener(this->nt_scan_sub, nt::EventFlags::kValueAll, std::bind(&NTBridgeNode::nt_scan_cb, this, std::placeholders::_1));
 		inst.AddListener(this->nt_pose_sub, nt::EventFlags::kValueAll, std::bind(&NTBridgeNode::nt_pose_cb, this, std::placeholders::_1));
 
 		this->scan_pub = this->create_publisher<sensor_msgs::msg::PointCloud2>("/uesim/scan", 1);
 		this->pose_pub = this->create_publisher<geometry_msgs::msg::PoseStamped>("/uesim/pose", 1);
+		this->grid_sub = this->create_subscription<nav_msgs::msg::OccupancyGrid>("/ldrp/obstacle_grid", 1, std::bind(&NTBridgeNode::ros_grid_cb, this, std::placeholders::_1));
 	}
 	~NTBridgeNode() = default;
 
@@ -129,16 +131,39 @@ protected:
 			}
 		}
 	}
+	void ros_grid_cb(const nav_msgs::msg::OccupancyGrid::ConstSharedPtr& grid) {
+		const size_t len = static_cast<size_t>( grid->info.width * grid->info.height ) + 20;
+		uint8_t* _data = new uint8_t[len];
+
+		reinterpret_cast<int32_t*>(_data)[0] = static_cast<int32_t>( grid->info.width );	// x cells
+		reinterpret_cast<int32_t*>(_data)[1] = static_cast<int32_t>( grid->info.height );	// y cells
+		reinterpret_cast<float*>(_data)[2] = static_cast<float>( grid->info.origin.position.x );	// x origin
+		reinterpret_cast<float*>(_data)[3] = static_cast<float>( grid->info.origin.position.y );	// y origin
+		reinterpret_cast<float*>(_data)[4] = static_cast<float>( grid->info.resolution );
+		memcpy(_data + 20, grid->data.data(), grid->data.size());
+
+		this->nt_grid_pub.Set(
+			std::span<const uint8_t>{
+				_data,
+				_data + len
+			},
+			(static_cast<int64_t>(grid->header.stamp.sec) * 1000000L) + (static_cast<int64_t>(grid->header.stamp.nanosec) / 1000L)
+		);
+
+		delete[] _data;
+		RCLCPP_INFO(this->get_logger(), "Published Grid!");
+	}
 
 
 protected:
 	nt::RawSubscriber nt_scan_sub;
 	nt::FloatArraySubscriber nt_pose_sub;
+	nt::RawPublisher nt_grid_pub;
 
 	rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr scan_pub;
 	rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_pub;
+	rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr grid_sub;
 
-	// rclcpp::Subscription<nav_msgs::msg::OccupancyGrid> grid_sub;
 
 };
 

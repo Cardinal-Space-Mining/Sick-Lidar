@@ -7,24 +7,33 @@
 *   See the License for the specific language governing permissions and        *
 *   limitations under the License.                                             *
 *                                                                              *
-*                                           ##**#                              *
-*                                         #%%#%%%@                             *
-*                                        %%%#%%@@@@                            *
-*                                         %%*%%%@@@                            *
-*                                          +*%%@@@                             *
-*                                           *%@@@%%%*=+%%%                     *
-*                                       +##++*++++*%@*++#%%%                   *
-*                                    +++#++*+++==*%%@#+++#%%                   *
-*                                 +++*#*++++++++*%%@@%*+*#*+*                  *
-*                               *+*#%%@*+*+++*#%%%%@@@%++++*##                 *
-*                               +++==*%#####*##%%%%%#***++*#%%%                *
-*                      #%%%###*+****=*%%%%%%%#%##****###%%%%%%%%               *
-*                    -----========+*#%%#%%%%%%@@@@%%%%%%%%%%%%%%               *
-*              ---===++++++++**+=--==++++++++*##*++***+++**#%@@@               *
-*           --=+*##%%##%%###%%%*-----===++*#%###*#%%%%%%%%%%@@                 *
-*          ++#%%%%%%%%%%%%%@@@#=--===++*#%%%@@@#*#%@@@@@@@@                    *
-*          *#%@@%%%%%@@@@@@@#=--=-::.....-+#%%@@*#%@@@@@@@                     *
-*          %@@@@@@@@@@@@@@*--=-............::-+@@@@%%@@@@                      *
+*                                ;xxxxxxx:                                     *
+*                               ;$$$$$$$$$       ...::..                       *
+*                               $$$$$$$$$$x   .:::::::::::..                   *
+*                            x$$$$$$$$$$$$$$::::::::::::::::.                  *
+*                        :$$$$$&X;      .xX:::::::::::::.::...                 *
+*                .$$Xx++$$$$+  :::.     :;:   .::::::.  ....  :                *
+*               :$$$$$$$$$  ;:      ;xXXXXXXXx  .::.  .::::. .:.               *
+*              :$$$$$$$$: ;      ;xXXXXXXXXXXXXx: ..::::::  .::.               *
+*             ;$$$$$$$$ ::   :;XXXXXXXXXXXXXXXXXX+ .::::.  .:::                *
+*              X$$$$$X : +XXXXXXXXXXXXXXXXXXXXXXXX; .::  .::::.                *
+*               .$$$$ :xXXXXXXXXXXXXXXXXXXXXXXXXXXX.   .:::::.                 *
+*                X$$X XXXXXXXXXXXXXXXXXXXXXXXXXXXXx:  .::::.                   *
+*                $$$:.XXXXXXXXXXXXXXXXXXXXXXXXXXX  ;; ..:.                     *
+*                $$& :XXXXXXXXXXXXXXXXXXXXXXXX;  +XX; X$$;                     *
+*                $$$::XXXXXXXXXXXXXXXXXXXXXX: :XXXXX; X$$;                     *
+*                X$$X XXXXXXXXXXXXXXXXXXX; .+XXXXXXX; $$$                      *
+*                $$$$ ;XXXXXXXXXXXXXXX+  +XXXXXXXXx+ X$$$+                     *
+*              x$$$$$X ;XXXXXXXXXXX+ :xXXXXXXXX+   .;$$$$$$                    *
+*             +$$$$$$$$ ;XXXXXXx;;+XXXXXXXXX+    : +$$$$$$$$                   *
+*              +$$$$$$$$: xXXXXXXXXXXXXXX+      ; X$$$$$$$$                    *
+*               :$$$$$$$$$. +XXXXXXXXX:      ;: x$$$$$$$$$                     *
+*               ;x$$$$XX$$$$+ .;+X+      :;: :$$$$$xX$$$X                      *
+*              ;;;;;;;;;;X$$$$$$$+      :X$$$$$$&.                             *
+*              ;;;;;;;:;;;;;x$$$$$$$$$$$$$$$$x.                                *
+*              :;;;;;;;;;;;;.  :$$$$$$$$$$X                                    *
+*               .;;;;;;;;:;;    +$$$$$$$$$                                     *
+*                 .;;;;;;.       X$$$$$$$:                                     *
 *                                                                              *
 *******************************************************************************/
 /** FOR REFERENCE
@@ -178,7 +187,7 @@ void PerceptionNode::scan_cb(const sensor_msgs::msg::PointCloud2::ConstSharedPtr
 	this->sampler_mutex.unlock();
 
 	RCLCPP_INFO(this->get_logger(),
-		"\n\tScan sample timestamp (ms): %ld"
+		"\n\tScan sample timestamp (us): %ld"
 		"\n\tTotal scan samples: %ld",
 		ts,
 		current_nsamples
@@ -201,7 +210,7 @@ void PerceptionNode::pose_cb(const geometry_msgs::msg::PoseStamped::ConstSharedP
 	if(!sample) {
 		RCLCPP_INFO(this->get_logger(),
 			"Invalid sample recieved!"
-			"\n\tTransform timestamp (ms): %ld",
+			"\n\tTransform timestamp (us): %ld",
 			trfm_target_ts
 		);
 		// this->sampler_mutex.unlock();
@@ -236,9 +245,9 @@ void PerceptionNode::pose_cb(const geometry_msgs::msg::PoseStamped::ConstSharedP
 		this->sampler_mutex.unlock();
 
 		RCLCPP_INFO(this->get_logger(),
-			"\n\tTransform timestamp (ms): %ld"
-			"\n\tSampled timestamp (ms): %ld"
-			"\n\tTimestamp difference (ms): %ld"
+			"\n\tTransform timestamp (us): %ld"
+			"\n\tSampled timestamp (us): %ld"
+			"\n\tTimestamp difference (us): %ld"
 			"\n\tTotal scan samples: %ld",
 			trfm_target_ts,
 			sample->first,
