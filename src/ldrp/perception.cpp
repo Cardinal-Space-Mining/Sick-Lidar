@@ -415,6 +415,8 @@ void PerceptionNode::process_and_export(const pcl::PointCloud<pcl::PointXYZ>& cl
 	out_grid.data.resize(_area);
 	memcpy(out_grid.data.data(), this->accumulator.buffData(), _area);
 
+	out_grid.header.frame_id = "world";
+
 	this->grid_pub->publish(out_grid);
 
 	RCLCPP_INFO(this->get_logger(),
