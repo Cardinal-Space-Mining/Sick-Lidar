@@ -4,6 +4,7 @@
 
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
+#include <sensor_msgs/msg/imu.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <nav_msgs/msg/occupancy_grid.hpp>
 
@@ -51,13 +52,16 @@ public:
 
 		this->nt_scan_sub = inst.GetRawTopic("uesim/scan").Subscribe( "PointXYZ_[]", {} );
 		this->nt_pose_sub = inst.GetFloatArrayTopic("uesim/pose").Subscribe( {} );
+		this->nt_imu_sub = inst.GetFloatArrayTopic("uesim/imu").Subscribe( {} );
 		this->nt_grid_pub = inst.GetRawTopic("nt-bridge/grid").Publish( "Grid_U8" );
 
 		inst.AddListener(this->nt_scan_sub, nt::EventFlags::kValueAll, std::bind(&NTBridgeNode::nt_scan_cb, this, std::placeholders::_1));
 		inst.AddListener(this->nt_pose_sub, nt::EventFlags::kValueAll, std::bind(&NTBridgeNode::nt_pose_cb, this, std::placeholders::_1));
+		inst.AddListener(this->nt_imu_sub, nt::EventFlags::kValueAll, std::bind(&NTBridgeNode::nt_imu_cb, this, std::placeholders::_1));
 
 		this->scan_pub = this->create_publisher<sensor_msgs::msg::PointCloud2>("/uesim/scan", 1);
 		this->pose_pub = this->create_publisher<geometry_msgs::msg::PoseStamped>("/uesim/pose", 1);
+		this->imu_pub = this->create_publisher<sensor_msgs::msg::Imu>("/uesim/imu", 1);
 		this->grid_sub = this->create_subscription<nav_msgs::msg::OccupancyGrid>("/ldrp/obstacle_grid", 1, std::bind(&NTBridgeNode::ros_grid_cb, this, std::placeholders::_1));
 	}
 	~NTBridgeNode() = default;
@@ -99,6 +103,7 @@ protected:
 
 			cloud.header.stamp.sec = static_cast<int32_t>( val.time() / 1000000L );
 			cloud.header.stamp.nanosec = static_cast<uint32_t>( val.time() % 1000000L ) * 1000U;
+			cloud.header.frame_id = "lidar";
 
 			this->scan_pub->publish(cloud);
 
@@ -124,10 +129,42 @@ protected:
 
 				pose.header.stamp.sec = static_cast<int32_t>( val.time() / 1000000L );
 				pose.header.stamp.nanosec = static_cast<uint32_t>( val.time() % 1000000L ) * 1000U;
+				pose.header.frame_id = "world";
 
 				this->pose_pub->publish(pose);
 
 				RCLCPP_INFO(this->get_logger(), "Published Pose!");
+			}
+		}
+	}
+	void nt_imu_cb(const nt::Event& event) {
+		const nt::Value& val = event.GetValueEventData()->value;
+		if( val.IsFloatArray() ) {
+			std::span<const float> data = val.GetFloatArray();
+
+			if(data.size() >= 10) {
+				sensor_msgs::msg::Imu imu;
+
+				imu.orientation.w = static_cast<double>( data[0] );
+				imu.orientation.x = static_cast<double>( data[1] );
+				imu.orientation.y = static_cast<double>( data[2] );
+				imu.orientation.z = static_cast<double>( data[3] );
+
+				imu.angular_velocity.x = static_cast<double>( data[4] );
+				imu.angular_velocity.y = static_cast<double>( data[5] );
+				imu.angular_velocity.z = static_cast<double>( data[6] );
+
+				imu.linear_acceleration.x = static_cast<double>( data[7] );
+				imu.linear_acceleration.y = static_cast<double>( data[8] );
+				imu.linear_acceleration.z = static_cast<double>( data[9] );
+
+				imu.header.stamp.sec = static_cast<int32_t>( val.time() / 1000000L );
+				imu.header.stamp.nanosec = static_cast<int32_t>( val.time() % 1000000L ) * 1000U;
+				imu.header.frame_id = "lidar";
+
+				this->imu_pub->publish(imu);
+
+				RCLCPP_INFO(this->get_logger(), "Published IMU data!");
 			}
 		}
 	}
@@ -157,11 +194,12 @@ protected:
 
 protected:
 	nt::RawSubscriber nt_scan_sub;
-	nt::FloatArraySubscriber nt_pose_sub;
+	nt::FloatArraySubscriber nt_pose_sub, nt_imu_sub;
 	nt::RawPublisher nt_grid_pub;
 
 	rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr scan_pub;
 	rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_pub;
+	rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr imu_pub;
 	rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr grid_sub;
 
 
