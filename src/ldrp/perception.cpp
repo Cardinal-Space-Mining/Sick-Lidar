@@ -47,6 +47,7 @@
 #include <limits>
 #include <memory>
 #include <type_traits>
+#include <ratio>
 
 #include <pcl/common/transforms.h>
 #include <pcl_conversions/pcl_conversions.h>
@@ -382,12 +383,12 @@ void PerceptionNode::process(const pcl::PointCloud<pcl::PointXYZ>& cloud, const 
 		pmf_filtered_obstacles
 	);
 
-	this->accumulator.incrementRatio(	// insert PMF obstacles
+	this->accumulator.incrementRatio<pcl::PointXYZ, std::ratio<3, 2>, 50, 100>(	// insert PMF obstacles
 		voxel_cloud,
 		pre_pmf_range_filtered,		// base
 		pmf_filtered_obstacles		// subset
 	);
-	this->accumulator.incrementRatio(	// insert z-thresh obstacles
+	this->accumulator.incrementRatio<pcl::PointXYZ, std::ratio<3, 2>, 50, 100>(	// insert z-thresh obstacles
 		voxel_cloud,
 		z_mid_filtered_obstacles,	// base
 		DEFAULT_NO_SELECTION		// use all of base

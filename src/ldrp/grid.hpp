@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <limits>
 #include <type_traits>
+#include <ratio>
 // #include <iostream>
 
 #include <Eigen/Core>
@@ -418,6 +419,12 @@ struct conditional_literal<false, T, tV, fV> {
 	static constexpr T value = fV;
 };
 
+template<typename>
+struct is_ratio : std::false_type{};
+template<std::intmax_t A, std::intmax_t B>
+struct is_ratio<std::ratio<A, B>> : std::true_type{};
+
+
 /** RatioGrid that also stores the result buffer, and updates it inline with ratio updates */
 template<
 	typename Buff_t = uint8_t,
@@ -520,7 +527,26 @@ public:
 	}
 
 
-	template<typename PointT>
+	/** Increments the base and accumulator counters for each point in the provided selections, which are determined by:
+	 * 1. if the BASE and ACCUM selections are both null (empty), all points are used to increment both counters
+	 * 2. if the BASE is null (empty) and the ACCUM selection is not, increment all base cells and increment selected accum cells
+	 * 3. if the BASE is non-null and the ACCUM IS null (empty), increment both counters for the selected base indices
+	 * 4. if the BASE and ACCUM selections are both non-null, increment the base selection and the valid accum selection which represents a subset of the base selection (incrementing an ACCUM w/o a BASE is invalid since it leads to a div by 0)
+	 * >> TEMPLATE PARAMS >>
+	 * @param PointT - the point type for the input pointcloud
+	 * @param Quantization_Exponent - the power to which the each ratio is taken to before being quantized -- default 1 (no effect)
+	 * @param Ratio_Normalize_Rebase - the base value to which each ratio will be normalized -- a value of 0 disables this feature
+	 * @param Ratio_Normalize_Thresh - the threshold value (denomentor) for which normalization will occur -- a value of 0 disables this feature
+	 * >> NORMAL PARAMS >>
+	 * @param cloud - the base set of points which will be used to index into the grid
+	 * @param base_selection - the set of indices for which points should be used to increment the DENOMENATOR of the ratio at each corresponding cell
+	 * @param accum_selection - the set of indices for which points should be used to increment the NUMERATOR of the ratio at each corresponding cell (MUST RESOLVE TO BE A SUBSET OF THE BASE SELECTION - although this is internally enforced so deviations will be handled gracefully)
+	 */
+	template<
+		typename PointT,
+		typename Quantization_Exponent = std::ratio<1, 1>::type,		// can't use float until C++20 so use std::ratio,
+		This_T::IntT Ratio_Normalize_Rebase = static_cast<This_T::IntT>(0),		// need to use integers since float template params (if used for ratio type) are invalid below C++20
+		This_T::IntT Ratio_Normalize_Thresh = static_cast<This_T::IntT>(0)>		// this is find tho since the counters are always integral
 	void incrementRatio(
 		const pcl::PointCloud<PointT>& cloud,
 		const pcl::Indices& base_selection,
@@ -544,7 +570,8 @@ public:
 						Cell_T* _cell = this->grid + i;
 						_cell->accum += Super_T::template literalR(1);
 						_cell->base += Super_T::template literalR(1);
-						this->buffer[i] = static_cast<Buff_T>( This_T::Buff_Norm_Val * (static_cast<PreciseFloatT>(_cell->accum) / _cell->base) );
+
+						this->buffer[i] = this->normalizeAndQuantize<Quantization_Exponent, Ratio_Normalize_Rebase, Ratio_Normalize_Thresh>(*_cell);
 					}
 				}
 			} else {						// CASE 2: increment all base + selected accumulator indices
@@ -566,7 +593,8 @@ public:
 							_sel++;
 						}
 						_cell->base += Super_T::template literalR(1);
-						this->buffer[i] = static_cast<Buff_T>( This_T::Buff_Norm_Val * (static_cast<PreciseFloatT>(_cell->accum) / _cell->base) );
+
+						this->buffer[i] = this->normalizeAndQuantize<Quantization_Exponent, Ratio_Normalize_Rebase, Ratio_Normalize_Thresh>(*_cell);
 					}
 				}
 			}
@@ -584,7 +612,8 @@ public:
 						Cell_T* _cell = this->grid + i;
 						_cell->accum += Super_T::template literalR(1);
 						_cell->base += Super_T::template literalR(1);
-						this->buffer[i] = static_cast<Buff_T>( This_T::Buff_Norm_Val * (static_cast<PreciseFloatT>(_cell->accum) / _cell->base) );
+
+						this->buffer[i] = this->normalizeAndQuantize<Quantization_Exponent, Ratio_Normalize_Rebase, Ratio_Normalize_Thresh>(*_cell);
 					}
 				}
 			} else {						// CASE 4: increment through base and accum selections (in case subset is invalid)
@@ -604,13 +633,51 @@ public:
 							_accum++;
 						}
 						_cell->base += Super_T::template literalR(1);
-						this->buffer[i] = static_cast<Buff_T>( This_T::Buff_Norm_Val * (static_cast<PreciseFloatT>(_cell->accum) / _cell->base) );
+
+						this->buffer[i] = this->normalizeAndQuantize<Quantization_Exponent, Ratio_Normalize_Rebase, Ratio_Normalize_Thresh>(*_cell);
 					}
 				}
 			}
 
 		}
 
+	}
+
+
+protected:
+	template<
+		typename Quantization_Exponent = std::ratio<1, 1>::type,
+		This_T::IntT Ratio_Normalize_Rebase = static_cast<This_T::IntT>(0),
+		This_T::IntT Ratio_Normalize_Thresh = static_cast<This_T::IntT>(0)>
+	static Buff_T normalizeAndQuantize(Cell_T& cell) {
+		static_assert(is_ratio<Quantization_Exponent>::value, "Exponent must be std::ratio<>!");
+		static constexpr double
+			_Exp = static_cast<double>(Quantization_Exponent::num) / Quantization_Exponent::den;
+		static_assert(_Exp > 0.0, "Only positive, non-zero exponents are allowed!");	// otherwise this breaks the implementation
+		static_assert(
+			Ratio_Normalize_Thresh == static_cast<This_T::IntT>(0) &&
+			Ratio_Normalize_Rebase == static_cast<This_T::IntT>(0) ||
+			Ratio_Normalize_Thresh > Ratio_Normalize_Rebase,
+			"Normalization threshold must be greater than the rebase value!");	// ratio normalization constants must induce a negative feedback loop
+
+		if constexpr(Ratio_Normalize_Rebase > static_cast<This_T::IntT>(0)) {		// thresh must also be greater than 0 due to static_assert ^
+			static constexpr This_T::PreciseFloatT
+				Normalization_Factor = (static_cast<This_T::PreciseFloatT>(Ratio_Normalize_Rebase) / Ratio_Normalize_Thresh);
+
+			if(cell.base == Ratio_Normalize_Thresh) {
+				cell.accum = static_cast<This_T::RatioT>( cell.accum * Normalization_Factor );
+				cell.base = static_cast<This_T::RatioT>( Ratio_Normalize_Rebase );
+			} else if(cell.base > Ratio_Normalize_Thresh) {		// catch in case we miss the point where base is exactly at thresh -- need to scale by exact proportion otherwise the ratio could become >1 and overflow the integral type when quantizing
+				cell.accum = static_cast<This_T::RatioT>( cell.accum * (static_cast<This_T::PreciseFloatT>(Ratio_Normalize_Rebase) / cell.base) );
+				cell.base = static_cast<This_T::RatioT>( Ratio_Normalize_Rebase );
+			}
+		}
+
+		if constexpr(Quantization_Exponent::num == Quantization_Exponent::den) {
+			return static_cast<Buff_T>( This_T::Buff_Norm_Val * (static_cast<PreciseFloatT>(cell.accum) / cell.base) );
+		} else {
+			return static_cast<Buff_T>( This_T::Buff_Norm_Val * pow((static_cast<PreciseFloatT>(cell.accum) / cell.base), _Exp) );
+		}
 	}
 
 

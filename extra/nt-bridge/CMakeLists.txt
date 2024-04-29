@@ -15,7 +15,7 @@ execute_process(
 	COMMAND cmake
 		-S ${PROJECT_SOURCE_DIR}/protobuf
 		-B ${PROJECT_SOURCE_DIR}/protobuf/cmake-build
-		-DCMAKE_INSTALL_PREFIX=${PROJECT_SOURCE_DIR}/protobuf/cmake-install
+		-DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}
 		-DCMAKE_CXX_STANDARD=20
 		-DCMAKE_BUILD_TYPE=Release
 		-Dprotobuf_BUILD_EXAMPLES=OFF
@@ -49,9 +49,9 @@ set(WITH_EXAMPLES ON CACHE BOOL "" FORCE)
 set(WITH_TESTS OFF CACHE BOOL "" FORCE)
 set(WITH_GUI OFF CACHE BOOL "" FORCE)
 set(WITH_SIMULATION_MODULES OFF CACHE BOOL "" FORCE)
-set(Protobuf_INCLUDE_DIR		"${PROJECT_SOURCE_DIR}/protobuf/cmake-install/include")
-set(Protobuf_PROTOC_EXECUTABLE	"${PROJECT_SOURCE_DIR}/protobuf/cmake-install/bin/${_PROTOC_EXECUTABLE}")	# make sure that this is still compatible with windows!
-list(APPEND CMAKE_LIBRARY_PATH	"${PROJECT_SOURCE_DIR}/protobuf/cmake-install/lib")
+set(Protobuf_INCLUDE_DIR		"${CMAKE_INSTALL_PREFIX}/include")
+set(Protobuf_PROTOC_EXECUTABLE	"${CMAKE_INSTALL_PREFIX}/bin/${_PROTOC_EXECUTABLE}")	# make sure that this is still compatible with windows!
+list(APPEND CMAKE_LIBRARY_PATH	"${CMAKE_INSTALL_PREFIX}/lib")
 add_subdirectory(allwpilib)
 set(BUILD_SHARED_LIBS ${__BUILD_SHARED_LIBS})
 
