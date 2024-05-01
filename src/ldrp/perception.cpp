@@ -328,18 +328,24 @@ void PerceptionNode::process(const pcl::PointCloud<pcl::PointXYZ>& cloud, const 
 	;
 #endif
 
+
+	/** WARNING: The below algorithm is tricky since an empty, "null" selection
+	 * accomplishes different things depending on the specific method call! 
+	 * The current control-flow is specifically engineered to avoid misinterpretations. */
+
 	// voxelize points
 	voxel_filter(
-		cloud, DEFAULT_NO_SELECTION, voxel_cloud,
+		cloud, DEFAULT_NO_SELECTION, voxel_cloud,	// <-- default selection = use all points
 		voxel_size_m, voxel_size_m, voxel_size_m
 	);
 
 	// filter points under "high cut" thresh
 	carteZ_filter(
-		voxel_cloud, DEFAULT_NO_SELECTION, z_high_filtered,
+		voxel_cloud, DEFAULT_NO_SELECTION, z_high_filtered,		// <-- default selection = use all points
 		-std::numeric_limits<float>::infinity(),
 		max_z_thresh_m
 	);
+	if(z_high_filtered.size() <= 0) return;		// no points to process
 
 	// further filter points below "low cut" thresh
 	carteZ_filter(
@@ -347,53 +353,71 @@ void PerceptionNode::process(const pcl::PointCloud<pcl::PointXYZ>& cloud, const 
 		-std::numeric_limits<float>::infinity(),
 		min_z_thresh_m
 	);
-	
-	// get the points inbetween high and low thresholds --> treated as wall obstacles
-	pc_negate_selection(
-		z_high_filtered,
-		z_low_subset_filtered,
-		z_mid_filtered_obstacles
-	);
 
-	// filter close enough points for PMF
-	pc_filter_distance(
-		voxel_cloud.points,
-		z_low_subset_filtered,
-		pre_pmf_range_filtered,
-		0.f, max_pmf_range_m,
-		origin
-	);
+	const bool
+		only_z_mid = z_low_subset_filtered.size() <= 0,		// no points at "groud level" --> skip advanced processing and just add these to the grid
+		has_z_mid = z_low_subset_filtered.size() != z_high_filtered.size();		// are there any points at all in the "wall range"? --> if not, don't attempt to negate the selection, or add points to the grid
+	if(!only_z_mid) {	// need points in order to continue (otherwise this gets misinterpretted as "use all points")
 
-	// apply pmf to selected points
-	progressive_morph_filter(
-		voxel_cloud, pre_pmf_range_filtered, pmf_filtered_ground,
-		pmf_window_base,
-		pmf_max_window_size_m,
-		pmf_cell_size_m,
-		pmf_init_distance_m,
-		pmf_max_distance_m,
-		pmf_slope,
-		false
-	);
-	
-	// obstacles = (base - ground)
-	pc_negate_selection(
-		pre_pmf_range_filtered,
-		pmf_filtered_ground,
-		pmf_filtered_obstacles
-	);
+		if(has_z_mid) {
+			// get the points inbetween high and low thresholds --> treated as wall obstacles
+			pc_negate_selection(
+				z_high_filtered,
+				z_low_subset_filtered,
+				z_mid_filtered_obstacles
+			);
+		}
 
-	this->accumulator.incrementRatio<pcl::PointXYZ, std::ratio<3, 2>, 50, 100>(	// insert PMF obstacles
-		voxel_cloud,
-		pre_pmf_range_filtered,		// base
-		pmf_filtered_obstacles		// subset
-	);
-	this->accumulator.incrementRatio<pcl::PointXYZ, std::ratio<3, 2>, 50, 100>(	// insert z-thresh obstacles
-		voxel_cloud,
-		z_mid_filtered_obstacles,	// base
-		DEFAULT_NO_SELECTION		// use all of base
-	);
-	// trim ratios
+		// filter close enough points for PMF
+		pc_filter_distance(
+			voxel_cloud.points,
+			z_low_subset_filtered,
+			pre_pmf_range_filtered,		// NOTE: this will contain all indices even if the entire cloud is selected (no default empty select)
+			0.f, max_pmf_range_m,
+			origin
+		);
+		if(pre_pmf_range_filtered.size() > 0) {		// need points in order to continue (otherwise this gets reinterpretted as "use all points")
+
+			// apply pmf to selected points
+			progressive_morph_filter(
+				voxel_cloud, pre_pmf_range_filtered, pmf_filtered_ground,	// see the note above -- an empty output selection means no ground points
+				pmf_window_base,
+				pmf_max_window_size_m,
+				pmf_cell_size_m,
+				pmf_init_distance_m,
+				pmf_max_distance_m,
+				pmf_slope,
+				false
+			);
+			
+			// obstacles = (base - ground)
+			if(pmf_filtered_ground.size() == 0) {	// the case where all subset points are obstacles...
+				pmf_filtered_obstacles.clear();
+				std::swap(pre_pmf_range_filtered, pmf_filtered_obstacles);	// setup the "accumulator" selection as containing the selection (null base) to trigger "case 2" of incrementRatio best efficiency
+			} else {
+				pc_negate_selection(	// normal set difference computation
+					pre_pmf_range_filtered,
+					pmf_filtered_ground,
+					pmf_filtered_obstacles
+				);
+			}	// in the case that all prefiltered points are ground, incrementRatio opperates correctly by default
+
+			this->accumulator.incrementRatio<pcl::PointXYZ, std::ratio<3, 2>, 50, 100>(	// insert PMF obstacles
+				voxel_cloud,
+				pre_pmf_range_filtered,		// base
+				pmf_filtered_obstacles		// subset (accumulator)
+			);
+
+		} else {}	// no points to process for PMF...
+
+	} else {}	// no low (groud) points to process
+	if(has_z_mid) {		// only attempt if z_mid_filtered_obstacles is not empty to prevent a misinterprettation by incrementRatio (this would increment all the cells in the grid)
+		this->accumulator.incrementRatio<pcl::PointXYZ, std::ratio<3, 2>, 50, 100>(	// insert z-thresh obstacles (increment both halves of ratio)
+			voxel_cloud,
+			DEFAULT_NO_SELECTION,		// trigger "case 2" of incrementRatio (recently changed)
+			(only_z_mid ? z_high_filtered : z_mid_filtered_obstacles)	// accumulator --> increments both for this selection since base is null
+		);
+	}
 
 }
 

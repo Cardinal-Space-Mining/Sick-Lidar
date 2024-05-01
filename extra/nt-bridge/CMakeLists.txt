@@ -29,6 +29,7 @@ execute_process(
 		--build ${PROJECT_SOURCE_DIR}/protobuf/cmake-build
 		--target install
 		--config Release
+		--parallel
 )
 
 if(WIN32)

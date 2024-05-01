@@ -160,7 +160,7 @@ protected:
 
 				imu.header.stamp.sec = static_cast<int32_t>( val.time() / 1000000L );
 				imu.header.stamp.nanosec = static_cast<int32_t>( val.time() % 1000000L ) * 1000U;
-				imu.header.frame_id = "lidar";
+				imu.header.frame_id = "world";
 
 				this->imu_pub->publish(imu);
 

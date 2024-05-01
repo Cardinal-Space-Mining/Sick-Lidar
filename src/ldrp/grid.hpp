@@ -529,8 +529,8 @@ public:
 
 	/** Increments the base and accumulator counters for each point in the provided selections, which are determined by:
 	 * 1. if the BASE and ACCUM selections are both null (empty), all points are used to increment both counters
-	 * 2. if the BASE is null (empty) and the ACCUM selection is not, increment all base cells and increment selected accum cells
-	 * 3. if the BASE is non-null and the ACCUM IS null (empty), increment both counters for the selected base indices
+	 * 2. if the BASE is null (empty) and the ACCUM selection is not, increment BOTH for accum selection
+	 * 3. if the BASE is non-null and the ACCUM is empty, ONLY increment the base selection (no accum increments -- EMPTY TREATED NORMALLY)
 	 * 4. if the BASE and ACCUM selections are both non-null, increment the base selection and the valid accum selection which represents a subset of the base selection (incrementing an ACCUM w/o a BASE is invalid since it leads to a div by 0)
 	 * >> TEMPLATE PARAMS >>
 	 * @param PointT - the point type for the input pointcloud
@@ -574,24 +574,16 @@ public:
 						this->buffer[i] = this->normalizeAndQuantize<Quantization_Exponent, Ratio_Normalize_Rebase, Ratio_Normalize_Thresh>(*_cell);
 					}
 				}
-			} else {						// CASE 2: increment all base + selected accumulator indices
-				size_t
-					_pt = 0,
-					_sel = 0;
-				for(; _pt < cloud.points.size(); _pt++) {
+			} else {						// CASE 2: increment both for accumulator selection
+				for(const pcl::index_t _pt : accum_selection) {
 					const PointT& pt = cloud.points[_pt];
 					const int64_t i = this->cellIdxOf(static_cast<FloatT>(pt.x), static_cast<FloatT>(pt.y));
 #ifndef GRID_IMPL_SKIP_BOUND_CHECKING
-					if (i < 0 || i >= this->area()) {	// opposite the usual so that we only need one macro test!
-						if(_sel < accum_selection.size() && accum_selection[_sel] == _pt) _sel++;	// need to test for increment even if point is invalid
-					} else	// else since we tested the opposite!
+					if (i >= 0 && i < this->area())
 #endif
 					{
 						Cell_T* _cell = this->grid + i;
-						if(_sel < accum_selection.size() && accum_selection[_sel] == _pt) {
-							_cell->accum += Super_T::template literalR(1);
-							_sel++;
-						}
+						_cell->accum += Super_T::template literalR(1);
 						_cell->base += Super_T::template literalR(1);
 
 						this->buffer[i] = this->normalizeAndQuantize<Quantization_Exponent, Ratio_Normalize_Rebase, Ratio_Normalize_Thresh>(*_cell);
@@ -601,7 +593,7 @@ public:
 
 		} else {
 
-			if(accum_selection.empty()) {	// CASE 3: increment both for entire base selection
+			if(accum_selection.empty()) {	// CASE 3: increment only base selection
 				for(const pcl::index_t _pt : base_selection) {
 					const PointT& pt = cloud.points[_pt];
 					const int64_t i = this->cellIdxOf(static_cast<FloatT>(pt.x), static_cast<FloatT>(pt.y));
@@ -610,7 +602,6 @@ public:
 #endif
 					{
 						Cell_T* _cell = this->grid + i;
-						_cell->accum += Super_T::template literalR(1);
 						_cell->base += Super_T::template literalR(1);
 
 						this->buffer[i] = this->normalizeAndQuantize<Quantization_Exponent, Ratio_Normalize_Rebase, Ratio_Normalize_Thresh>(*_cell);

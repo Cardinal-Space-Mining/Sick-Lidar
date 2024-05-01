@@ -536,8 +536,13 @@ void pc_negate_selection(
 	std::vector<IntT>& negated
 ) {
 	if(base.size() <= selection.size()) {
+		// negated.clear();
 		return;
 	}
+	// if(selection.size() == 0) {
+	// 	negated = base;
+	// 	return;
+	// }
 	negated.resize(base.size() - selection.size());
 	size_t
 		_base = 0,
