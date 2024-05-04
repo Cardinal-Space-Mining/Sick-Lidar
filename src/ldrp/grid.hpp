@@ -42,6 +42,8 @@ namespace GridUtils {
 	inline static int64_t gridIdx(const Eigen::Vector2<IntT>& loc, const Eigen::Vector2<IntT>& size) {
 		return gridIdx<X_Major, IntT>(loc.x(), loc.y(), size);
 	}
+
+	/** Get the 2d location corresponding to a raw buffer idx for the provded grid size (templated on major-order) */
 	template<bool X_Major = false, typename IntT = int>
 	inline static Eigen::Vector2<IntT> gridLoc(const size_t idx, const Eigen::Vector2<IntT>& size) {
 		if constexpr(X_Major) {
@@ -57,6 +59,31 @@ namespace GridUtils {
 		}
 	}
 
+	/** Copy a 2d windows of elemens - expects element types to be POD (templated on major-order) */
+	template<typename T, bool X_Major = false, typename IntT = int, size_t T_Bytes = sizeof(T)>
+	static void memcpyWindow(
+		T* dest, const T* src,
+		const Eigen::Vector2<IntT>& dest_size, const Eigen::Vector2<IntT>& src_size,
+		const Eigen::Vector2<IntT>& diff
+	) {
+		if constexpr(X_Major) {
+			for(int64_t _x = 0; _x < src_size.x(); _x++) {	// iterate through source "rows" of contiguous memory (along y -- for each x)
+				memcpy(
+					dest + ((_x + diff.x()) * dest_size.y() + diff.y()),
+					src + (_x * src_size.y()),
+					src_size.y() * T_Bytes
+				);
+			}
+		} else {
+			for(int64_t _y = 0; _y < src_size.y(); _y++) {	// iterate through source "rows" of contiguous memory (along x -- for each y)
+				memcpy(
+					dest + ((_y + diff.y()) * dest_size.x() + diff.x()),
+					src + (_y * src_size.x()),
+					src_size.x() * T_Bytes
+				);
+			}
+		}
+	}
 
 };
 
@@ -105,28 +132,12 @@ public:
 	}
 
 	template<typename T = Cell_T, typename IT = IntT, size_t T_Bytes = sizeof(T)>
-	static void memcpyWindow(
+	inline static void memcpyWindow(
 		T* dest, const T* src,
 		const Eigen::Vector2<IT>& dest_size, const Eigen::Vector2<IT>& src_size,
 		const Eigen::Vector2<IT>& diff
 	) {
-		if constexpr(This_T::X_Major_Order) {
-			for(int64_t _x = 0; _x < src_size.x(); _x++) {	// iterate through source "rows" of contiguous memory (along y -- for each x)
-				memcpy(
-					dest + ((_x + diff.x()) * dest_size.y() + diff.y()),
-					src + (_x * src_size.y()),
-					src_size.y() * T_Bytes
-				);
-			}
-		} else {
-			for(int64_t _y = 0; _y < src_size.y(); _y++) {	// iterate through source "rows" of contiguous memory (along x -- for each y)
-				memcpy(
-					dest + ((_y + diff.y()) * dest_size.x() + diff.x()),
-					src + (_y * src_size.x()),
-					src_size.x() * T_Bytes
-				);
-			}
-		}
+		return GridUtils::memcpyWindow<T, This_T::X_Major_Order, IT, T_Bytes>(dest, src, dest_size, src_size, diff);
 	}
 
 public:
