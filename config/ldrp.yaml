@@ -1,0 +1,19 @@
+/**:
+  ros__parameters:
+
+    scan_matching_history_s: 0.25
+
+    map_resolution_cm: 5.0
+    voxel_size_cm: 3.0
+    max_z_thresh_cm: 100.0
+    min_z_thresh_cm: 25.0
+
+    pmf_max_range_cm: 250.0
+    pmf_window_base: 2.0
+    pmf_max_window_size_cm: 48.0
+    pmf_cell_size_cm: 5.0
+    pmf_init_distance_cm: 5.0
+    pmf_max_distance_cm: 12.0
+    pmf_slope: 2.0
+
+    output_frame: "world"

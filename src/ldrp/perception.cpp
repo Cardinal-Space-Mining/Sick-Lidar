@@ -112,9 +112,9 @@ namespace util {
 PerceptionNode::PerceptionNode() : rclcpp::Node("perception_node") {
 	RCLCPP_INFO(this->get_logger(), "Perception Node Initialization!");
 	// setup subs/pubs
-	this->scan_sub = this->create_subscription<sensor_msgs::msg::PointCloud2>("/uesim/scan", 1,
+	this->scan_sub = this->create_subscription<sensor_msgs::msg::PointCloud2>("scan", 1,	// gets remapped when using launchfile
 		std::bind(&PerceptionNode::scan_cb, this, std::placeholders::_1));
-	this->pose_sub = this->create_subscription<geometry_msgs::msg::PoseStamped>("/uesim/pose", 1,
+	this->pose_sub = this->create_subscription<geometry_msgs::msg::PoseStamped>("pose", 1,	// ^
 		std::bind(&PerceptionNode::pose_cb, this, std::placeholders::_1));
 	this->grid_pub = this->create_publisher<nav_msgs::msg::OccupancyGrid>("/ldrp/obstacle_grid", 1);
 
@@ -133,6 +133,7 @@ PerceptionNode::PerceptionNode() : rclcpp::Node("perception_node") {
 	util::declare_param(this, "pmf_max_distance_cm", this->_config.pmf_max_distance_cm, this->_config.pmf_max_distance_cm);
 	util::declare_param(this, "pmf_slope", this->_config.pmf_slope, this->_config.pmf_slope);
 	util::declare_param(this, "scan_matching_history_s", this->_config.scan_matching_history_range_s, this->_config.scan_matching_history_range_s);
+	util::declare_param(this, "output_frame", this->_config.output_frame_id, this->_config.output_frame_id);
 	// util::declare_param(this, "TODO", this->_config.scan_matching_skip_invalid, this->_config.scan_matching_skip_invalid);
 
 	// log params
@@ -440,7 +441,8 @@ void PerceptionNode::process_and_export(const pcl::PointCloud<pcl::PointXYZ>& cl
 	out_grid.data.resize(_area);
 	memcpy(out_grid.data.data(), this->accumulator.buffData(), _area);
 
-	out_grid.header.frame_id = "world";
+	out_grid.header.frame_id = this->_config.output_frame_id;
+	out_grid.header.stamp = this->get_clock()->now();
 
 	this->grid_pub->publish(out_grid);
 

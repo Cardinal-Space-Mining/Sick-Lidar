@@ -213,7 +213,10 @@ endif()
 
 	install(
 		TARGETS ldrp_node
-		DESTINATION lib/${PROJECT_NAME}/)
+		DESTINATION lib/${PROJECT_NAME})
+	install(
+		DIRECTORY config launch
+		DESTINATION share/${PROJECT_NAME})
 	# ament_export_include_directories()
 	# ament_export_dependencies()
 	ament_package()

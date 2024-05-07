@@ -29,7 +29,7 @@
 #include "./grid.hpp"
 #include "./timestamp_sampler.hpp"
 
-#include <mutex>
+#include <string>
 
 #include <Eigen/Core>
 #include <pcl/point_cloud.h>
@@ -71,18 +71,21 @@ protected:
 		// bool
 		// 	scan_matching_skip_invalid = false;
 		double
-			scan_matching_history_range_s = 1.0,
+			scan_matching_history_range_s = 0.25,
 			map_resolution_cm		= 5.,
-			pmf_max_range_cm		= 250.,
+			voxel_size_cm			= 3.,
 			max_z_thresh_cm			= 100.,
 			min_z_thresh_cm			= 25.,
-			voxel_size_cm			= 3.,
+			pmf_max_range_cm		= 250.,
 			pmf_window_base			= 2.,
 			pmf_max_window_size_cm	= 48.,
 			pmf_cell_size_cm		= 5.,
 			pmf_init_distance_cm	= 5.,
 			pmf_max_distance_cm		= 12.,
 			pmf_slope				= 2.;
+
+		std::string
+			output_frame_id = "world";
 
 	} _config;
 
