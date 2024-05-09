@@ -23,14 +23,14 @@ def generate_launch_description():
 		description = 'Input pose topic name'
 	)
 
-	ldrp_yaml_path = PathJoinSubstitution([current_pkg, 'config', 'ldrp.yaml'])
+	params_yaml_path = PathJoinSubstitution([current_pkg, 'config', 'params.yaml'])
 
 	ldrp_node = Node(
 		name = 'ldrp',
 		package = 'sick_perception',
 		executable = 'ldrp_node',
 		output = 'screen',
-		parameters = [ldrp_yaml_path],
+		parameters = [params_yaml_path],
 		remappings = [
 			('scan', pointcloud_topic_cfg),
 			('pose', pose_topic_cfg)
