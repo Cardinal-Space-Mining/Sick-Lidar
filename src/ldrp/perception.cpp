@@ -112,9 +112,9 @@ namespace util {
 PerceptionNode::PerceptionNode() : rclcpp::Node("perception_node") {
 	RCLCPP_INFO(this->get_logger(), "Perception Node Initialization!");
 	// setup subs/pubs
-	this->scan_sub = this->create_subscription<sensor_msgs::msg::PointCloud2>("scan", 1,	// gets remapped when using launchfile
+	this->scan_sub = this->create_subscription<sensor_msgs::msg::PointCloud2>("/filtered_cloud", 1,	// gets remapped when using launchfile
 		std::bind(&PerceptionNode::scan_cb, this, std::placeholders::_1));
-	this->pose_sub = this->create_subscription<geometry_msgs::msg::PoseStamped>("pose", 1,	// ^
+	this->pose_sub = this->create_subscription<geometry_msgs::msg::PoseStamped>("/adjusted_pose", 1,	// ^
 		std::bind(&PerceptionNode::pose_cb, this, std::placeholders::_1));
 	this->grid_pub = this->create_publisher<nav_msgs::msg::OccupancyGrid>("/ldrp/obstacle_grid", 1);
 
