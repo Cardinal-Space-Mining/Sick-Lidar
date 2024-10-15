@@ -1,6 +1,0 @@
-[submodule "extra/nt-bridge/allwpilib"]
-	path = extra/nt-bridge/allwpilib
-	url = https://github.com/wpilibsuite/allwpilib
-[submodule "extra/nt-bridge/protobuf"]
-	path = extra/nt-bridge/protobuf
-	url = https://github.com/protocolbuffers/protobuf

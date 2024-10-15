@@ -1,6 +1,0 @@
-cmake-build/**
-cmake-install/**
-build/**
-install/**
-log/**
-.vscode/**
