@@ -14,6 +14,8 @@ if(${sickperception_VSCODE_CONFIGURE})	# this is just a dummy configuration so v
 	find_package(sensor_msgs REQUIRED)
 	find_package(geometry_msgs REQUIRED)
 	find_package(nav_msgs REQUIRED)
+	find_package(tf2_ros REQUIRED)
+	find_package(tf2_sensor_msgs REQUIRED)
 	find_package(pcl_conversions REQUIRED)
 
 	find_package(PCL REQUIRED COMPONENTS common filters, octree)
@@ -80,16 +82,16 @@ if(${sickperception_VSCODE_CONFIGURE})	# this is just a dummy configuration so v
 	list(APPEND ldrp_sources "${ldrp_src}/main.cpp" "${ldrp_src}/ldrp/perception.cpp")
 	list(APPEND ldrp_includedirs)
 
-	add_executable(ldrp_node ${ldrp_sources})
+	add_executable(${PROJECT_NAME} ${ldrp_sources})
 
-	target_include_directories(ldrp_node
+	target_include_directories(${PROJECT_NAME}
 		PRIVATE ${PCL_INCLUDE_DIRS}
 		PRIVATE ${ldrp_includedirs})
-	target_link_directories(ldrp_node
+	target_link_directories(${PROJECT_NAME}
 		PRIVATE ${PCL_LIBRARY_DIRS})
-	target_link_libraries(ldrp_node
+	target_link_libraries(${PROJECT_NAME}
 		${PCL_LIBRARIES})	# PRIVATE here causes conflicts with ament_target_dependencies
-	target_compile_definitions(ldrp_node
+	target_compile_definitions(${PROJECT_NAME}
 		PRIVATE ${ldrp_defines}
 		PRIVATE ${PCL_DEFINITIONS})
 
@@ -102,6 +104,8 @@ else()
 	find_package(sensor_msgs REQUIRED)
 	find_package(geometry_msgs REQUIRED)
 	find_package(nav_msgs REQUIRED)
+	find_package(tf2_ros REQUIRED)
+	find_package(tf2_sensor_msgs REQUIRED)
 	find_package(pcl_conversions REQUIRED)
 	find_package(pcl_ros REQUIRED)
 	# find_package(tf2_msgs REQUIRED)
@@ -189,30 +193,31 @@ endif()
 	list(APPEND ldrp_sources "${ldrp_src}/main.cpp" "${ldrp_src}/ldrp/perception.cpp")
 	list(APPEND ldrp_includedirs)
 
-	add_executable(ldrp_node ${ldrp_sources})
+	add_executable(${PROJECT_NAME} ${ldrp_sources})
 
-	target_include_directories(ldrp_node
+	target_include_directories(${PROJECT_NAME}
 		PRIVATE ${PCL_INCLUDE_DIRS}
 		PRIVATE ${ldrp_includedirs})
-	target_link_directories(ldrp_node
+	target_link_directories(${PROJECT_NAME}
 		PRIVATE ${PCL_LIBRARY_DIRS})
-	target_link_libraries(ldrp_node
+	target_link_libraries(${PROJECT_NAME}
 		${PCL_LIBRARIES})	# PRIVATE here causes conflicts with ament_target_dependencies
-	target_compile_definitions(ldrp_node
+	target_compile_definitions(${PROJECT_NAME}
 		PRIVATE ${ldrp_defines}
 		PRIVATE ${PCL_DEFINITIONS})
 
-	ament_target_dependencies(ldrp_node
+	ament_target_dependencies(${PROJECT_NAME}
 		"rclcpp"
 		"pcl_conversions"
 		"pcl_ros"
 		"tf2_ros"
+		"tf2_sensor_msgs"
 		"nav_msgs"
 		"sensor_msgs"
 		"geometry_msgs")
 
 	install(
-		TARGETS ldrp_node
+		TARGETS ${PROJECT_NAME}
 		DESTINATION lib/${PROJECT_NAME})
 	install(
 		DIRECTORY config launch

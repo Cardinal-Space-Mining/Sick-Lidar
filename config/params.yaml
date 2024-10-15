@@ -1,7 +1,9 @@
 /**:
   ros__parameters:
 
-    scan_matching_history_s: 0.25
+    scan_topic: "/cardinal_perception/filtered_scan"
+
+    max_tf_wait_time_s: 0.25
 
     map_resolution_cm: 5.0
     voxel_size_cm: 3.0
@@ -16,4 +18,5 @@
     pmf_max_distance_cm: 12.0
     pmf_slope: 2.0
 
-    output_frame: "world"
+    map_frame: "map"
+    lidar_frame: "lidar_link"

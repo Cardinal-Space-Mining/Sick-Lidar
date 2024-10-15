@@ -1,6 +1,7 @@
 [![CI](https://github.com/Cardinal-Space-Mining/Sick-Perception/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Cardinal-Space-Mining/Sick-Perception/actions/workflows/ci.yml)
 
 # Sick-Perception
+*Don't be fooled, this is actually a mapping package!*
 
 ## ⚠️ IMPORTANT ⚠️
 Previous versions (branches) of this project were architected to be standalone "pure-C++" modules, however, __this branch has been updated to target ROS\[2\], and offloads sensor interfacing and localization pipeline prerequisites to various external ROS packages__, which are discuessed below. To view the old architecture, check out the [perception-v1](/Cardinal-Space-Mining/Sick-Perception/tree/perception-v1) and/or [perception-v2](/Cardinal-Space-Mining/Sick-Perception/tree/perception-v2) branches. These branches are not likely to be maintained, and as a result may not reflect the same functionality as this branch in the future.

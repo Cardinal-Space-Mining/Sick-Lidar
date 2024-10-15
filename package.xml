@@ -4,7 +4,7 @@
   <name>sick_perception</name>
   <version>0.1.0</version>
   <description>LiDAR Obstacle Detection Mapping</description>
-  <maintainer email="samrichter888@gmail.com">sigma</maintainer>
+  <maintainer email="samrichter888@gmail.com">Sam Richter</maintainer>
   <license>MIT</license>
 
   <depend>rclcpp</depend>
@@ -12,6 +12,8 @@
   <depend>sensor_msgs</depend>
   <depend>geometry_msgs</depend>
   <depend>nav_msgs</depend>
+  <depend>tf2_ros</depend>
+  <depend>tf2_sensor_msgs</depend>
   <depend>pcl_conversions</depend>
   <depend>pcl_ros</depend>
 
